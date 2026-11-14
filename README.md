@@ -20,7 +20,7 @@
 
 - **Text in, graph out.** Extract entities and relations with any LLM, or without one.
 - **Any graph database.** Neo4j, Memgraph, FalkorDB, HydraDB, or embedded Kuzu, behind one API.
-- **Facts that change.** Every change is versioned, newer facts retire older ones, and you can read the graph as of any past time.
+- **Facts that change.** Every change is versioned, newer facts retire older ones, and you can read the graph as of any past time, or as it was known then.
 - **An ontology, not just a graph.** Types, synonyms, and definitions ground a question, so the answerability check knows a firm is a `Company`.
 - **Light by default, powerful on request.** One `level` option moves every capability from free and deterministic to LLM-backed.
 - **Knows when it has no answer.** An LLM-free answerability check, readiness lint, and certified facts tell an agent what the graph holds.

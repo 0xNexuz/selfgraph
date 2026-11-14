@@ -231,7 +231,7 @@ export class Insert {
       );
       if (judged && llm !== null) {
         const fresh = relations.filter((r) => r.created_at.getTime() === createdAt.getTime());
-        found.push(...(await judgeContradictions(tx, ns, llm, fresh, caps)));
+        found.push(...(await judgeContradictions(tx, ns, llm, fresh, caps, createdAt)));
       }
 
       let diff: SourceDiff | null = null;
@@ -245,6 +245,7 @@ export class Insert {
           sourceVersion,
           [...prior].filter((id) => !produced.has(id)),
           at,
+          createdAt,
         );
         found.push(...notes);
         const sorted = (keep: (id: string) => boolean) => [...produced].filter(keep).sort(comparePy);

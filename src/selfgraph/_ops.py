@@ -41,6 +41,7 @@ from ._serde import (
     encode_preference_props,
     encode_relation_props,
     encode_trace_props,
+    from_iso,
     json_iso,
     now,
     preference_edge_type,
@@ -657,9 +658,18 @@ async def _plan_evidence(
     return records, gained
 
 
-async def _write_evidence(runner: Any, ns: str, records: list[tuple[str, dict]]) -> None:
+async def _write_evidence(runner: Any, ns: str, records: list[tuple[str, dict]], known: datetime) -> None:
+    """Write new evidence records, each stamped with the write that recorded it, for known_at reads.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param records (list[tuple[str, dict]]): the evidence ids and properties to write.
+    @param known (datetime): the write's timestamp.
+    @return (None): nothing.
+    """
     if records:
-        await runner.upsert_nodes(ns, L_EVIDENCE, records)
+        stamp = to_iso(known)
+        await runner.upsert_nodes(ns, L_EVIDENCE, [(evid, {**props, "created_at": stamp}) for evid, props in records])
 
 
 async def list_evidence(runner: Any, ns: str, target_id: str, *, kind: str, skip: int, limit: int) -> list[Evidence]:
@@ -992,7 +1002,7 @@ async def upsert_entities(
         by_type.setdefault(props["type"], []).append((eid, props))
     for etype, rows in by_type.items():
         await runner.upsert_nodes(ns, L_ENTITY, rows, extra_label=etype)
-    await _write_evidence(runner, ns, records)
+    await _write_evidence(runner, ns, records, created_at)
     return out
 
 
@@ -1874,15 +1884,22 @@ async def require_max_count(
         tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (at, 0, at))
 
 
-def _retired(edge: dict, by: str, at: datetime) -> dict:
+def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
     """Mark a relation version as no longer current because a newer relation superseded it.
 
     @param edge (dict): the current edge row.
     @param by (str): the id of the relation that superseded it.
     @param at (datetime): the superseding relation's effective time.
+    @param known (datetime): when the retirement is written, for reads with known_at.
     @return (dict): the edge row with its version retired.
     """
-    props = {**edge["props"], "is_current": False, "invalidated_at": to_iso(at), "invalidated_by": by}
+    props = {
+        **edge["props"],
+        "is_current": False,
+        "invalidated_at": to_iso(at),
+        "invalidated_by": by,
+        "invalidated_known_at": to_iso(known),
+    }
     return {**edge, "props": props}
 
 
@@ -1970,18 +1987,21 @@ async def rival_relations(
     return out
 
 
-async def retire_relations(runner: Any, ns: str, retirements: Iterable[tuple[dict, str, datetime]]) -> list[Relation]:
+async def retire_relations(
+    runner: Any, ns: str, retirements: Iterable[tuple[dict, str, datetime]], known: datetime
+) -> list[Relation]:
     """Retire current relations, each once, by the first retirement named for it.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param retirements (Iterable[tuple[dict, str, datetime]]): each current edge row with what retired it (a relation
         or source version id) and when.
+    @param known (datetime): the timestamp of the write that retires them.
     @return (list[Relation]): the retired versions.
     """
     gone: dict[str, dict] = {}
     for edge, by, at in retirements:
-        gone.setdefault(edge["props"]["id"], _retired(edge, by, at))
+        gone.setdefault(edge["props"]["id"], _retired(edge, by, at, known))
     for edge in gone.values():
         await _precheck_write(runner, edge["props"])
     rows = [(e["type"], e["from_id"], e["to_id"], e["props"]) for e in gone.values()]
@@ -2093,6 +2113,7 @@ async def upsert_relations(
                     source_count=sources,
                     invalidated_at=None if prev.is_current or reassert else prev.invalidated_at,
                     invalidated_by=None if prev.is_current or reassert else prev.invalidated_by,
+                    invalidated_known_at=None if prev.is_current or reassert else prev.invalidated_known_at,
                 )
             edge = {**edge, "props": props}
         if tracker is not None and props["is_current"]:
@@ -2110,7 +2131,7 @@ async def upsert_relations(
     if warnings is not None:
         warnings.extend(found)
     for old, (by, at) in ended.items():
-        gone = _retired(current.get(old) or existing[old], by, at)
+        gone = _retired(current.get(old) or existing[old], by, at, created_at)
         key = (old, gone["props"]["revision"])
         (writes if key in writes else retires)[key] = gone["props"]
         current[old] = gone
@@ -2124,7 +2145,7 @@ async def upsert_relations(
             rows.append((edge["type"], edge["from_id"], edge["to_id"], props))
         if rows:
             await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
-    await _write_evidence(runner, ns, records)
+    await _write_evidence(runner, ns, records, created_at)
     final = {**writes, **retires}
     result = []
     for rid, revision, rel in out:
@@ -2213,9 +2234,9 @@ async def create_relation(
         ended, settled = tracker.settle()
         if warnings is not None:
             warnings.extend([*found, *settled])
-        retires = [_retired(existing[old], by, at) for old, (by, at) in ended.items() if old != rid]
+        retires = [_retired(existing[old], by, at, created_at) for old, (by, at) in ended.items() if old != rid]
         if rid in ended:
-            props = _retired(edge, *ended[rid])["props"]
+            props = _retired(edge, *ended[rid], created_at)["props"]
     for write in [props, *(edge["props"] for edge in retires)]:
         await _precheck_write(runner, write)
     rel = await _write_relation_version(runner, ns, from_entity, rtype, to_entity, props, retire=False)
@@ -2223,7 +2244,7 @@ async def create_relation(
         await runner.create_edges(
             ns, L_ENTITY, L_ENTITY, [(e["type"], e["from_id"], e["to_id"], e["props"]) for e in retires]
         )
-    await _write_evidence(runner, ns, records)
+    await _write_evidence(runner, ns, records, created_at)
     if prior is not None and warnings is not None:
         warnings.append(
             InsertWarning(
@@ -2284,6 +2305,7 @@ async def update_relation(
         stored = subject.model_copy(update={"properties": current.properties})
         await schema_check(runner, Extraction(relations=[subject]), Extraction(relations=[stored]))
     new_event_time = event_time if event_time is not None else current.event_time
+    created_at = now()
     records, gained = await _plan_evidence(runner, ns, [(rid, ev) for ev in evidence or []], new_targets=set())
     sources = current.source_count + gained.get(rid, 0)
 
@@ -2291,7 +2313,7 @@ async def update_relation(
         if sources != current.source_count:
             await runner.update_current_edge(ns, rid, {"source_count": sources})
             current.source_count = sources
-        await _write_evidence(runner, ns, records)
+        await _write_evidence(runner, ns, records, created_at)
         return current
 
     props = encode_relation_props(
@@ -2300,14 +2322,14 @@ async def update_relation(
         revision=current.revision + 1,
         properties=new_props,
         event_time=new_event_time,
-        created_at=now(),
+        created_at=created_at,
         is_current=True,
         source_count=sources,
     )
     rel = await _write_relation_version(
         runner, ns, current.from_entity, current.type, current.to_entity, props, retire=True
     )
-    await _write_evidence(runner, ns, records)
+    await _write_evidence(runner, ns, records, created_at)
     return rel
 
 
@@ -2373,37 +2395,89 @@ async def list_relations(
     return [_relation_of(r) for r in rows[skip : skip + limit]]
 
 
-def version_as_of(versions: Iterable[Any], as_of: datetime) -> Any:
+class AsOf(NamedTuple):
+    valid: datetime
+    known: datetime | None = None
+
+
+def parse_as_of(as_of: Any, known_at: Any) -> AsOf | None:
+    """Parse the as_of and known_at arguments, reading a naive time as UTC; known_at alone sets both.
+
+    @param as_of (Any): the valid time, as a datetime, ISO 8601 text, or None.
+    @param known_at (Any): the time the graph knew it by, in the same forms.
+    @return (AsOf | None): the times to read at, or None to read the current graph.
+    """
+    valid, known = parse_time(as_of, "as_of"), parse_time(known_at, "known_at")
+    if valid is None and known is None:
+        return None
+    known = None if known is None else aware(known)
+    return AsOf(known if valid is None else aware(valid), known)
+
+
+def _known_by(stamp: datetime | None, known: datetime | None) -> bool:
+    """Report whether something written at a time was in the graph by another time.
+
+    @param stamp (datetime | None): when it was written; None counts as always.
+    @param known (datetime | None): the time read on the knowledge axis, or None for everything stored.
+    @return (bool): True when it was written by then.
+    """
+    return stamp is None or known is None or aware(stamp) <= known
+
+
+def version_as_of(versions: Iterable[Any], as_of: AsOf) -> Any:
     """Pick the version of a relation or preference that was valid at a point in time.
 
-    The picked version is the highest revision whose effective time is at or before as_of, so a later write overrides
-    earlier ones from its effective time on. It is valid unless the first invalidation recorded at or after its
-    revision happened at or before as_of.
+    The picked version is the highest revision whose effective time is at or before as_of.valid, so a later write
+    overrides earlier ones from its effective time on. It is valid unless the first invalidation recorded at or after
+    its revision happened at or before as_of.valid. With as_of.known, only the versions and invalidations written by
+    then count, and the picked version is shown as the graph held it then: an invalidation written later is cleared,
+    its certification is the one in force then, and it is current when no newer revision and no invalidation was
+    written by then.
 
     @param versions (Iterable[Relation | Preference]): every version of one relation or preference.
-    @param as_of (datetime): the point in time.
+    @param as_of (AsOf): the valid time, and the time the graph knew it by.
     @return (Relation | Preference | None): the version valid at as_of, or None.
     """
-    ordered = sorted(versions, key=lambda v: v.revision)
+    ordered = sorted((v for v in versions if _known_by(v.created_at, as_of.known)), key=lambda v: v.revision)
     picked = None
     for version in ordered:
-        if effective_time(version) <= as_of:
+        if effective_time(version) <= as_of.valid:
             picked = version
     if picked is None:
         return None
     for version in ordered:
         ended = getattr(version, "invalidated_at", None)
-        if version.revision >= picked.revision and ended is not None:
-            return picked if ended > as_of else None
-    return picked
+        if version.revision >= picked.revision and ended and _known_by(version.invalidated_known_at, as_of.known):
+            if ended <= as_of.valid:
+                return None
+            break
+    if as_of.known is None:
+        return picked
+    update: dict[str, Any] = {"is_current": picked.revision == ordered[-1].revision}
+    if getattr(picked, "invalidated_at", None) is not None:
+        if _known_by(picked.invalidated_known_at, as_of.known):
+            update["is_current"] = False
+        else:
+            update.update(invalidated_at=None, invalidated_by=None, invalidated_known_at=None)
+    if getattr(picked, "certifications", None) is not None:
+        seen = [
+            c.model_copy(update={"until": c.until if c.until and c.until <= as_of.known else None})
+            for c in picked.certifications
+            if _known_by(c.at, as_of.known)
+        ]
+        held = seen[-1] if seen and seen[-1].until is None else None
+        update.update(
+            certifications=seen, certified_at=held.at if held else None, certified_by=held.by if held else None
+        )
+    return picked.model_copy(update=update)
 
 
-def _pick_as_of(edges: list[dict], decode: Callable[[dict], Any], as_of: datetime) -> list[Any]:
+def _pick_as_of(edges: list[dict], decode: Callable[[dict], Any], as_of: AsOf) -> list[Any]:
     """Group edge versions by id in read order and keep the version of each valid at a point in time.
 
     @param edges (list[dict]): the edge versions.
     @param decode (Callable[[dict], Any]): turns an edge row into a Relation or Preference.
-    @param as_of (datetime): the point in time.
+    @param as_of (AsOf): the valid time, and the time the graph knew it by.
     @return (list[Any]): the valid versions, one per id at most.
     """
     versions: dict[str, list[Any]] = {}
@@ -2414,30 +2488,47 @@ def _pick_as_of(edges: list[dict], decode: Callable[[dict], Any], as_of: datetim
 
 
 async def relations_as_of(
-    runner: Any, ns: str, as_of: datetime, *, from_in: list[str] | None = None, to_in: list[str] | None = None
+    runner: Any,
+    ns: str,
+    as_of: AsOf,
+    *,
+    from_in: list[str] | None = None,
+    to_in: list[str] | None = None,
+    count_sources: bool = False,
 ) -> list[Relation]:
     """Read every version of the relations starting or ending at some entities, as each stood at a point in time.
 
+    With as_of.known and count_sources, each relation's source_count counts only the sources whose evidence was
+    written by then.
+
     @param runner (Any): graph runner.
     @param ns (str): namespace.
-    @param as_of (datetime): the point in time.
+    @param as_of (AsOf): the valid time, and the time the graph knew it by.
     @param from_in (list[str] | None): keep relations whose source is in this list.
     @param to_in (list[str] | None): keep relations whose destination is in this list.
+    @param count_sources (bool): recount source_count for as_of.known; left as stored otherwise.
     @return (list[Relation]): the relations valid at as_of, in id order.
     """
     fetch = partial(
         runner.match_edges, ns, from_label=L_ENTITY, to_label=L_ENTITY, from_in=from_in, to_in=to_in, order_by="id"
     )
     edges = [e for e in await _paged(fetch) if _is_relation_type(e["type"])]
-    return _pick_as_of(edges, _relation_of, as_of)
+    picked = _pick_as_of(edges, _relation_of, as_of)
+    if as_of.known is None or not count_sources or not picked:
+        return picked
+    sources: dict[str, set[str]] = {}
+    for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", [r.id for r in picked]):
+        if _known_by(from_iso(row.get("created_at")), as_of.known):
+            sources.setdefault(row["target_id"], set()).add(row["source_id"])
+    return [r.model_copy(update={"source_count": len(sources.get(r.id, ()))}) for r in picked]
 
 
-async def preferences_as_of(runner: Any, ns: str, as_of: datetime) -> list[Preference]:
+async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preference]:
     """Read every version of every preference, as each stood at a point in time.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
-    @param as_of (datetime): the point in time.
+    @param as_of (AsOf): the valid time, and the time the graph knew it by.
     @return (list[Preference]): the preferences valid at as_of, in id order.
     """
     fetch = partial(runner.match_edges, ns, from_label=L_PROFILE, to_label=None, order_by="id")
@@ -2467,7 +2558,9 @@ async def certify_relation(runner: Any, ns: str, rid: str, by: str | None, at: d
     """Mark the current version of a relation as verified by someone, in place, or clear the mark when by is None.
 
     A certified relation stays current when a supersede contradiction or a replaced source would retire it.
-    The mark belongs to the version: a later revision of the relation starts uncertified.
+    The mark belongs to the version: a later revision of the relation starts uncertified. Each certification is kept
+    in the version's certifications, with when it ended, so a known_at read shows the one in force then; certifying
+    again by the same verifier, or uncertifying an uncertified version, changes nothing.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2488,7 +2581,21 @@ async def certify_relation(runner: Any, ns: str, rid: str, by: str | None, at: d
         if newest is None:
             raise NotFoundError("Relation", rid)
         raise ValidationError(f"{invalidated_note(_relation_of(newest))}; only a current relation can be certified")
-    props = {**edge["props"], "certified_at": None if by is None else to_iso(at), "certified_by": by}
+    current = _relation_of(edge)
+    held = next((c for c in current.certifications if c.until is None), None)
+    if (held.by if held else None) == by:
+        return current
+    history = [
+        {"by": c.by, "at": to_iso(c.at), "until": to_iso(at if c is held else c.until)} for c in current.certifications
+    ]
+    if by is not None:
+        history.append({"by": by, "at": to_iso(at), "until": None})
+    props = {
+        **edge["props"],
+        "certified_at": None if by is None else to_iso(at),
+        "certified_by": by,
+        "certifications_json": _dumps(history),
+    }
     await _precheck_write(runner, props)
     await runner.create_edges(ns, L_ENTITY, L_ENTITY, [(edge["type"], edge["from_id"], edge["to_id"], props)])
     return _relation_of({**edge, "props": props})
@@ -2507,11 +2614,12 @@ async def source_targets(runner: Any, ns: str, source_id: str) -> set[str]:
 
 
 async def replace_source(
-    runner: Any, ns: str, source_id: str, version: str, stale: Iterable[str], at: datetime
+    runner: Any, ns: str, source_id: str, version: str, stale: Iterable[str], at: datetime, known: datetime
 ) -> tuple[list[str], list[InsertWarning]]:
     """Make one version of a source replace its others: mark them replaced_at and replaced_by, so retrieval stops
     quoting them, and retire the current relations among some candidates whose every evidence record is from one of
-    them, as a newer fact retires one: invalidated_at is set and nothing is deleted.
+    them, as a newer fact retires one: invalidated_at is set and nothing is deleted. Each version keeps its
+    replacements, with when each was written and undone, in replacements_json for known_at reads.
 
     A relation with evidence from the given version, or from a version of another source that was not itself
     replaced, stays current, and so does a certified one, with a "certified_kept" warning. Evidence recorded by hand
@@ -2523,6 +2631,7 @@ async def replace_source(
     @param version (str): the source version just recorded; it is stored as invalidated_by.
     @param stale (Iterable[str]): the ids the source supported before and the new version did not produce again.
     @param at (datetime): the new version's effective time.
+    @param known (datetime): the timestamp of the insert that recorded the new version.
     @return (tuple[list[str], list[InsertWarning]]): the retired relation ids, and one warning per decision.
     """
     candidates = sorted(set(stale))
@@ -2554,13 +2663,20 @@ async def replace_source(
         retired.append(rid)
         message = f"relation {rid} was retired: only older versions of source {source_id} stated it"
         warnings.append(InsertWarning(code="fact_retired_by_source", message=message))
-    await retire_relations(runner, ns, retirements)
+    await retire_relations(runner, ns, retirements, known)
+    known_at = to_iso(known)
     marks = []
     for row in await runner.child_nodes(ns, L_SOURCE, _ids.source_node_id(source_id), R_HAS_VERSION, L_SOURCE_VERSION):
+        history = _loads(row.get("replacements_json"), [])
         if row["id"] == version and row.get("replaced_by") is not None:
-            marks.append((row["id"], {**row, "replaced_at": None, "replaced_by": None}))
+            history[-1]["until"] = known_at
+            marks.append(
+                (row["id"], {**row, "replaced_at": None, "replaced_by": None, "replacements_json": _dumps(history)})
+            )
         elif row["id"] != version and row.get("replaced_by") is None:
-            marks.append((row["id"], {**row, "replaced_at": to_iso(at), "replaced_by": version}))
+            history.append({"at": to_iso(at), "by": version, "known_at": known_at, "until": None})
+            mark = {"replaced_at": to_iso(at), "replaced_by": version, "replacements_json": _dumps(history)}
+            marks.append((row["id"], {**row, **mark}))
     if marks:
         await runner.upsert_nodes(ns, L_SOURCE_VERSION, marks)
     return retired, warnings

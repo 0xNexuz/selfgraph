@@ -774,12 +774,14 @@ export function buildParser(): Command<[], GlobalOptions> {
     .description("judge whether the graph holds what a question asks about; words join into one")
     .option("--term <phrase>", "a key phrase to check instead of the question's words (repeatable)", collect, [])
     .option("--as-of <iso>", `judge the graph as of this time (${ISO})`, timeArg("as_of"))
+    .option("--known-at <iso>", `judge only what the graph held at this time (${ISO})`, timeArg("known_at"))
     .option("--depth <n>", "most hops between matched entities", intArg("--depth"), 3)
     .action((words, o, cmd) =>
       emit(cmd, (g) =>
         g.checkAnswerable(words.join(" "), {
           terms: o.term.length ? o.term : null,
           as_of: o.asOf,
+          known_at: o.knownAt,
           depth: o.depth,
         }),
       ),
@@ -817,6 +819,7 @@ export function buildParser(): Command<[], GlobalOptions> {
     .option("--max-nodes <n>", "entity cap", intArg("--max-nodes"), RETRIEVE_DEFAULTS.max_nodes)
     .option("--budget-tokens <n>", "context budget", intArg("--budget-tokens"), RETRIEVE_DEFAULTS.budget_tokens)
     .option("--as-of <iso>", `read the graph as of this time (${ISO})`, timeArg("as_of"))
+    .option("--known-at <iso>", `read only what the graph held at this time (${ISO})`, timeArg("known_at"))
     .option("--skip-hubs", "do not walk through entities with 50 or more relations")
     .option("--context-only", "print only the context text, not the JSON result")
     .action((words, o, cmd) =>
@@ -828,6 +831,7 @@ export function buildParser(): Command<[], GlobalOptions> {
           max_nodes: o.maxNodes,
           budget_tokens: o.budgetTokens,
           as_of: o.asOf,
+          known_at: o.knownAt,
           seeds: o.seeds,
           skip_hubs: o.skipHubs === true,
         });

@@ -224,6 +224,7 @@ def encode_relation_props(
     source_count: int,
     invalidated_at: datetime | None = None,
     invalidated_by: str | None = None,
+    invalidated_known_at: datetime | None = None,
 ) -> dict[str, Any]:
     return {
         "id": id,
@@ -236,6 +237,7 @@ def encode_relation_props(
         "source_count": source_count,
         "invalidated_at": to_iso(invalidated_at),
         "invalidated_by": invalidated_by,
+        "invalidated_known_at": to_iso(invalidated_known_at),
     }
 
 
@@ -253,10 +255,12 @@ def decode_relation(props: dict[str, Any], *, from_entity: str, to_entity: str, 
         source_count=int(props.get("source_count") or 0),
         invalidated_at=from_iso(props.get("invalidated_at")),
         invalidated_by=props.get("invalidated_by"),
+        invalidated_known_at=from_iso(props.get("invalidated_known_at")),
         relevance=_relevance_of(props),
         relevance_at=from_iso(props.get("relevance_at")),
         certified_at=from_iso(props.get("certified_at")),
         certified_by=props.get("certified_by"),
+        certifications=_loads(props.get("certifications_json"), []),
     )
 
 

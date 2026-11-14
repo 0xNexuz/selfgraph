@@ -3,7 +3,7 @@ import * as ids from "./ids.js";
 import { casefold } from "./internal/casefold.js";
 import { dumps, loads } from "./internal/json.js";
 import { comparePy, deepEqual, isPlainObject, pyRepr, pyStrip, utf8 } from "./internal/py.js";
-import { epochMicros, jsonIso, toIso } from "./internal/time.js";
+import { epochMicros, fromIso, jsonIso, toIso } from "./internal/time.js";
 import {
   childEdgeId,
   EDGE_TYPES,
@@ -77,6 +77,7 @@ import {
   hasControl,
   hasSurrogate,
   keysOf,
+  parseTime,
   requireDatetime,
   requireInt,
   requireJsonMapping,
@@ -585,8 +586,23 @@ async function planEvidence(
   return [records, gained];
 }
 
-async function writeEvidence(runner: Runner, ns: string, records: readonly NodeRow[]): Promise<void> {
-  if (records.length) await runner.upsertNodes(ns, L_EVIDENCE, records);
+/**
+ * Write new evidence records, each stamped with the write that recorded it, for known_at reads.
+ *
+ * @param runner (Runner): the graph runner.
+ * @param ns (string): the namespace.
+ * @param records (readonly NodeRow[]): the evidence ids and properties to write.
+ * @param known (Date): the write's timestamp.
+ * @return (Promise<void>): nothing.
+ */
+async function writeEvidence(runner: Runner, ns: string, records: readonly NodeRow[], known: Date): Promise<void> {
+  if (!records.length) return;
+  const stamp = toIso(known);
+  await runner.upsertNodes(
+    ns,
+    L_EVIDENCE,
+    records.map(([evid, props]) => [evid, { ...props, created_at: stamp }]),
+  );
 }
 
 /**
@@ -936,7 +952,7 @@ export async function upsertEntities(
     byType.set(props.type as string, rows);
   }
   for (const [etype, rows] of byType) await runner.upsertNodes(ns, L_ENTITY, rows, { extra_label: etype });
-  await writeEvidence(runner, ns, records);
+  await writeEvidence(runner, ns, records, createdAt);
   return out;
 }
 
@@ -1952,10 +1968,20 @@ export async function requireMaxCount(
  * @param edge (EdgeRow): the current edge row.
  * @param by (string): the id of the relation that superseded it.
  * @param at (Date): the superseding relation's effective time.
+ * @param known (Date): when the retirement is written, for reads with known_at.
  * @return (EdgeRow): the edge row with its version retired.
  */
-function retiredEdge(edge: EdgeRow, by: string, at: Date): EdgeRow {
-  return { ...edge, props: { ...edge.props, is_current: false, invalidated_at: toIso(at), invalidated_by: by } };
+function retiredEdge(edge: EdgeRow, by: string, at: Date, known: Date): EdgeRow {
+  return {
+    ...edge,
+    props: {
+      ...edge.props,
+      is_current: false,
+      invalidated_at: toIso(at),
+      invalidated_by: by,
+      invalidated_known_at: toIso(known),
+    },
+  };
 }
 
 export interface ContradictionOptions {
@@ -2041,16 +2067,18 @@ export async function rivalRelations(
  * @param ns (string): the namespace.
  * @param retirements (Iterable<readonly [EdgeRow, string, Date]>): each current edge row with what retired it (a
  * relation or source version id) and when.
+ * @param known (Date): the timestamp of the write that retires them.
  * @return (Relation[]): the retired versions.
  */
 export async function retireRelations(
   runner: Runner,
   ns: string,
   retirements: Iterable<readonly [EdgeRow, string, Date]>,
+  known: Date,
 ): Promise<Relation[]> {
   const gone = new Map<string, EdgeRow>();
   for (const [edge, by, at] of retirements) {
-    if (!gone.has(idOf(edge.props))) gone.set(idOf(edge.props), retiredEdge(edge, by, at));
+    if (!gone.has(idOf(edge.props))) gone.set(idOf(edge.props), retiredEdge(edge, by, at, known));
   }
   for (const edge of gone.values()) precheckWrite(runner, edge.props);
   const rows: EdgeWrite[] = [...gone.values()].map((e) => [e.type, e.from_id, e.to_id, e.props]);
@@ -2167,6 +2195,7 @@ export async function upsertRelations(
           source_count: sources,
           invalidated_at: live ? null : prev.invalidated_at,
           invalidated_by: live ? null : prev.invalidated_by,
+          invalidated_known_at: live ? null : prev.invalidated_known_at,
         });
       }
       edge = { ...edge, props };
@@ -2192,7 +2221,7 @@ export async function upsertRelations(
   const [ended, settled] = tracker?.settle() ?? [new Map<string, [string, Date]>(), []];
   options.warnings?.push(...settled);
   for (const [old, [by, at]] of ended) {
-    const gone = retiredEdge(current.get(old) ?? existing.get(old)!, by, at);
+    const gone = retiredEdge(current.get(old) ?? existing.get(old)!, by, at, createdAt);
     const key = JSON.stringify([old, gone.props.revision]);
     (writes.has(key) ? writes : retires).set(key, [old, gone.props]);
     current.set(old, gone);
@@ -2206,7 +2235,7 @@ export async function upsertRelations(
     });
     if (rows.length) await runner.createEdges(ns, L_ENTITY, L_ENTITY, rows);
   }
-  await writeEvidence(runner, ns, records);
+  await writeEvidence(runner, ns, records, createdAt);
   return out.map(([rid, revision, rel]) => {
     const key = JSON.stringify([rid, revision]);
     const final = retires.get(key) ?? writes.get(key);
@@ -2298,9 +2327,9 @@ export async function createRelation(
     options.warnings?.push(...found, ...settled);
     retires = [...ended]
       .filter(([old]) => old !== rid)
-      .map(([old, [by, at]]) => retiredEdge(existing.get(old)!, by, at));
+      .map(([old, [by, at]]) => retiredEdge(existing.get(old)!, by, at, createdAt));
     const own = ended.get(rid);
-    if (own !== undefined) written = retiredEdge(edge, ...own).props;
+    if (own !== undefined) written = retiredEdge(edge, ...own, createdAt).props;
   }
   for (const write of [written, ...retires.map((e) => e.props)]) precheckWrite(runner, write);
   const rel = await writeRelationVersion(runner, ns, ends, written, false);
@@ -2312,7 +2341,7 @@ export async function createRelation(
       retires.map((e) => [e.type, e.from_id, e.to_id, e.props]),
     );
   }
-  await writeEvidence(runner, ns, records);
+  await writeEvidence(runner, ns, records, createdAt);
   if (prior !== null) {
     options.warnings?.push(
       insertWarning(
@@ -2411,6 +2440,7 @@ export async function updateRelation(
     { entities: [], relations: [{ id: rid, from_entity, type, to_entity, properties: current.properties }] },
   );
   const newEventTime = args.event_time ?? current.event_time;
+  const createdAt = new Date();
   const [records, gained] = await planEvidence(
     runner,
     ns,
@@ -2424,7 +2454,7 @@ export async function updateRelation(
       await runner.updateCurrentEdge(ns, rid, { source_count: sources });
       current.source_count = sources;
     }
-    await writeEvidence(runner, ns, records);
+    await writeEvidence(runner, ns, records, createdAt);
     return current;
   }
 
@@ -2434,12 +2464,12 @@ export async function updateRelation(
     revision: current.revision + 1,
     properties: newProps,
     event_time: newEventTime,
-    created_at: new Date(),
+    created_at: createdAt,
     is_current: true,
     source_count: sources,
   });
   const rel = await writeRelationVersion(runner, ns, current, props, true);
-  await writeEvidence(runner, ns, records);
+  await writeEvidence(runner, ns, records, createdAt);
   return rel;
 }
 
@@ -2495,30 +2525,88 @@ export async function listRelations(
     .map(relationOf);
 }
 
+export interface AsOf {
+  valid: Date;
+  known: Date | null;
+}
+
+/**
+ * Parse the as_of and known_at arguments, reading a time with no offset as UTC; known_at alone sets both.
+ *
+ * @param asOf (unknown): the valid time, as a Date, ISO 8601 text, or null.
+ * @param knownAt (unknown): the time the graph knew it by, in the same forms.
+ * @return (AsOf | null): the times to read at, or null to read the current graph.
+ */
+export function parseAsOf(asOf: unknown, knownAt: unknown): AsOf | null {
+  const valid = parseTime(asOf, "as_of");
+  const known = parseTime(knownAt, "known_at");
+  if (valid === null && known === null) return null;
+  return { valid: valid ?? known!, known };
+}
+
+/**
+ * Report whether something written at a time was in the graph by another time.
+ *
+ * @param stamp (Date | null): when it was written; null counts as always.
+ * @param known (Date | null): the time read on the knowledge axis, or null for everything stored.
+ * @return (boolean): true when it was written by then.
+ */
+export function knownBy(stamp: Date | null, known: Date | null): boolean {
+  return stamp === null || known === null || epochMicros(stamp) <= epochMicros(known);
+}
+
 /**
  * Pick the version of a relation or preference that was valid at a point in time.
  *
- * The picked version is the highest revision whose effective time is at or before asOf, so a later write overrides
- * earlier ones from its effective time on. It is valid unless the first invalidation recorded at or after its
- * revision happened at or before asOf.
+ * The picked version is the highest revision whose effective time is at or before asOf.valid, so a later write
+ * overrides earlier ones from its effective time on. It is valid unless the first invalidation recorded at or after
+ * its revision happened at or before asOf.valid. With asOf.known, only the versions and invalidations written by then
+ * count, and the picked version is shown as the graph held it then: an invalidation written later is cleared, its
+ * certification is the one in force then, and it is current when no newer revision and no invalidation was written by
+ * then.
  *
  * @param versions (Iterable<T>): every version of one relation or preference.
- * @param asOf (Date): the point in time.
+ * @param asOf (AsOf): the valid time, and the time the graph knew it by.
  * @return (T | null): the version valid at asOf, or null.
  */
-export function versionAsOf<T extends Relation | Preference>(versions: Iterable<T>, asOf: Date): T | null {
-  const at = epochMicros(asOf);
-  const ordered = [...versions].sort((a, b) => a.revision - b.revision);
+export function versionAsOf<T extends Relation | Preference>(versions: Iterable<T>, asOf: AsOf): T | null {
+  const at = epochMicros(asOf.valid);
+  const ordered = [...versions]
+    .filter((v) => knownBy(v.created_at, asOf.known))
+    .sort((a, b) => a.revision - b.revision);
   let picked: T | null = null;
   for (const version of ordered) {
     if (epochMicros(effectiveTime(version)) <= at) picked = version;
   }
   if (picked === null) return null;
   for (const version of ordered) {
-    const ended = (version as { invalidated_at?: Date | null }).invalidated_at ?? null;
-    if (version.revision >= picked.revision && ended !== null) return epochMicros(ended) > at ? picked : null;
+    const rel = version as Partial<Relation>;
+    const ended = rel.invalidated_at ?? null;
+    if (version.revision >= picked.revision && ended && knownBy(rel.invalidated_known_at ?? null, asOf.known)) {
+      if (epochMicros(ended) <= at) return null;
+      break;
+    }
   }
-  return picked;
+  if (asOf.known === null) return picked;
+  const held = picked as Partial<Relation>;
+  const update: Partial<Relation> = { is_current: picked.revision === ordered.at(-1)!.revision };
+  if ((held.invalidated_at ?? null) !== null) {
+    if (knownBy(held.invalidated_known_at ?? null, asOf.known)) update.is_current = false;
+    else Object.assign(update, { invalidated_at: null, invalidated_by: null, invalidated_known_at: null });
+  }
+  if (held.certifications !== undefined) {
+    const known = epochMicros(asOf.known);
+    const seen = held.certifications
+      .filter((c) => knownBy(c.at, asOf.known))
+      .map((c) => ({ ...c, until: c.until !== null && epochMicros(c.until) <= known ? c.until : null }));
+    const inForce = seen.length && seen.at(-1)!.until === null ? seen.at(-1)! : null;
+    Object.assign(update, {
+      certifications: seen,
+      certified_at: inForce?.at ?? null,
+      certified_by: inForce?.by ?? null,
+    });
+  }
+  return { ...picked, ...update };
 }
 
 /**
@@ -2526,13 +2614,13 @@ export function versionAsOf<T extends Relation | Preference>(versions: Iterable<
  *
  * @param edges (readonly EdgeRow[]): the edge versions.
  * @param decode ((e: EdgeRow) => T): turns an edge row into a Relation or Preference.
- * @param asOf (Date): the point in time.
+ * @param asOf (AsOf): the valid time, and the time the graph knew it by.
  * @return (T[]): the valid versions, one per id at most.
  */
 function pickAsOf<T extends Relation | Preference>(
   edges: readonly EdgeRow[],
   decode: (e: EdgeRow) => T,
-  asOf: Date,
+  asOf: AsOf,
 ): T[] {
   const versions = new Map<string, T[]>();
   for (const edge of edges) {
@@ -2544,24 +2632,43 @@ function pickAsOf<T extends Relation | Preference>(
 }
 
 /**
- * Read every version of the relations starting or ending at some entities, as each stood at a point in time.
+ * Read every version of the relations starting or ending at some entities, as each stood at a point in time. With
+ * asOf.known and countSources, each relation's source_count counts only the sources whose evidence was written by
+ * then.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
- * @param asOf (Date): the point in time.
+ * @param asOf (AsOf): the valid time, and the time the graph knew it by.
  * @param anchor ({ from_in?: readonly string[]; to_in?: readonly string[] }): the entity ids the relations start or end at.
+ * @param countSources (boolean): recount source_count for asOf.known; left as stored otherwise.
  * @return (Relation[]): the relations valid at asOf, in id order.
  */
 export async function relationsAsOf(
   runner: Runner,
   ns: string,
-  asOf: Date,
+  asOf: AsOf,
   anchor: { from_in?: readonly string[]; to_in?: readonly string[] },
+  countSources = false,
 ): Promise<Relation[]> {
   const edges = (await allEdges(runner, ns, { from_label: L_ENTITY, to_label: L_ENTITY, ...anchor }, PAGE)).filter(
     (e) => isRelationType(e.type),
   );
-  return pickAsOf(edges, relationOf, asOf);
+  const picked = pickAsOf(edges, relationOf, asOf);
+  if (asOf.known === null || !countSources || !picked.length) return picked;
+  const sources = new Map<string, Set<string>>();
+  for (const row of await nodesWhere(
+    runner,
+    ns,
+    L_EVIDENCE,
+    "target_id",
+    picked.map((r) => r.id),
+  )) {
+    if (!knownBy(fromIso(row.created_at), asOf.known)) continue;
+    const target = row.target_id as string;
+    if (!sources.has(target)) sources.set(target, new Set());
+    sources.get(target)!.add(row.source_id as string);
+  }
+  return picked.map((r) => ({ ...r, source_count: sources.get(r.id)?.size ?? 0 }));
 }
 
 /**
@@ -2569,10 +2676,10 @@ export async function relationsAsOf(
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
- * @param asOf (Date): the point in time.
+ * @param asOf (AsOf): the valid time, and the time the graph knew it by.
  * @return (Preference[]): the preferences valid at asOf, in id order.
  */
-export async function preferencesAsOf(runner: Runner, ns: string, asOf: Date): Promise<Preference[]> {
+export async function preferencesAsOf(runner: Runner, ns: string, asOf: AsOf): Promise<Preference[]> {
   const edges = (await allEdges(runner, ns, { from_label: L_PROFILE, to_label: null }, PAGE)).filter((e) =>
     isPreferenceType(e.type),
   );
@@ -2583,7 +2690,9 @@ export async function preferencesAsOf(runner: Runner, ns: string, asOf: Date): P
  * Mark the current version of a relation as verified by someone, in place, or clear the mark when by is null.
  *
  * A certified relation stays current when a supersede contradiction or a replaced source would retire it. The mark
- * belongs to the version: a later revision of the relation starts uncertified.
+ * belongs to the version: a later revision of the relation starts uncertified. Each certification is kept in the
+ * version's certifications, with when it ended, so a known_at read shows the one in force then; certifying again by the
+ * same verifier, or uncertifying an uncertified version, changes nothing.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
@@ -2613,7 +2722,21 @@ export async function certifyRelation(
     if (newest === null) throw new NotFoundError("Relation", rid);
     throw new ValidationError(`${invalidatedNote(newest)}; only a current relation can be certified`);
   }
-  const props = { ...edge.props, certified_at: by === null ? null : toIso(at), certified_by: by };
+  const current = relationOf(edge);
+  const held = current.certifications.find((c) => c.until === null) ?? null;
+  if ((held?.by ?? null) === by) return current;
+  const history = current.certifications.map((c) => ({
+    by: c.by,
+    at: toIso(c.at),
+    until: toIso(c === held ? at : c.until),
+  }));
+  if (by !== null) history.push({ by, at: toIso(at), until: null });
+  const props = {
+    ...edge.props,
+    certified_at: by === null ? null : toIso(at),
+    certified_by: by,
+    certifications_json: dumps(history),
+  };
   precheckWrite(runner, props);
   await runner.createEdges(ns, L_ENTITY, L_ENTITY, [[edge.type, edge.from_id, edge.to_id, props]]);
   return relationOf({ ...edge, props });
@@ -2635,7 +2758,8 @@ export async function sourceTargets(runner: Runner, ns: string, sourceId: string
 /**
  * Make one version of a source replace its others: mark them replaced_at and replaced_by, so retrieval stops quoting
  * them, and retire the current relations among some candidates whose every evidence record is from one of them, as a
- * newer fact retires one: invalidated_at is set and nothing is deleted.
+ * newer fact retires one: invalidated_at is set and nothing is deleted. Each version keeps its replacements, with when
+ * each was written and undone, in replacements_json for known_at reads.
  *
  * A relation with evidence from the given version, or from a version of another source that was not itself replaced,
  * stays current, and so does a certified one, with a "certified_kept" warning. Evidence recorded by hand has no stored
@@ -2647,6 +2771,7 @@ export async function sourceTargets(runner: Runner, ns: string, sourceId: string
  * @param version (string): the source version just recorded; it is stored as invalidated_by.
  * @param stale (Iterable<string>): the ids the source supported before and the new version did not produce again.
  * @param at (Date): the new version's effective time.
+ * @param known (Date): the timestamp of the insert that recorded the new version.
  * @return ([string[], InsertWarning[]]): the retired relation ids, and one warning per decision.
  */
 export async function replaceSource(
@@ -2656,6 +2781,7 @@ export async function replaceSource(
   version: string,
   stale: Iterable<string>,
   at: Date,
+  known: Date,
 ): Promise<[string[], InsertWarning[]]> {
   const candidates = [...new Set(stale)].sort(comparePy);
   const support = new Map<string, Props[]>();
@@ -2691,7 +2817,8 @@ export async function replaceSource(
     const message = `relation ${rid} was retired: only older versions of source ${sourceId} stated it`;
     warnings.push(insertWarning("fact_retired_by_source", message));
   }
-  await retireRelations(runner, ns, retirements);
+  await retireRelations(runner, ns, retirements, known);
+  const knownAt = toIso(known);
   const marks: NodeRow[] = [];
   for (const row of await runner.childNodes(
     ns,
@@ -2701,10 +2828,17 @@ export async function replaceSource(
     L_SOURCE_VERSION,
   )) {
     const replacedBy = row.replaced_by ?? null;
+    const history = loads<Array<Record<string, string | null>>>(row.replacements_json, []);
     if (row.id === version && replacedBy !== null) {
-      marks.push([row.id as string, { ...row, replaced_at: null, replaced_by: null }]);
+      history.at(-1)!.until = knownAt;
+      marks.push([
+        row.id as string,
+        { ...row, replaced_at: null, replaced_by: null, replacements_json: dumps(history) },
+      ]);
     } else if (row.id !== version && replacedBy === null) {
-      marks.push([row.id as string, { ...row, replaced_at: toIso(at), replaced_by: version }]);
+      history.push({ at: toIso(at), by: version, known_at: knownAt, until: null });
+      const mark = { replaced_at: toIso(at), replaced_by: version, replacements_json: dumps(history) };
+      marks.push([row.id as string, { ...row, ...mark }]);
     }
   }
   if (marks.length) await runner.upsertNodes(ns, L_SOURCE_VERSION, marks);

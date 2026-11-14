@@ -7,13 +7,12 @@ import math
 import re
 from collections import deque
 from collections.abc import Collection, Iterable
-from datetime import datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
 from . import _ops
 from ._maintenance import scan_entities, scan_relations
-from ._ops import _paged
+from ._ops import AsOf, _paged
 from ._serde import (
     L_CHUNK,
     L_ENTITY,
@@ -21,6 +20,7 @@ from ._serde import (
     L_PROFILE,
     L_SOURCE_VERSION,
     R_HAS_CHUNK,
+    _loads,
     decode_entity,
     from_iso,
     preference_edge_type,
@@ -316,7 +316,7 @@ async def _scan_seeds(
     query_tokens: set[str],
     k: int,
     exact: set[str],
-    as_of: datetime | None,
+    as_of: AsOf | None,
     valid: list[Preference] | None,
 ) -> list[tuple[Entity, float]]:
     """Rank every entity as a seed, as _select_seeds does, in two streaming passes over id-ordered pages.
@@ -330,7 +330,7 @@ async def _scan_seeds(
     @param query_tokens (set[str]): the content tokens from the query.
     @param k (int): the maximum number of seeds to keep.
     @param exact (set[str]): short query tokens that seed an entity whose whole name equals one.
-    @param as_of (datetime | None): score only the entities visible at this time, or None for all.
+    @param as_of (AsOf | None): score only the entities visible at this time, or None for all.
     @param valid (list[Preference] | None): the preference versions valid at as_of.
     @return (list[tuple[Entity, float]]): seed entities with their scores, best first.
     """
@@ -355,12 +355,12 @@ async def _scan_seeds(
     return best
 
 
-async def _entity_pages(graph: SelfGraph, ns: str, as_of: datetime | None, valid: list[Preference] | None):
+async def _entity_pages(graph: SelfGraph, ns: str, as_of: AsOf | None, valid: list[Preference] | None):
     """Stream every entity in id-ordered pages, keeping only those visible at as_of when it is set.
 
     @param graph (SelfGraph): the open graph.
     @param ns (str): the namespace to read.
-    @param as_of (datetime | None): keep only the entities visible at this time, or None for all.
+    @param as_of (AsOf | None): keep only the entities visible at this time, or None for all.
     @param valid (list[Preference] | None): the preference versions valid at as_of.
     @return (AsyncIterator[list[Entity]]): the pages.
     """
@@ -384,7 +384,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 async def _embedding_seeds(
-    graph: SelfGraph, ns: str, query: str, k: int, as_of: datetime | None, valid: list[Preference] | None
+    graph: SelfGraph, ns: str, query: str, k: int, as_of: AsOf | None, valid: list[Preference] | None
 ) -> list[tuple[Entity, float]]:
     """Rank every entity by the embedder's similarity between its text and the query, best first.
 
@@ -395,7 +395,7 @@ async def _embedding_seeds(
     @param ns (str): the namespace to read.
     @param query (str): the query text.
     @param k (int): the maximum number of seeds to keep.
-    @param as_of (datetime | None): score only the entities visible at this time, or None for all.
+    @param as_of (AsOf | None): score only the entities visible at this time, or None for all.
     @param valid (list[Preference] | None): the preference versions valid at as_of.
     @return (list[tuple[Entity, float]]): the entities with a positive similarity, with it.
     """
@@ -444,7 +444,7 @@ async def _traverse(
     depth: int,
     max_nodes: int,
     prefetch: int,
-    as_of: datetime | None = None,
+    as_of: AsOf | None = None,
     skip_hubs: bool = False,
 ) -> tuple[dict[str, int], list[Relation], set[str]]:
     """Walk the current-relation graph out from the seeds in BFS or DFS order over prefetched adjacency.
@@ -459,7 +459,7 @@ async def _traverse(
     @param depth (int): the maximum number of hops from a seed.
     @param max_nodes (int): the maximum number of entities to collect.
     @param prefetch (int): the most entities whose adjacency to load up front; DFS needs more than it keeps.
-    @param as_of (datetime | None): walk the relations valid at this time instead of the current ones.
+    @param as_of (AsOf | None): walk the relations valid at this time instead of the current ones.
     @param skip_hubs (bool): do not expand hubs other than the seeds.
     @return (tuple[dict[str, int], list[Relation], set[str]]): visited entity ids with distance, the relations among
         them, and the visited hubs.
@@ -492,7 +492,7 @@ async def _traverse(
 
 
 async def _prefetch(
-    graph: SelfGraph, ns: str, seed_ids: list[str], depth: int, limit: int, as_of: datetime | None = None
+    graph: SelfGraph, ns: str, seed_ids: list[str], depth: int, limit: int, as_of: AsOf | None = None
 ) -> dict[str, list[Relation]]:
     """Load the adjacency of entities within depth - 1 hops of the seeds, one batched query per hop.
 
@@ -501,7 +501,7 @@ async def _prefetch(
     @param seed_ids (list[str]): entity ids to start from.
     @param depth (int): the maximum number of hops from a seed.
     @param limit (int): the most entities to prefetch.
-    @param as_of (datetime | None): load the relations valid at this time instead of the current ones.
+    @param as_of (AsOf | None): load the relations valid at this time instead of the current ones.
     @return (dict[str, list[Relation]]): each prefetched entity's adjacent relations.
     """
     adjacency: dict[str, list[Relation]] = {}
@@ -524,17 +524,17 @@ async def _prefetch(
 
 
 async def _visible_at(
-    graph: SelfGraph, ns: str, entities: Iterable[Entity], as_of: datetime, preferences: list[Preference]
+    graph: SelfGraph, ns: str, entities: Iterable[Entity], as_of: AsOf, preferences: list[Preference]
 ) -> set[str]:
     """List the entities visible at a point in time on the valid-time axis.
 
-    An entity is visible when it was stored by then, or when it is an endpoint of a relation version, or the
-    subject, value, or about entity of a preference version, valid then.
+    An entity is visible when it was stored by then (and by as_of.known when set), or when it is an endpoint of a
+    relation version, or the subject, value, or about entity of a preference version, valid then.
 
     @param graph (SelfGraph): the open graph.
     @param ns (str): the namespace to read.
     @param entities (Iterable[Entity]): the entities to judge.
-    @param as_of (datetime): the point in time.
+    @param as_of (AsOf): the valid time, and the time the graph knew it by.
     @param preferences (list[Preference]): the preference versions valid at as_of.
     @return (set[str]): the ids of the visible entities.
     """
@@ -542,7 +542,9 @@ async def _visible_at(
     visible: set[str] = set()
     late: list[str] = []
     for entity in entities:
-        if entity.created_at <= as_of or entity.id in referenced:
+        if (
+            entity.created_at <= as_of.valid and _ops._known_by(entity.created_at, as_of.known)
+        ) or entity.id in referenced:
             visible.add(entity.id)
         else:
             late.append(entity.id)
@@ -554,7 +556,7 @@ async def _visible_at(
 
 
 async def _adjacent(
-    graph: SelfGraph, ns: str, nodes: list[str], as_of: datetime | None
+    graph: SelfGraph, ns: str, nodes: list[str], as_of: AsOf | None
 ) -> tuple[list[Relation], list[Relation]]:
     """Fetch the outgoing and incoming relations of some entities, both sides at once.
 
@@ -564,7 +566,7 @@ async def _adjacent(
     @param graph (SelfGraph): the open graph.
     @param ns (str): the namespace to read.
     @param nodes (list[str]): the entity ids to expand.
-    @param as_of (datetime | None): read the relations valid at this time instead of the current ones.
+    @param as_of (AsOf | None): read the relations valid at this time instead of the current ones.
     @return (tuple[list[Relation], list[Relation]]): the outgoing and the incoming relations.
     """
     if as_of is None:
@@ -572,8 +574,8 @@ async def _adjacent(
         out, inc = await asyncio.gather(_paged(partial(fetch, from_in=nodes)), _paged(partial(fetch, to_in=nodes)))
         return out, inc
     out, inc = await asyncio.gather(
-        _ops.relations_as_of(graph.store, ns, as_of, from_in=nodes),
-        _ops.relations_as_of(graph.store, ns, as_of, to_in=nodes),
+        _ops.relations_as_of(graph.store, ns, as_of, from_in=nodes, count_sources=True),
+        _ops.relations_as_of(graph.store, ns, as_of, to_in=nodes, count_sources=True),
     )
     others = list(dict.fromkeys([*(r.to_entity for r in out), *(r.from_entity for r in inc)]))
     alive = set(await _ops._nodes_by_id(graph.store, ns, L_ENTITY, others))
@@ -581,7 +583,7 @@ async def _adjacent(
 
 
 async def _neighbors(
-    graph: SelfGraph, ns: str, nodes: list[str], as_of: datetime | None = None
+    graph: SelfGraph, ns: str, nodes: list[str], as_of: AsOf | None = None
 ) -> dict[str, list[Relation]]:
     """Fetch each entity's outgoing then incoming relations; one-sided queries, as OR scans every edge.
 
@@ -591,7 +593,7 @@ async def _neighbors(
     @param graph (SelfGraph): the open graph.
     @param ns (str): the namespace to read.
     @param nodes (list[str]): the entity ids to expand.
-    @param as_of (datetime | None): read the relations valid at this time instead of the current ones.
+    @param as_of (AsOf | None): read the relations valid at this time instead of the current ones.
     @return (dict[str, list[Relation]]): each entity's adjacent relations.
     """
     outgoing: dict[str, list[Relation]] = {n: [] for n in nodes}
@@ -675,36 +677,51 @@ def _ppr_rank(
     return {n: i for i, n in enumerate(sorted(nodes, key=lambda n: (-mass[n], n)))}
 
 
-async def _collect_decisions(graph: SelfGraph, ns: str, relation_ids: set[str], as_of: datetime | None = None):
+async def _collect_decisions(graph: SelfGraph, ns: str, relation_ids: set[str], as_of: AsOf | None = None):
     """Return decision traces that reference any of the given relations.
 
     @param graph (SelfGraph): the open graph.
     @param ns (str): the namespace to search.
     @param relation_ids (set[str]): the relation ids collected during traversal.
-    @param as_of (datetime | None): keep only traces whose effective time is at or before this time.
+    @param as_of (AsOf | None): keep only traces effective by its valid time and written by its known time.
     @return (list[DecisionTrace]): the matching decision traces.
     """
     if not relation_ids:
         return []
     tids = sorted(await _ops._traces_touching_relations(graph.store, ns, sorted(relation_ids)))
     traces = await _ops.get_traces(graph.store, ns, tids)
-    return [t for t in traces if as_of is None or _ops.effective_time(t) <= as_of]
+    return [
+        t
+        for t in traces
+        if as_of is None or (_ops.effective_time(t) <= as_of.valid and _ops._known_by(t.created_at, as_of.known))
+    ]
 
 
-def _quotable(version: dict | None, as_of: datetime | None) -> bool:
+def _quotable(version: dict | None, as_of: AsOf | None) -> bool:
     """Report whether a source version can supply passages: it exists, took effect by as_of, and was not replaced
-    by a newer version of its source by then.
+    by a newer version of its source by then. With as_of.known, a version or replacement written later does not
+    count.
 
     @param version (dict | None): the stored source version, or None when it is gone.
-    @param as_of (datetime | None): the point in time read, or None for now.
+    @param as_of (AsOf | None): the point in time read, or None for now.
     @return (bool): True when its chunks may be quoted.
     """
     if version is None:
         return False
-    if as_of is not None and from_iso(version.get("event_time") or version["created_at"]) > as_of:
+    if as_of is not None and (
+        from_iso(version.get("event_time") or version["created_at"]) > as_of.valid
+        or not _ops._known_by(from_iso(version["created_at"]), as_of.known)
+    ):
         return False
-    replaced = from_iso(version.get("replaced_at"))
-    return replaced is None or (as_of is not None and replaced > as_of)
+    if as_of is None or as_of.known is None:
+        replaced = from_iso(version.get("replaced_at"))
+        return replaced is None or (as_of is not None and replaced > as_of.valid)
+    return not any(
+        from_iso(r["at"]) <= as_of.valid
+        and from_iso(r["known_at"]) <= as_of.known
+        and not (r["until"] and from_iso(r["until"]) <= as_of.known)
+        for r in _loads(version.get("replacements_json"), [])
+    )
 
 
 async def _collect_passages(
@@ -713,7 +730,7 @@ async def _collect_passages(
     entities: list[Entity],
     dist: dict[str, int],
     query_tokens: set[str],
-    as_of: datetime | None = None,
+    as_of: AsOf | None = None,
 ) -> list[str]:
     """Gather the most query-relevant source passages behind the retrieved entities.
 
@@ -722,7 +739,8 @@ async def _collect_passages(
     @param entities (list[Entity]): the collected entities.
     @param dist (dict[str, int]): each entity's closeness rank to the query, lower first (hops, or PageRank rank).
     @param query_tokens (set[str]): the content tokens from the query.
-    @param as_of (datetime | None): skip source versions whose effective time (event_time, else created_at) is after it.
+    @param as_of (AsOf | None): skip source versions that took effect after its valid time or were written after its
+        known time.
     @return (list[str]): passage texts, most query-relevant first; a version replaced by a newer one of its source
         (insert.text with replace_source) by then is skipped.
     """
@@ -743,6 +761,8 @@ async def _collect_passages(
             usable.update((sv, _quotable(versions.get(sv), as_of)) for sv in unseen)
             for row in rows:
                 if not usable[row["source_version"]]:
+                    continue
+                if as_of is not None and not _ops._known_by(from_iso(row.get("created_at")), as_of.known):
                     continue
                 sv_dist.setdefault(row["source_version"], dist.get(e.id, far))
                 if len(sv_dist) >= _MAX_PASSAGE_SOURCES:
@@ -911,7 +931,7 @@ async def retrieve(
     k: int = 20,
     max_nodes: int = 200,
     budget_tokens: int = 3000,
-    as_of: datetime | None = None,
+    as_of: AsOf | None = None,
     seeds: str = "bm25",
     skip_hubs: bool = False,
 ) -> RetrievalResult:
@@ -927,7 +947,9 @@ async def retrieve(
     With as_of, the graph is read on the valid-time axis: each relation and preference at its version valid then
     (see version_as_of), and an entity when it was stored by then or is an endpoint, subject, value, or about
     entity of one of those versions, so a backdated fact shows with its entities. Decisions effective by then are
-    kept unless they name an entity not visible then, and passages come from source versions stored by then.
+    kept unless they name an entity not visible then, and passages come from source versions stored by then. With
+    as_of.known, only what was written by that time counts: later versions, invalidations, certifications,
+    entities, decisions, and source versions are left out, so the read shows what the graph held then.
 
     @param graph (SelfGraph): the open graph to read.
     @param query (str): the natural-language query to seed from.
@@ -936,7 +958,7 @@ async def retrieve(
     @param k (int): the maximum number of seed entities.
     @param max_nodes (int): the maximum number of entities to collect.
     @param budget_tokens (int): the assembled-context token budget.
-    @param as_of (datetime | None): the point in time to read the graph at (naive means UTC), or None for now.
+    @param as_of (AsOf | None): the valid time to read the graph at, and the time it knew it by, or None for now.
     @param seeds (str): the seeding tier: "bm25", "synonyms", or "embeddings".
     @param skip_hubs (bool): do not walk through hubs other than the seeds.
     @return (RetrievalResult): the seeds, the collected subgraph, the assembled context, and the hubs reached.
@@ -1186,14 +1208,14 @@ def answerability(
 
 
 async def check_answerable(
-    graph: SelfGraph, question: str, *, terms: list[str] | None, as_of: datetime | None, depth: int
+    graph: SelfGraph, question: str, *, terms: list[str] | None, as_of: AsOf | None, depth: int
 ) -> AnswerabilityReport:
     """Read the namespace and judge whether it holds what a question asks about; see answerability.
 
     @param graph (SelfGraph): the open graph to read.
     @param question (str): the question.
     @param terms (list[str] | None): the terms to check, or None to take them from the question.
-    @param as_of (datetime | None): judge the graph as it stood at this time, or None for now.
+    @param as_of (AsOf | None): judge the graph as it stood at this time, or None for now.
     @param depth (int): the most hops between matched entities.
     @return (AnswerabilityReport): the coverage of each term, the connectivity, and the verdict.
     """

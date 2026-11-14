@@ -51,7 +51,8 @@ out of extraction even when `llm=` is set, and `"llm"` requires one. The result'
 
 Sources are content-addressed. Inserting changed text under the same
 `source_id` records a new version, and the facts extracted from the old version
-stay current. When the new text replaces the old one, say so:
+stay current. Inserting the same text again keeps the version as first stored,
+with its `event_time` and metadata. When the new text replaces the old one, say so:
 
 ```python
 result = await graph.insert.text(handbook_v2, source_id="handbook", replace_source=True)

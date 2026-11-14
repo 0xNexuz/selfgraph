@@ -43,6 +43,7 @@ function line(edgeType: string, source: string, target: string, properties: Json
  * @param llm (LLMClient): the LLM to ask.
  * @param written (readonly Relation[]): the relations a write just stored.
  * @param caps (ReadonlyMap<string, ops.RelationCap> | null): the schema's max_count limits by relation type.
+ * @param known (Date): the timestamp of the write, stamped on each retirement.
  * @return (InsertWarning[]): one relation_superseded warning per retired relation, and one certified_kept warning per
  * certified relation the LLM judged contradicted, which stays current.
  */
@@ -52,6 +53,7 @@ export async function judgeContradictions(
   llm: LLMClient,
   written: readonly Relation[],
   caps: ReadonlyMap<string, ops.RelationCap> | null,
+  known: Date,
 ): Promise<InsertWarning[]> {
   const rivals = await ops.rivalRelations(runner, ns, written, caps, MAX_RIVALS);
   if (!rivals.size) return [];
@@ -96,7 +98,7 @@ export async function judgeContradictions(
       }
     }
   }
-  const retired = await ops.retireRelations(runner, ns, retirements);
+  const retired = await ops.retireRelations(runner, ns, retirements, known);
   return [
     ...kept,
     ...retired.map((rel) =>

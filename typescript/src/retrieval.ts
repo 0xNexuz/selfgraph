@@ -3,6 +3,7 @@ import { loadTokenizer } from "./chunking.js";
 import { ValidationError } from "./errors.js";
 import { normalizeText, profileId } from "./ids.js";
 import { casefold } from "./internal/casefold.js";
+import { loads } from "./internal/json.js";
 import { comparePy, cpLen, NON_ASCII, pyFloatRepr, pyRepr, pyStr, pyStrip } from "./internal/py.js";
 import { epochMicros, fromIso } from "./internal/time.js";
 import {
@@ -33,7 +34,7 @@ import type { ParsedSchema } from "./schema.js";
 import { decodeEntity } from "./serde.js";
 import { expandTokens, groundedTerms, schemaForms, stem } from "./terms.js";
 import type { SeedTier } from "./tiers.js";
-import { checkOptions, keysOf, parseTime, requireBool, requireInt, typeName } from "./validate.js";
+import { checkOptions, keysOf, requireBool, requireInt, typeName } from "./validate.js";
 
 const STOPWORDS = new Set(
   (
@@ -256,7 +257,7 @@ export function selectSeeds(entities: Entity[], queryTokens: Set<string>, k: num
  * @param queryTokens (Set<string>): the content tokens from the query.
  * @param k (number): the maximum number of seeds.
  * @param exact (Set<string>): short query tokens that seed an entity whose whole name equals one.
- * @param asOf (Date | null): score only the entities visible at this time, or null for all.
+ * @param asOf (AsOf | null): score only the entities visible at this time, or null for all.
  * @param valid (Preference[] | null): the preference versions valid at asOf.
  * @return (Array<[Entity, number]>): seed entities with their scores, best first.
  */
@@ -266,7 +267,7 @@ async function scanSeeds(
   queryTokens: Set<string>,
   k: number,
   exact: Set<string>,
-  asOf: Date | null,
+  asOf: ops.AsOf | null,
   valid: Preference[] | null,
 ): Promise<Array<[Entity, number]>> {
   let stats: CorpusStats | null = null;
@@ -295,14 +296,14 @@ async function scanSeeds(
  *
  * @param store (GraphPrimitives): the graph reader.
  * @param ns (string): the namespace to read.
- * @param asOf (Date | null): keep only the entities visible at this time, or null for all.
+ * @param asOf (AsOf | null): keep only the entities visible at this time, or null for all.
  * @param valid (Preference[] | null): the preference versions valid at asOf.
  * @return (AsyncGenerator<Entity[]>): the pages.
  */
 async function* entityPages(
   store: GraphPrimitives,
   ns: string,
-  asOf: Date | null,
+  asOf: ops.AsOf | null,
   valid: Preference[] | null,
 ): AsyncGenerator<Entity[]> {
   for await (const page of ops.keyset(
@@ -345,7 +346,7 @@ function cosine(a: readonly number[], b: readonly number[]): number {
  * @param store (GraphPrimitives): the graph reader.
  * @param query (string): the query text.
  * @param k (number): the maximum number of seeds to keep.
- * @param asOf (Date | null): score only the entities visible at this time, or null for all.
+ * @param asOf (AsOf | null): score only the entities visible at this time, or null for all.
  * @param valid (Preference[] | null): the preference versions valid at asOf.
  * @return (Array<[Entity, number]>): the entities with a positive similarity, with it.
  */
@@ -354,7 +355,7 @@ async function embeddingSeeds(
   store: GraphPrimitives,
   query: string,
   k: number,
-  asOf: Date | null,
+  asOf: ops.AsOf | null,
   valid: Preference[] | null,
 ): Promise<Array<[Entity, number]>> {
   const ns = graph.namespace;
@@ -421,12 +422,12 @@ function fuse(rankings: ReadonlyArray<ReadonlyArray<[Entity, number]>>, k: numbe
 }
 
 /**
- * List the entities visible at a point in time on the valid-time axis. An entity is visible when it was stored by then, or when it is an endpoint of a relation version, or the subject, value, or about entity of a preference version, valid then.
+ * List the entities visible at a point in time on the valid-time axis. An entity is visible when it was stored by then (and by asOf.known when set), or when it is an endpoint of a relation version, or the subject, value, or about entity of a preference version, valid then.
  *
  * @param store (GraphPrimitives): the graph reader.
  * @param ns (string): the namespace to read.
  * @param entities (Iterable<Entity>): the entities to judge.
- * @param asOf (Date): the point in time.
+ * @param asOf (AsOf): the valid time, and the time the graph knew it by.
  * @param preferences (Preference[]): the preference versions valid at asOf.
  * @return (Set<string>): the ids of the visible entities.
  */
@@ -434,7 +435,7 @@ async function visibleAt(
   store: GraphPrimitives,
   ns: string,
   entities: Iterable<Entity>,
-  asOf: Date,
+  asOf: ops.AsOf,
   preferences: Preference[],
 ): Promise<Set<string>> {
   const referenced = new Set<string>();
@@ -444,7 +445,9 @@ async function visibleAt(
   const visible = new Set<string>();
   const late: string[] = [];
   for (const entity of entities) {
-    if (epochMicros(entity.created_at) <= epochMicros(asOf) || referenced.has(entity.id)) visible.add(entity.id);
+    const stored =
+      epochMicros(entity.created_at) <= epochMicros(asOf.valid) && ops.knownBy(entity.created_at, asOf.known);
+    if (stored || referenced.has(entity.id)) visible.add(entity.id);
     else late.push(entity.id);
   }
   for (let start = 0; start < late.length; start += PAGE) {
@@ -461,14 +464,14 @@ async function visibleAt(
  * @param store (GraphPrimitives): the graph reader.
  * @param ns (string): the namespace to read.
  * @param nodes (string[]): the entity ids to expand.
- * @param asOf (Date | null): read the relations valid at this time instead of the current ones.
+ * @param asOf (AsOf | null): read the relations valid at this time instead of the current ones.
  * @return ([Relation[], Relation[]]): the outgoing and the incoming relations.
  */
 async function adjacent(
   store: GraphPrimitives,
   ns: string,
   nodes: string[],
-  asOf: Date | null,
+  asOf: ops.AsOf | null,
 ): Promise<[Relation[], Relation[]]> {
   if (asOf === null) {
     const page = (filter: { from_in?: string[]; to_in?: string[] }) => (skip: number, limit: number) =>
@@ -476,8 +479,8 @@ async function adjacent(
     return Promise.all([ops.scan(page({ from_in: nodes })), ops.scan(page({ to_in: nodes }))]);
   }
   const [out, inc] = await Promise.all([
-    ops.relationsAsOf(store, ns, asOf, { from_in: nodes }),
-    ops.relationsAsOf(store, ns, asOf, { to_in: nodes }),
+    ops.relationsAsOf(store, ns, asOf, { from_in: nodes }, true),
+    ops.relationsAsOf(store, ns, asOf, { to_in: nodes }, true),
   ]);
   const others = [...new Set([...out.map((r) => r.to_entity), ...inc.map((r) => r.from_entity)])];
   const alive = new Set((await ops.nodesById(store, ns, L_ENTITY, others)).keys());
@@ -490,14 +493,14 @@ async function adjacent(
  * @param store (GraphPrimitives): the graph reader.
  * @param ns (string): the namespace to read.
  * @param nodes (string[]): the entity ids to expand.
- * @param asOf (Date | null): read the relations valid at this time instead of the current ones.
+ * @param asOf (AsOf | null): read the relations valid at this time instead of the current ones.
  * @return (Map<string, Relation[]>): each entity's adjacent relations.
  */
 async function neighbors(
   store: GraphPrimitives,
   ns: string,
   nodes: string[],
-  asOf: Date | null = null,
+  asOf: ops.AsOf | null = null,
 ): Promise<Map<string, Relation[]>> {
   const outgoing = new Map<string, Relation[]>(nodes.map((n) => [n, []]));
   const incoming = new Map<string, Relation[]>(nodes.map((n) => [n, []]));
@@ -522,7 +525,7 @@ async function neighbors(
  * @param seedIds (string[]): entity ids to start from.
  * @param depth (number): the maximum number of hops from a seed.
  * @param limit (number): the most entities to prefetch.
- * @param asOf (Date | null): load the relations valid at this time instead of the current ones.
+ * @param asOf (AsOf | null): load the relations valid at this time instead of the current ones.
  * @return (Map<string, Relation[]>): each prefetched entity's adjacent relations.
  */
 async function prefetch(
@@ -531,7 +534,7 @@ async function prefetch(
   seedIds: string[],
   depth: number,
   limit: number,
-  asOf: Date | null = null,
+  asOf: ops.AsOf | null = null,
 ): Promise<Map<string, Relation[]>> {
   const adjacency = new Map<string, Relation[]>();
   let level = [...new Set(seedIds)];
@@ -578,7 +581,7 @@ const distanceIn = (dist: Map<string, number>): ((id: string) => number) => {
  * @param depth (number): the maximum number of hops from a seed.
  * @param maxNodes (number): the maximum number of entities to collect.
  * @param prefetchLimit (number): the most entities whose adjacency to load up front; DFS needs more than it keeps.
- * @param asOf (Date | null): walk the relations valid at this time instead of the current ones.
+ * @param asOf (AsOf | null): walk the relations valid at this time instead of the current ones.
  * @param skipHubs (boolean): do not expand hubs other than the seeds.
  * @return ([Map<string, number>, Relation[], Set<string>]): visited entity ids with distance, the relations among them, and the visited hubs.
  */
@@ -590,7 +593,7 @@ async function traverse(
   depth: number,
   maxNodes: number,
   prefetchLimit: number,
-  asOf: Date | null = null,
+  asOf: ops.AsOf | null = null,
   skipHubs = false,
 ): Promise<[Map<string, number>, Relation[], Set<string>]> {
   const bfs = strategy === "bfs";
@@ -706,28 +709,45 @@ async function collectDecisions(
   store: GraphPrimitives,
   ns: string,
   relationIds: Set<string>,
-  asOf: Date | null = null,
+  asOf: ops.AsOf | null = null,
 ): Promise<DecisionTrace[]> {
   if (!relationIds.size) return [];
   const tids = await ops.tracesTouchingRelations(store, ns, [...relationIds].sort(comparePy));
   const traces = await ops.getTraces(store, ns, [...tids].sort(comparePy));
-  return traces.filter((t) => asOf === null || epochMicros(ops.effectiveTime(t)) <= epochMicros(asOf));
+  return traces.filter(
+    (t) =>
+      asOf === null ||
+      (epochMicros(ops.effectiveTime(t)) <= epochMicros(asOf.valid) && ops.knownBy(t.created_at, asOf.known)),
+  );
 }
 
 /**
- * Report whether a source version can supply passages: it exists, took effect by asOf, and was not replaced by a newer version of its source by then.
+ * Report whether a source version can supply passages: it exists, took effect by asOf, and was not replaced by a newer version of its source by then. With asOf.known, a version or replacement written later does not count.
  *
  * @param version (Props | undefined): the stored source version, or undefined when it is gone.
- * @param asOf (Date | null): the point in time read, or null for now.
+ * @param asOf (AsOf | null): the point in time read, or null for now.
  * @return (boolean): true when its chunks may be quoted.
  */
-function quotable(version: Props | undefined, asOf: Date | null): boolean {
+function quotable(version: Props | undefined, asOf: ops.AsOf | null): boolean {
   if (version === undefined) return false;
-  if (asOf !== null && epochMicros(fromIso(version.event_time ?? version.created_at)!) > epochMicros(asOf)) {
+  if (
+    asOf !== null &&
+    (epochMicros(fromIso(version.event_time ?? version.created_at)!) > epochMicros(asOf.valid) ||
+      !ops.knownBy(fromIso(version.created_at), asOf.known))
+  ) {
     return false;
   }
-  const replaced = fromIso(version.replaced_at);
-  return replaced == null || (asOf !== null && epochMicros(replaced) > epochMicros(asOf));
+  if (asOf === null || asOf.known === null) {
+    const replaced = fromIso(version.replaced_at);
+    return replaced == null || (asOf !== null && epochMicros(replaced) > epochMicros(asOf.valid));
+  }
+  const known = epochMicros(asOf.known);
+  return !loads<Array<Record<string, string | null>>>(version.replacements_json, []).some(
+    (r) =>
+      epochMicros(fromIso(r.at)!) <= epochMicros(asOf.valid) &&
+      epochMicros(fromIso(r.known_at)!) <= known &&
+      !(r.until && epochMicros(fromIso(r.until)!) <= known),
+  );
 }
 
 async function collectPassages(
@@ -736,7 +756,7 @@ async function collectPassages(
   entities: Entity[],
   dist: Map<string, number>,
   queryTokens: Set<string>,
-  asOf: Date | null = null,
+  asOf: ops.AsOf | null = null,
 ): Promise<string[]> {
   const distOf = distanceIn(dist);
   const svDist = new Map<string, number>();
@@ -753,6 +773,7 @@ async function collectPassages(
       for (const row of rows) {
         const sv = row.source_version as string;
         if (!usable.get(sv)) continue;
+        if (asOf !== null && !ops.knownBy(fromIso(row.created_at), asOf.known)) continue;
         if (!svDist.has(sv)) svDist.set(sv, distOf(e.id));
         if (svDist.size >= MAX_PASSAGE_SOURCES) break;
       }
@@ -922,6 +943,7 @@ export interface RetrieveOptions {
   max_nodes?: number;
   budget_tokens?: number;
   as_of?: DateTimeInput | null;
+  known_at?: DateTimeInput | null;
   seeds?: SeedTier | null;
   skip_hubs?: boolean;
 }
@@ -933,18 +955,19 @@ const RETRIEVE_KEYS = keysOf<RetrieveOptions>({
   max_nodes: true,
   budget_tokens: true,
   as_of: true,
+  known_at: true,
   seeds: true,
   skip_hubs: true,
 });
 
 /**
- * Retrieve graph context for a query via keyword seeds and bounded traversal, optionally ranked by PageRank. Seeding climbs a ladder: "bm25" scores entities lexically; "synonyms" first adds the name of each schema entity type the query names by alias or synonym; "embeddings" also ranks entities by the graph embedder and fuses the two rankings. With as_of, the graph is read on the valid-time axis: each relation and preference at its version valid then, and an entity when it was stored by then or is an endpoint, subject, value, or about entity of one of those versions. Decisions effective by then are kept unless they name an entity not visible then, and passages come from source versions stored by then.
+ * Retrieve graph context for a query via keyword seeds and bounded traversal, optionally ranked by PageRank. Seeding climbs a ladder: "bm25" scores entities lexically; "synonyms" first adds the name of each schema entity type the query names by alias or synonym; "embeddings" also ranks entities by the graph embedder and fuses the two rankings. With as_of, the graph is read on the valid-time axis: each relation and preference at its version valid then, and an entity when it was stored by then or is an endpoint, subject, value, or about entity of one of those versions. Decisions effective by then are kept unless they name an entity not visible then, and passages come from source versions stored by then. With known_at, only what was written by that time counts: later versions, invalidations, certifications, entities, decisions, and source versions are left out, so the read shows what the graph held then.
  *
  * @param graph (GraphAccess): the graph to read.
  * @param query (string): the natural-language query to seed from.
  * Entities with at least HUB_DEGREE relations reached by the walk are listed in hubs, and a context line through one that is not a seed is marked "(via hub)": a link through a hub is weak evidence of a real connection.
  *
- * @param options (RetrieveOptions): the strategy and seeding tier (the graph's defaults when null), hop depth, seed count, entity cap, token budget, and as_of, the point in time to read the graph at (no offset means UTC; null for now), and skip_hubs, to not walk through hubs other than the seeds.
+ * @param options (RetrieveOptions): the strategy and seeding tier (the graph's defaults when null), hop depth, seed count, entity cap, token budget, and as_of, the point in time to read the graph at (no offset means UTC; null for now), known_at, to read only what the graph held at that time (alone, it also sets as_of), and skip_hubs, to not walk through hubs other than the seeds.
  * @return (RetrievalResult): the seeds, the collected subgraph, the assembled context, and the hubs reached.
  */
 export async function retrieve(
@@ -965,7 +988,7 @@ export async function retrieve(
   }
   const skipHubs = options.skip_hubs ?? false;
   requireBool("skip_hubs", skipHubs);
-  const asOf = parseTime(options.as_of, "as_of");
+  const asOf = ops.parseAsOf(options.as_of, options.known_at);
   const { depth, k, max_nodes: maxNodes, budget_tokens: budgetTokens } = { ...RETRIEVE_DEFAULTS, ...options };
   const strategy = (options.strategy ?? graph.tiers.strategy).toLowerCase();
   if (!(STRATEGIES as readonly string[]).includes(strategy)) {
@@ -991,7 +1014,7 @@ interface RunOptions {
   k: number;
   maxNodes: number;
   budgetTokens: number;
-  asOf: Date | null;
+  asOf: ops.AsOf | null;
   seeds: SeedTier;
   skipHubs: boolean;
 }
@@ -1287,7 +1310,7 @@ export function answerability(
  * @param schema (ParsedSchema | null): the graph's schema.
  * @param question (string): the question.
  * @param terms (string[] | null): the terms to check, or null to take them from the question.
- * @param asOf (Date | null): judge the graph as it stood at this time, or null for now.
+ * @param asOf (AsOf | null): judge the graph as it stood at this time, or null for now.
  * @param depth (number): the most hops between matched entities.
  * @return (AnswerabilityReport): the coverage of each term, the connectivity, and the verdict.
  */
@@ -1297,7 +1320,7 @@ export async function checkAnswerable(
   schema: ParsedSchema | null,
   question: string,
   terms: string[] | null,
-  asOf: Date | null,
+  asOf: ops.AsOf | null,
   depth: number,
 ): Promise<AnswerabilityReport> {
   let entities = await scanEntities(store, ns);

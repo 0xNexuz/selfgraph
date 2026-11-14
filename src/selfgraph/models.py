@@ -22,6 +22,7 @@ __all__ = [
     "JsonValue",
     "Evidence",
     "Entity",
+    "Certification",
     "Relation",
     "Preference",
     "DecisionStep",
@@ -365,6 +366,12 @@ class Entity(BaseModel):
     relevance_at: datetime | None = None
 
 
+class Certification(BaseModel):
+    by: str
+    at: datetime
+    until: datetime | None = None
+
+
 class Relation(BaseModel):
     id: str
     revision: int
@@ -378,10 +385,12 @@ class Relation(BaseModel):
     source_count: int = 0
     invalidated_at: datetime | None = None
     invalidated_by: str | None = None
+    invalidated_known_at: datetime | None = None
     relevance: float | None = None
     relevance_at: datetime | None = None
     certified_at: datetime | None = None
     certified_by: str | None = None
+    certifications: list[Certification] = Field(default_factory=list)
 
 
 class Preference(BaseModel):

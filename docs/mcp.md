@@ -76,7 +76,7 @@ default 50) and `[cursor]`.
 | Tool | Arguments |
 |------|-----------|
 | `check_readiness` | none ([readiness](trust.md#readiness)) |
-| `check_answerable` | `question`, `[terms]`, `[as_of]`, `[depth]` ([check_answerable](trust.md#check_answerable)) |
+| `check_answerable` | `question`, `[terms]`, `[as_of]`, `[known_at]`, `[depth]` ([check_answerable](trust.md#check_answerable)) |
 | `get_schema` | `[format]` (`selfgraph`, `neo4j`, or `ossie`) |
 | `insert_text` | `text`, `[source_id]`, `[event_time]`, `[metadata]`, `[resolver]`, `[contradiction]`, `[schema]`, `[schema_mode]`, `[instructions]`, `[prompts]`, `[replace_source]` |
 | `insert_facts` | `facts` (an object with `entities`, `relations`, `preferences`, `decisions`), `[source_id]`, `[event_time]`, `[resolver]`, `[contradiction]`, `[schema]`, `[schema_mode]` |
@@ -99,7 +99,7 @@ default 50) and `[cursor]`.
 | `update_decision` | `id`, `[title]`, `[steps]`, `[actor_entity]`, `[summary]`, `[rationale]`, `[outcome_entity]`, `[alternative_entities]`, `[status]`, `[event_time]`, `[clear]` |
 | `list_decisions` | `[actor_entity]`, `[status]` |
 | `get_decision`, `delete_decision` | `id` |
-| `retrieve` | `query`, `[strategy]`, `[depth]`, `[k]`, `[max_nodes]`, `[budget_tokens]`, `[as_of]`, `[seeds]`, `[skip_hubs]` |
+| `retrieve` | `query`, `[strategy]`, `[depth]`, `[k]`, `[max_nodes]`, `[budget_tokens]`, `[as_of]`, `[known_at]`, `[seeds]`, `[skip_hubs]` |
 | `run_cypher` | `query`, `[params]` |
 | `maintenance_decay` | `[half_life_days]`, `[now]`, `[dry_run]` |
 | `maintenance_prune` | `[min_relevance]`, `[older_than]`, `[types]`, `[relation_types]`, `[include_certified]`, `[dry_run]` |
@@ -117,7 +117,7 @@ default 50) and `[cursor]`.
 
 **Types.**
 
-- Time arguments (`event_time`, `as_of`, `now`, `older_than`) are ISO 8601 text,
+- Time arguments (`event_time`, `as_of`, `known_at`, `now`, `older_than`) are ISO 8601 text,
   read as the [CLI time flags](cli.md#arguments) are.
 - Boolean arguments (`dry_run`, `include_invalidated`, `newest_first`) accept only
   JSON `true` or `false`.

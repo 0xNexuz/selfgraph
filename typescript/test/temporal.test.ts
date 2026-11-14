@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 
 import {
   ConflictError,
+  type Extractor,
   ids,
   type LLMClient,
   NotFoundError,
@@ -405,6 +406,153 @@ function suite(spec: StoreSpec): void {
     await p.insert.text("Ann works at Acme.", { source_id: "note", event_time: at(2020) });
     expect((await p.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n")).toContain("Ann works at Acme.");
     expect((await p.retrieve("Ann Acme", { as_of: at(2019) })).context).not.toContain("Ann works at Acme.");
+  });
+
+  it("known_at reads what the graph held before a backdated correction", async () => {
+    const g = await graph("supersede");
+    const acme = await g.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: at(2024) });
+    const learned = await instant();
+    const globex = await g.relations.create("person:ann", "WORKS_AT", "company:globex", { event_time: at(2025) });
+    const held = async (options: object) => (await g.retrieve("Ann", options)).subgraph.relations;
+    const mid2025 = new Date(Date.UTC(2025, 5, 1));
+    expect((await held({ as_of: mid2025 })).map((r) => r.id)).toEqual([globex.id]);
+    const [then] = await held({ as_of: mid2025, known_at: learned });
+    expect([then!.id, then!.is_current, then!.invalidated_at, then!.invalidated_known_at]).toEqual([
+      acme.id,
+      true,
+      null,
+      null,
+    ]);
+    expect((await held({ known_at: learned })).map((r) => r.id)).toEqual([acme.id]);
+    expect((await held({ known_at: await instant() })).map((r) => r.id)).toEqual([globex.id]);
+    const [old] = await held({ as_of: new Date(Date.UTC(2024, 5, 1)) });
+    expect([old!.id, old!.is_current, old!.invalidated_by]).toEqual([acme.id, false, globex.id]);
+    expect(old!.invalidated_known_at!.getTime()).toBeGreaterThan(learned.getTime());
+    const report = await g.checkAnswerable("Ann Globex", { as_of: mid2025, known_at: learned });
+    expect([report.verdict, report.missing]).toEqual(["partial", ["globex"]]);
+    await expect(g.retrieve("Ann", { known_at: "soon" })).rejects.toThrow(/invalid known_at/);
+  });
+
+  it("known_at leaves out entities, decisions, certifications, revisions, and passages written later", async () => {
+    const g = open();
+    await g.insert.facts({ entities: PEOPLE });
+    const rel = await g.relations.create("person:ann", "WORKS_AT", "company:acme");
+    await g.insert.text("Ann works at Acme in Berlin.", { source_id: "note" });
+    const learned = await instant();
+    await g.relations.certify(rel.id, { by: "ops" });
+    await g.entities.create("Zed", "Person");
+    await g.decisions.create("Join Acme", { steps: [rel.id], actor_entity: "person:ann", event_time: at(2020) });
+    await g.relations.update(rel.id, { set_properties: { role: "cto" }, event_time: at(2020) });
+    await g.insert.text("Ann works at Acme in Paris.", { source_id: "note", replace_source: true });
+    const then = await g.retrieve("Ann Acme Zed Berlin Paris", { as_of: at(2099), known_at: learned });
+    expect(then.subgraph.entities.map((e) => e.id)).not.toContain("person:zed");
+    expect(then.subgraph.decisions).toEqual([]);
+    const [held] = then.subgraph.relations.filter((r) => r.id === rel.id);
+    expect([held!.revision, held!.is_current, held!.certified_at]).toEqual([1, true, null]);
+    expect(then.context).not.toContain("[certified]");
+    expect(then.context.split("\n")).toContain("Ann works at Acme in Berlin.");
+    expect(then.context).not.toContain("Ann works at Acme in Paris.");
+    const later = await g.retrieve("Ann Acme Zed Berlin Paris", { as_of: at(2099) });
+    expect(later.subgraph.entities.map((e) => e.id)).toContain("person:zed");
+    expect(later.subgraph.decisions.map((d) => d.title)).toEqual(["Join Acme"]);
+    expect(later.context.split("\n")).toContain("Ann works at Acme in Paris.");
+    expect(later.context).not.toContain("Ann works at Acme in Berlin.");
+    expect((await g.checkAnswerable("Zed", { known_at: learned })).verdict).toBe("not_answerable");
+    expect((await g.checkAnswerable("Zed", { known_at: await instant() })).verdict).toBe("answerable");
+  });
+
+  it("known_at keeps passages through reinserts and replacement history", async () => {
+    const g = open();
+    await g.insert.facts({ entities: PEOPLE });
+    const berlin = "Ann works at Acme in Berlin.";
+    const paris = "Ann works at Acme in Paris.";
+    await g.insert.text(berlin, { source_id: "note" });
+    const first = await instant();
+    await g.insert.text(berlin, { source_id: "note" });
+    await g.insert.text(paris, { source_id: "note", replace_source: true });
+    const replaced = await instant();
+    await g.insert.text(berlin, { source_id: "note", replace_source: true });
+    const quoted = async (known: Date) => {
+      const lines = (await g.retrieve("Ann Acme Berlin Paris", { as_of: at(2099), known_at: known })).context.split(
+        "\n",
+      );
+      return [berlin, paris].filter((line) => lines.includes(line));
+    };
+    expect(await quoted(first)).toEqual([berlin]);
+    expect(await quoted(replaced)).toEqual([paris]);
+    expect(await quoted(await instant())).toEqual([berlin]);
+  });
+
+  it("known_at shows the certification in force then", async () => {
+    const g = open();
+    await g.insert.facts({ entities: PEOPLE });
+    const rel = await g.relations.create("person:ann", "WORKS_AT", "company:acme");
+    const first = await g.relations.certify(rel.id, { by: "alice" });
+    expect((await g.relations.certify(rel.id, { by: "alice" })).certified_at).toEqual(first.certified_at);
+    const alice = await instant();
+    await g.relations.certify(rel.id, { by: "bob" });
+    const bob = await instant();
+    await g.relations.uncertify(rel.id);
+    const held = async (known: Date) => {
+      const [r] = (await g.retrieve("Ann", { known_at: known })).subgraph.relations;
+      return [r!.certified_by, r!.certifications.map((c) => [c.by, c.until === null])];
+    };
+    expect(await held(alice)).toEqual(["alice", [["alice", true]]]);
+    expect(await held(bob)).toEqual([
+      "bob",
+      [
+        ["alice", false],
+        ["bob", true],
+      ],
+    ]);
+    expect(await held(await instant())).toEqual([
+      null,
+      [
+        ["alice", false],
+        ["bob", false],
+      ],
+    ]);
+  });
+
+  it("known_at counts only the sources recorded by then", async () => {
+    const g = open();
+    await g.insert.facts({ entities: PEOPLE });
+    await g.insert.facts({ relations: [annAt("acme")] } as never, { source_id: "one" });
+    const [written] = (await g.relations.list()).items;
+    expect(
+      (await g.retrieve("Ann", { known_at: written!.created_at })).subgraph.relations.map((r) => r.source_count),
+    ).toEqual([1]);
+    const learned = await instant();
+    await g.insert.facts({ relations: [annAt("acme")] } as never, { source_id: "two" });
+    const counts = async (options: object) =>
+      (await g.retrieve("Ann", options)).subgraph.relations.map((r) => r.source_count);
+    expect(await counts({})).toEqual([2]);
+    expect(await counts({ known_at: learned })).toEqual([1]);
+  });
+
+  it("reinserting the same text keeps the version as first stored", async () => {
+    const g = open();
+    await g.insert.facts({ entities: PEOPLE });
+    await g.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: at(2020) });
+    await g.insert.text("Ann joined Acme.", { source_id: "dated", event_time: at(2020) });
+    await g.insert.text("Ann joined Acme.", { source_id: "dated", event_time: at(2024) });
+    const lines = (await g.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n");
+    expect(lines).toContain("Ann joined Acme.");
+  });
+
+  it("known_at quotes a passage only once its evidence was recorded", async () => {
+    let names = ["Ann"];
+    const extractor: Extractor = {
+      extract: async () => ({ entities: names.map((name) => ({ type: "Person", name })) }),
+    };
+    const g = open({ extractor });
+    await g.entities.create("Bob", "Person");
+    await g.insert.text("Ann met Bob.", { source_id: "note" });
+    const learned = await instant();
+    names = ["Ann", "Bob"];
+    await g.insert.text("Ann met Bob.", { source_id: "note" });
+    expect((await g.retrieve("Bob")).context).toContain("Ann met Bob.");
+    expect((await g.retrieve("Bob", { known_at: learned })).context).not.toContain("Ann met Bob.");
   });
 
   it("a supersede rerun enforces the cap, keeps the newest fact, and warns once per retired relation", async () => {

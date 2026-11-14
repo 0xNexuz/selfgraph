@@ -299,6 +299,7 @@ class SelfGraph:
         max_nodes: int = 200,
         budget_tokens: int = 3000,
         as_of: datetime | str | None = None,
+        known_at: datetime | str | None = None,
         seeds: tiers.SeedTier | None = None,
         skip_hubs: bool = False,
     ) -> RetrievalResult:
@@ -313,6 +314,8 @@ class SelfGraph:
         @param budget_tokens (int): the assembled-context token budget.
         @param as_of (datetime | str | None): a point in time to read the graph at on the valid-time axis (relations and
             preferences valid then, with their entities; naive means UTC), or None for now.
+        @param known_at (datetime | str | None): read only what the graph held at this time: versions, retirements,
+            and certifications written later are left out (naive means UTC). Alone, it also sets as_of.
         @param seeds (SeedTier | None): how to seed: "bm25", "synonyms" to also expand schema synonyms, "embeddings"
             to fuse embedder similarity with BM25, or None for the graph's tier.
         @param skip_hubs (bool): do not walk through hubs, entities with at least 50 relations, other than seeds.
@@ -330,7 +333,7 @@ class SelfGraph:
         for name, value in (("depth", depth), ("k", k), ("max_nodes", max_nodes), ("budget_tokens", budget_tokens)):
             _ops._require_int(name, value)
         _ops._require_bool("skip_hubs", skip_hubs)
-        as_of = self._as_of(as_of)
+        as_of = _ops.parse_as_of(as_of, known_at)
         await self._ensure_ready()
         return await _retrieve(
             self,
@@ -345,22 +348,13 @@ class SelfGraph:
             skip_hubs=skip_hubs,
         )
 
-    @staticmethod
-    def _as_of(value: datetime | str | None) -> datetime | None:
-        """Parse an as_of argument, reading a naive time as UTC.
-
-        @param value (datetime | str | None): a datetime, ISO 8601 text, or None.
-        @return (datetime | None): the aware time, or None.
-        """
-        parsed = _ops.parse_time(value, "as_of")
-        return None if parsed is None else aware(parsed)
-
     async def check_answerable(
         self,
         question: str,
         *,
         terms: list[str] | None = None,
         as_of: datetime | str | None = None,
+        known_at: datetime | str | None = None,
         depth: int = 3,
     ) -> AnswerabilityReport:
         """Judge, without an LLM, whether the graph holds what a question asks about, before answering from it.
@@ -376,6 +370,7 @@ class SelfGraph:
         @param terms (list[str] | None): the phrases to check, such as a model extracted, or None to take each run of
             question words that spells a stored name, and every other content word.
         @param as_of (datetime | str | None): judge the graph as it stood at this time (naive means UTC), or None.
+        @param known_at (datetime | str | None): judge only what the graph held at this time; alone, it also sets as_of.
         @param depth (int): the most hops between matched entities.
         @return (AnswerabilityReport): the verdict, each term's coverage, the missing terms, and the hub-only pairs.
         """
@@ -389,7 +384,7 @@ class SelfGraph:
         _ops._require_int("depth", depth)
         if depth < 1:
             raise ValidationError(f"depth must be >= 1, got {depth}")
-        as_of = self._as_of(as_of)
+        as_of = _ops.parse_as_of(as_of, known_at)
         await self._ensure_ready()
         report = await _check_answerable(self, question, terms=terms, as_of=as_of, depth=depth)
         if report.missing and self._seeds == "embeddings":
@@ -507,7 +502,7 @@ class SelfGraph:
                 tx, self.namespace, **fields, schema_check=check, contradiction=mode, caps=caps, warnings=found
             )
             if judged and self._llm is not None:
-                found.extend(await judge_contradictions(tx, self.namespace, self._llm, [rel], caps))
+                found.extend(await judge_contradictions(tx, self.namespace, self._llm, [rel], caps, rel.created_at))
             return rel
 
         rel = await self._in_tx(create)
@@ -627,13 +622,15 @@ class SelfGraph:
             )
             if judged and self._llm is not None:
                 fresh = [r for r in relations if r.created_at == created_at]
-                found.extend(await judge_contradictions(tx, ns, self._llm, fresh, caps))
+                found.extend(await judge_contradictions(tx, ns, self._llm, fresh, caps, created_at))
 
             diff = None
             if replace_source and source_id is not None and source_version is not None:
                 produced = {r.id for r in relations}
                 at = aware(default_event_time or created_at)
-                retired, notes = await _ops.replace_source(tx, ns, source_id, source_version, prior - produced, at)
+                retired, notes = await _ops.replace_source(
+                    tx, ns, source_id, source_version, prior - produced, at, created_at
+                )
                 found.extend(notes)
                 diff = SourceDiff(kept=sorted(produced & prior), added=sorted(produced - prior), retired=retired)
 

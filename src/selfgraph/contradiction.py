@@ -45,6 +45,7 @@ async def judge_contradictions(
     llm: LLMClient,
     written: list[Relation],
     caps: Mapping[str, _ops.RelationCap] | None,
+    known: datetime,
 ) -> list[InsertWarning]:
     """Ask the LLM which older relations each written relation makes untrue, and retire those.
 
@@ -57,6 +58,7 @@ async def judge_contradictions(
     @param llm (LLMClient): the LLM to ask.
     @param written (list[Relation]): the relations a write just stored.
     @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits by relation type.
+    @param known (datetime): the timestamp of the write, stamped on each retirement.
     @return (list[InsertWarning]): one relation_superseded warning per retired relation, and one certified_kept warning
         per certified relation the LLM judged contradicted, which stays current.
     """
@@ -103,7 +105,7 @@ async def judge_contradictions(
                     f"{rid} to contradict it"
                 )
                 kept.append(InsertWarning(code="certified_kept", message=message))
-    retired = await _ops.retire_relations(runner, ns, retirements)
+    retired = await _ops.retire_relations(runner, ns, retirements, known)
     return kept + [
         InsertWarning(
             code="relation_superseded",

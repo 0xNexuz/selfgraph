@@ -117,6 +117,12 @@ export interface Entity {
   relevance_at: Date | null;
 }
 
+export interface Certification {
+  by: string;
+  at: Date;
+  until: Date | null;
+}
+
 export interface Relation {
   id: string;
   revision: number;
@@ -130,10 +136,12 @@ export interface Relation {
   source_count: number;
   invalidated_at: Date | null;
   invalidated_by: string | null;
+  invalidated_known_at: Date | null;
   relevance: number | null;
   relevance_at: Date | null;
   certified_at: Date | null;
   certified_by: string | null;
+  certifications: Certification[];
 }
 
 export interface Preference {

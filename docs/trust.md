@@ -82,7 +82,9 @@ which says nothing about the stored facts (see [Certification](#certification)
 for facts). With [embedding seeds](retrieval.md#how-it-works), a report with
 missing terms carries a `note` that the check is lexical, since `retrieve` may
 still find them by meaning. `as_of` judges the graph as it stood then, with the
-[as_of rules](retrieval.md#as-of-a-point-in-time). The check reads every entity
+[as_of rules](retrieval.md#as-of-a-point-in-time), and `known_at` judges only what
+it held at that time ([As the graph knew it](retrieval.md#as-the-graph-knew-it)).
+The check reads every entity
 and relation in the namespace.
 
 ## Hubs
@@ -123,6 +125,11 @@ person reviewed. A certified relation:
   until it is uncertified;
 - comes first among equally close relations in `retrieve` context, marked
   `[certified]`.
+
+Certifying again by the same person changes nothing; certifying by someone else
+replaces the mark. Each mark is kept in the version's `certifications`, as
+`{by, at, until}`, where `until` is when it was replaced or removed, so a
+[`known_at`](retrieval.md#as-the-graph-knew-it) read shows the mark in force then.
 
 The mark belongs to the version: a change to its properties or event time
 writes a new revision that starts uncertified, and an insert that does so warns

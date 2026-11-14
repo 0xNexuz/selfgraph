@@ -1200,7 +1200,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         if withdrawn and await runner.node_exists(ns, L_SOURCE_VERSION, versions[0].invalidated_by):
             edge = await runner.get_current_edge(ns, rel.id)
             [rel] = await _ops.retire_relations(
-                runner, ns, [(edge, versions[0].invalidated_by, versions[0].invalidated_at)]
+                runner, ns, [(edge, versions[0].invalidated_by, versions[0].invalidated_at)], at
             )
         restored[rw.id] = rel.id
         relations.append(rel)

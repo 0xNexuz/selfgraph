@@ -154,7 +154,8 @@ await graph.relations.evidence(rel.id)        # Page of Evidence, all versions
 - A custom `id` for a relation, preference, or decision must be its kind, a
   colon, and a non-empty name, as in `relation:jane-acme`.
 - `certify(id, by=...)` marks the current version as verified (`certified_at`,
-  `certified_by`) and `uncertify(id)` clears it. See
+  `certified_by`) and `uncertify(id)` clears it. Past marks stay in
+  `certifications`. See
   [Certification](trust.md#certification).
 
 **Retired relations.** A [contradiction](schema.md#contradictions) can retire a

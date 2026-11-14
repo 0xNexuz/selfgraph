@@ -45,7 +45,6 @@ import { clamp, type ExtractionTier, type Level, PRESETS, requireLevel, requireT
 import {
   checkOptions,
   keysOf,
-  parseTime,
   requireInt,
   requireJsonMapping,
   requireList,
@@ -56,11 +55,12 @@ import {
 export interface CheckAnswerableOptions {
   terms?: readonly string[] | null;
   as_of?: DateTimeInput | null;
+  known_at?: DateTimeInput | null;
   depth?: number;
 }
 
 const LEXICAL_NOTE = "the check is lexical; embedding seeds may still find what the missing terms ask about";
-const ANSWERABLE_KEYS = keysOf<CheckAnswerableOptions>({ terms: true, as_of: true, depth: true });
+const ANSWERABLE_KEYS = keysOf<CheckAnswerableOptions>({ terms: true, as_of: true, known_at: true, depth: true });
 
 export interface SelfGraphOptions {
   llm?: LLMArg;
@@ -257,7 +257,7 @@ export class SelfGraph {
    * Retrieve graph context for a query via keyword seeds and bounded traversal.
    *
    * @param query (string): the natural-language query to seed from.
-   * @param options (RetrieveOptions): strategy ("bfs", "dfs", or "ppr"; the level's by default), seeds ("bm25", "synonyms" to also expand schema synonyms, or "embeddings" to fuse embedder similarity with BM25; the graph's tier by default), depth, k, max_nodes, budget_tokens, and as_of (read on the valid-time axis: relations and preferences valid then, with their entities), and skip_hubs (do not walk through hubs, entities with at least 50 relations, other than seeds).
+   * @param options (RetrieveOptions): strategy ("bfs", "dfs", or "ppr"; the level's by default), seeds ("bm25", "synonyms" to also expand schema synonyms, or "embeddings" to fuse embedder similarity with BM25; the graph's tier by default), depth, k, max_nodes, budget_tokens, and as_of (read on the valid-time axis: relations and preferences valid then, with their entities), known_at (read only what the graph held at that time; alone, it also sets as_of), and skip_hubs (do not walk through hubs, entities with at least 50 relations, other than seeds).
    * @return (RetrievalResult): the seeds, the collected subgraph, the assembled context, and the hubs reached.
    */
   async retrieve(query: string, options: RetrieveOptions = {}): Promise<RetrievalResult> {
@@ -270,7 +270,7 @@ export class SelfGraph {
    * Each term of the question (or each given term) is matched against entity names and aliases, then entity types, definitions, relation types, and property and preference keys; a schema term covers a word only when the graph holds something of it. Entities matched by different terms must connect within depth hops, and not only through a hub. The verdict is answerable, partial (some terms missing), uncertain (all covered but not connected, or only through a hub), or not_answerable (nothing covered). With embedding seeds, a report with missing terms carries a note that the check is lexical.
    *
    * @param question (string): the question.
-   * @param options (CheckAnswerableOptions): terms, the phrases to check (else each run of question words that spells a stored name, and every other content word); as_of, judge the graph as it stood then (no offset means UTC); depth, the most hops between matched entities (default 3).
+   * @param options (CheckAnswerableOptions): terms, the phrases to check (else each run of question words that spells a stored name, and every other content word); as_of, judge the graph as it stood then (no offset means UTC); known_at, judge only what the graph held at that time (alone, it also sets as_of); depth, the most hops between matched entities (default 3).
    * @return (AnswerabilityReport): the verdict, each term's coverage, the missing terms, and the hub-only pairs.
    */
   async checkAnswerable(question: string, options: CheckAnswerableOptions = {}): Promise<AnswerabilityReport> {
@@ -289,7 +289,7 @@ export class SelfGraph {
     const depth = options.depth ?? 3;
     requireInt("depth", depth);
     if (depth < 1) throw new ValidationError(`depth must be >= 1, got ${depth}`);
-    const asOf = parseTime(options.as_of, "as_of");
+    const asOf = ops.parseAsOf(options.as_of, options.known_at);
     const report = await this.graph.read((store, ns) =>
       checkAnswerable(store, ns, this.schema, question, terms, asOf, depth),
     );

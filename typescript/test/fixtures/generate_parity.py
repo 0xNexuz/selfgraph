@@ -7,12 +7,21 @@ from pydantic import BaseModel
 from selfgraph import _serde, ids
 from selfgraph._export import obsidian_vault
 from selfgraph._maintenance import lint, relevance_score
-from selfgraph._ops import Contradictions, version_as_of
+from selfgraph._ops import AsOf, Contradictions, version_as_of
 from selfgraph.extraction import chunking
 from selfgraph.extraction.basic import _regex_extract
 from selfgraph.extraction.extractor import LLMExtractor, _is_noise_name, _RelOut
 from selfgraph.mcp.server import _is_blocked_query
-from selfgraph.models import DecisionStep, DecisionTrace, Entity, EntityInput, Evidence, Preference, Relation
+from selfgraph.models import (
+    Certification,
+    DecisionStep,
+    DecisionTrace,
+    Entity,
+    EntityInput,
+    Evidence,
+    Preference,
+    Relation,
+)
 from selfgraph.resolution import DefaultResolver, distinct_names, jaro_winkler, name_similarity, token_jaccard
 from selfgraph.resources._common import encode_cursor
 from selfgraph.retrieval import _fold, _format_props, _grep_score, _ppr_rank, _select_seeds, _tokens, answerability
@@ -423,7 +432,9 @@ def day(n, micros=0):
     return EPOCH + timedelta(days=n, microseconds=micros)
 
 
-def version(revision, created, *, event=None, invalidated=None, by=None, rid="relation:r", ends=None):
+def version(
+    revision, created, *, event=None, invalidated=None, by=None, known=None, certified=None, rid="relation:r", ends=None
+):
     """Build a relation version for the temporal cases.
 
     @param revision (int): the revision.
@@ -431,6 +442,8 @@ def version(revision, created, *, event=None, invalidated=None, by=None, rid="re
     @param event (datetime | None): the event time.
     @param invalidated (datetime | None): when a contradiction retired it.
     @param by (str | None): the superseding relation id.
+    @param known (datetime | None): when the retirement was written.
+    @param certified (datetime | None): when it was certified.
     @param rid (str): the relation id.
     @param ends (tuple[str, str, str] | None): (from, type, to), default person:ann WORKS_AT company:acme.
     @return (Relation): the version.
@@ -447,6 +460,10 @@ def version(revision, created, *, event=None, invalidated=None, by=None, rid="re
         is_current=invalidated is None,
         invalidated_at=invalidated,
         invalidated_by=by,
+        invalidated_known_at=known,
+        certified_at=certified,
+        certified_by=None if certified is None else "ops",
+        certifications=[] if certified is None else [Certification(by="ops", at=certified)],
     )
 
 
@@ -473,7 +490,7 @@ def as_of_cases():
         for probe in probes:
             for micros in (-1, 0):
                 at = day(probe, micros)
-                got = version_as_of(versions, at)
+                got = version_as_of(versions, AsOf(at))
                 picked[_serde.to_iso(at)] = None if got is None else got.revision
         out[name] = {"versions": [v.model_dump(mode="json") for v in versions], "picked": picked}
     pref = Preference(
@@ -489,8 +506,35 @@ def as_of_cases():
     )
     out["preference"] = {
         "versions": [pref.model_dump(mode="json")],
-        "picked": {_serde.to_iso(day(n)): getattr(version_as_of([pref], day(n)), "revision", None) for n in (-1, 0)},
+        "picked": {
+            _serde.to_iso(day(n)): getattr(version_as_of([pref], AsOf(day(n))), "revision", None) for n in (-1, 0)
+        },
     }
+    return out
+
+
+KNOWN_CASES = {
+    "backdated_correction": (
+        [version(1, day(0), invalidated=day(7), by="relation:globex", known=day(14))],
+        [(10, 10), (10, 14), (3, 14), (10, None)],
+    ),
+    "later_revision": ([version(1, day(0)), version(2, day(10), event=day(2))], [(5, 5), (5, 10), (5, None)]),
+    "certified_later": ([version(1, day(0), certified=day(6))], [(8, 4), (8, 6), (8, None)]),
+    "written_later": ([version(1, day(10), event=day(0))], [(5, 5), (5, 10)]),
+}
+
+
+def known_cases():
+    out = {}
+    for name, (versions, probes) in KNOWN_CASES.items():
+        picked = []
+        for valid, known in probes:
+            got = version_as_of(versions, AsOf(day(valid), None if known is None else day(known)))
+            seen = None
+            if got is not None:
+                seen = {k: getattr(got, k) for k in ("revision", "is_current", "invalidated_by", "certified_by")}
+            picked.append([_serde.to_iso(day(valid)), None if known is None else _serde.to_iso(day(known)), seen])
+        out[name] = {"versions": [v.model_dump(mode="json") for v in versions], "picked": picked}
     return out
 
 
@@ -1153,6 +1197,7 @@ def main():
         "extract": extract_cases(),
         "assemble": assemble_case(),
         "as_of": as_of_cases(),
+        "known_at": known_cases(),
         "contradictions": contradiction_cases(),
         "resolution": resolution_cases(),
         "relevance": [

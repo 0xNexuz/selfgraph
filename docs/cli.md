@@ -70,7 +70,7 @@ settings from the environment are ignored silently.
 | `mcp` | Runs the [MCP](mcp.md) server over stdio with the global flags. |
 | `schema` | Prints the active schema, or `null` with a hint on stderr. `schema import FILE` and `schema export` convert from and to a [Neo4j graph schema](schema.md#neo4j-graph-schema-interop); `schema export --to ossie` prints an [Apache Ossie ontology](schema.md#apache-ossie-export). Importing a file that is already a SelfGraph schema fails with a hint to pass it as `--schema`. |
 | `readiness` | Prints whether the store is reachable and the namespace holds data, with counts and lint ([readiness](trust.md#readiness)). |
-| `check-answerable` | Judges whether the graph holds what a question asks about. Unquoted words join into one question; `--term` (repeatable) checks given phrases instead, with `--as-of` and `--depth` ([check_answerable](trust.md#check_answerable)). |
+| `check-answerable` | Judges whether the graph holds what a question asks about. Unquoted words join into one question; `--term` (repeatable) checks given phrases instead, with `--as-of`, `--known-at`, and `--depth` ([check_answerable](trust.md#check_answerable)). |
 | `export obsidian DIR` | Writes the namespace into `DIR` as an Obsidian vault, overwriting notes of the same name ([Export to Obsidian](retrieval.md#export-to-obsidian)). |
 | `query` | Runs one raw Cypher statement in the backend's own dialect. See [`query`](#query). |
 | `retrieve` | Retrieves context for a query. See [`retrieve`](#retrieve). |
@@ -103,6 +103,7 @@ Unquoted words join into one query, so `retrieve who works at Acme` works. See
 | `--max-nodes` | 200 | Entity cap. |
 | `--budget-tokens` | 3000 | Context budget. |
 | `--as-of` | | Read the graph at this time. |
+| `--known-at` | | Read only what the graph held at this time. See [As the graph knew it](retrieval.md#as-the-graph-knew-it). |
 | `--skip-hubs` | | Do not walk through [hubs](trust.md#hubs). |
 | `--context-only` | | Print just the context text instead of the JSON result. |
 
@@ -129,7 +130,7 @@ Unquoted words join into one query, so `retrieve who works at Acme` works. See
 is valid JSON. So `zip=12345` stores the number. Write `zip='"12345"'` to keep
 text. A pair without `=` fails naming the flag (`--prop expects KEY=VALUE`).
 
-**Time flags** (`--event-time`, `--as-of`, `--now`, `--older-than`) take ISO 8601
+**Time flags** (`--event-time`, `--as-of`, `--known-at`, `--now`, `--older-than`) take ISO 8601
 text. No offset, or a bare date, means UTC. Times in output are UTC with a `Z`
 suffix. `insert facts --event-time` is the default for items without their
 own.

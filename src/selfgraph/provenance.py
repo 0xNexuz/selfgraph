@@ -37,7 +37,7 @@ async def record_source(
     @param parsed_text (str): the parsed document text to chunk and record.
     @param media_type (str): the media type of the source content.
     @param metadata (dict[str, Any] | None): optional metadata stored on the version.
-    @param created_at (datetime): the insert timestamp stored on the version node.
+    @param created_at (datetime): the insert timestamp; content stored before keeps every field of its first insert.
     @param event_time (datetime | None): when the content took effect, stored on the version node when set.
     @return (tuple[str, list[Evidence]]): the source version id and one source-level evidence (chunk_id None).
     """
@@ -45,20 +45,21 @@ async def record_source(
     source_node = _ids.source_node_id(source_id)
 
     await runner.upsert_node(ns, L_SOURCE, source_node, {"id": source_node, "ns": ns, "source_id": source_id})
-    await runner.upsert_node(
-        ns,
-        L_SOURCE_VERSION,
-        sv,
-        {
-            "id": sv,
-            "ns": ns,
-            "source_id": source_id,
-            "media_type": media_type,
-            "created_at": to_iso(created_at),
-            "event_time": to_iso(event_time),
-            "metadata_json": json.dumps(metadata or {}, sort_keys=True, default=str),
-        },
-    )
+    if await runner.get_node(ns, L_SOURCE_VERSION, sv) is None:
+        await runner.upsert_node(
+            ns,
+            L_SOURCE_VERSION,
+            sv,
+            {
+                "id": sv,
+                "ns": ns,
+                "source_id": source_id,
+                "media_type": media_type,
+                "created_at": to_iso(created_at),
+                "event_time": to_iso(event_time),
+                "metadata_json": json.dumps(metadata or {}, sort_keys=True, default=str),
+            },
+        )
     await runner.create_edge(
         ns,
         R_HAS_VERSION,

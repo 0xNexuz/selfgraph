@@ -243,13 +243,14 @@ Facts are ranked by effective time (`event_time`, else when the version was
 written), then by higher revision, then by later `created_at`. So a `create`
 without `event_time` takes effect now, and on equal times the later write wins.
 
-A retired relation keeps its revision and gains three fields:
+A retired relation keeps its revision and gains four fields:
 
 | Field | Value |
 |-------|-------|
 | `is_current` | `False` |
 | `invalidated_by` | The fact that displaced it in time order: the `max_count`-th newer fact at that endpoint, retired history included. With `max_count` 1, that is the next newer one. |
 | `invalidated_at` | That fact's effective time. |
+| `invalidated_known_at` | When the retirement was written. A [`known_at`](retrieval.md#as-the-graph-knew-it) read before it shows the relation as current. |
 
 Example: with facts from 2019, 2020, and 2022, the 2019 one is invalidated by the
 2020 one at 2020. An `as_of` of 2020-06 shows only the 2020 fact.

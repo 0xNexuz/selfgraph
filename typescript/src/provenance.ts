@@ -12,7 +12,7 @@ import { evidenceOf } from "./serde.js";
  *
  * @param runner (GraphPrimitives): the graph runner.
  * @param ns (string): the namespace.
- * @param args ({ source_id: string; parsed_text: string; media_type: string; metadata: JsonObject | null; created_at: Date; event_time?: Date | null }): the source id, parsed text, media type, metadata, insert timestamp, and the time the content took effect.
+ * @param args ({ source_id: string; parsed_text: string; media_type: string; metadata: JsonObject | null; created_at: Date; event_time?: Date | null }): the source id, parsed text, media type, metadata, insert timestamp (content stored before keeps every field of its first insert), and the time the content took effect.
  * @return ([string, Evidence[]]): the source version id and the base evidence.
  */
 export async function recordSource(
@@ -32,15 +32,17 @@ export async function recordSource(
   const sourceNode = ids.sourceNodeId(sourceId);
 
   await runner.upsertNode(ns, L_SOURCE, sourceNode, { id: sourceNode, ns, source_id: sourceId });
-  await runner.upsertNode(ns, L_SOURCE_VERSION, sv, {
-    id: sv,
-    ns,
-    source_id: sourceId,
-    media_type: args.media_type,
-    created_at: toIso(args.created_at),
-    event_time: toIso(args.event_time),
-    metadata_json: pyJsonDumps(args.metadata ?? {}, { sortKeys: true, default: pyStr }),
-  });
+  if ((await runner.getNode(ns, L_SOURCE_VERSION, sv)) === null) {
+    await runner.upsertNode(ns, L_SOURCE_VERSION, sv, {
+      id: sv,
+      ns,
+      source_id: sourceId,
+      media_type: args.media_type,
+      created_at: toIso(args.created_at),
+      event_time: toIso(args.event_time),
+      metadata_json: pyJsonDumps(args.metadata ?? {}, { sortKeys: true, default: pyStr }),
+    });
+  }
   await runner.createEdge(ns, R_HAS_VERSION, L_SOURCE, sourceNode, L_SOURCE_VERSION, sv, {
     ns,
     id: childEdgeId(R_HAS_VERSION, sv),

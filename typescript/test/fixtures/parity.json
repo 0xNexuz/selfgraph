@@ -3566,10 +3566,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:b>c",
@@ -3584,10 +3586,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:c>d",
@@ -3602,10 +3606,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3643,10 +3649,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:hub>y",
@@ -3661,10 +3669,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:hub>z",
@@ -3679,10 +3689,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:w>hub",
@@ -3697,10 +3709,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3743,10 +3757,12 @@
      "source_count": 3,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:a>c",
@@ -3761,10 +3777,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:b>d",
@@ -3779,10 +3797,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:c>d",
@@ -3797,10 +3817,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:d>e",
@@ -3815,10 +3837,12 @@
      "source_count": 1,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3860,10 +3884,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3898,10 +3924,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:a>b",
@@ -3916,10 +3944,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3953,10 +3983,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -3996,10 +4028,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:b>m",
@@ -4014,10 +4048,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:a>n2",
@@ -4032,10 +4068,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "r:b>n2",
@@ -4050,10 +4088,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "ranks": {
@@ -4938,10 +4978,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "relation:r",
@@ -4956,10 +4998,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -4990,10 +5034,12 @@
      "source_count": 0,
      "invalidated_at": "2024-01-06T00:00:00Z",
      "invalidated_by": "relation:x",
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -5020,10 +5066,12 @@
      "source_count": 0,
      "invalidated_at": "2024-01-06T00:00:00Z",
      "invalidated_by": "relation:x",
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "relation:r",
@@ -5038,10 +5086,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -5070,10 +5120,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "relation:r",
@@ -5088,10 +5140,12 @@
      "source_count": 0,
      "invalidated_at": "2024-01-21T00:00:00Z",
      "invalidated_by": "relation:x",
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -5122,10 +5176,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "relation:r",
@@ -5140,10 +5196,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -5166,10 +5224,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     },
     {
      "id": "relation:r",
@@ -5184,10 +5244,12 @@
      "source_count": 0,
      "invalidated_at": null,
      "invalidated_by": null,
+     "invalidated_known_at": null,
      "relevance": null,
      "relevance_at": null,
      "certified_at": null,
-     "certified_by": null
+     "certified_by": null,
+     "certifications": []
     }
    ],
    "picked": {
@@ -5219,6 +5281,243 @@
     "2023-12-31T00:00:00+00:00": null,
     "2024-01-01T00:00:00+00:00": 1
    }
+  }
+ },
+ "known_at": {
+  "backdated_correction": {
+   "versions": [
+    {
+     "id": "relation:r",
+     "revision": 1,
+     "from_entity": "person:ann",
+     "type": "WORKS_AT",
+     "to_entity": "company:acme",
+     "properties": {},
+     "event_time": null,
+     "created_at": "2024-01-01T00:00:00Z",
+     "is_current": false,
+     "source_count": 0,
+     "invalidated_at": "2024-01-08T00:00:00Z",
+     "invalidated_by": "relation:globex",
+     "invalidated_known_at": "2024-01-15T00:00:00Z",
+     "relevance": null,
+     "relevance_at": null,
+     "certified_at": null,
+     "certified_by": null,
+     "certifications": []
+    }
+   ],
+   "picked": [
+    [
+     "2024-01-11T00:00:00+00:00",
+     "2024-01-11T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ],
+    [
+     "2024-01-11T00:00:00+00:00",
+     "2024-01-15T00:00:00+00:00",
+     null
+    ],
+    [
+     "2024-01-04T00:00:00+00:00",
+     "2024-01-15T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": false,
+      "invalidated_by": "relation:globex",
+      "certified_by": null
+     }
+    ],
+    [
+     "2024-01-11T00:00:00+00:00",
+     null,
+     null
+    ]
+   ]
+  },
+  "later_revision": {
+   "versions": [
+    {
+     "id": "relation:r",
+     "revision": 1,
+     "from_entity": "person:ann",
+     "type": "WORKS_AT",
+     "to_entity": "company:acme",
+     "properties": {},
+     "event_time": null,
+     "created_at": "2024-01-01T00:00:00Z",
+     "is_current": true,
+     "source_count": 0,
+     "invalidated_at": null,
+     "invalidated_by": null,
+     "invalidated_known_at": null,
+     "relevance": null,
+     "relevance_at": null,
+     "certified_at": null,
+     "certified_by": null,
+     "certifications": []
+    },
+    {
+     "id": "relation:r",
+     "revision": 2,
+     "from_entity": "person:ann",
+     "type": "WORKS_AT",
+     "to_entity": "company:acme",
+     "properties": {},
+     "event_time": "2024-01-03T00:00:00Z",
+     "created_at": "2024-01-11T00:00:00Z",
+     "is_current": true,
+     "source_count": 0,
+     "invalidated_at": null,
+     "invalidated_by": null,
+     "invalidated_known_at": null,
+     "relevance": null,
+     "relevance_at": null,
+     "certified_at": null,
+     "certified_by": null,
+     "certifications": []
+    }
+   ],
+   "picked": [
+    [
+     "2024-01-06T00:00:00+00:00",
+     "2024-01-06T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ],
+    [
+     "2024-01-06T00:00:00+00:00",
+     "2024-01-11T00:00:00+00:00",
+     {
+      "revision": 2,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ],
+    [
+     "2024-01-06T00:00:00+00:00",
+     null,
+     {
+      "revision": 2,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ]
+   ]
+  },
+  "certified_later": {
+   "versions": [
+    {
+     "id": "relation:r",
+     "revision": 1,
+     "from_entity": "person:ann",
+     "type": "WORKS_AT",
+     "to_entity": "company:acme",
+     "properties": {},
+     "event_time": null,
+     "created_at": "2024-01-01T00:00:00Z",
+     "is_current": true,
+     "source_count": 0,
+     "invalidated_at": null,
+     "invalidated_by": null,
+     "invalidated_known_at": null,
+     "relevance": null,
+     "relevance_at": null,
+     "certified_at": "2024-01-07T00:00:00Z",
+     "certified_by": "ops",
+     "certifications": [
+      {
+       "by": "ops",
+       "at": "2024-01-07T00:00:00Z",
+       "until": null
+      }
+     ]
+    }
+   ],
+   "picked": [
+    [
+     "2024-01-09T00:00:00+00:00",
+     "2024-01-05T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ],
+    [
+     "2024-01-09T00:00:00+00:00",
+     "2024-01-07T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": "ops"
+     }
+    ],
+    [
+     "2024-01-09T00:00:00+00:00",
+     null,
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": "ops"
+     }
+    ]
+   ]
+  },
+  "written_later": {
+   "versions": [
+    {
+     "id": "relation:r",
+     "revision": 1,
+     "from_entity": "person:ann",
+     "type": "WORKS_AT",
+     "to_entity": "company:acme",
+     "properties": {},
+     "event_time": "2024-01-01T00:00:00Z",
+     "created_at": "2024-01-11T00:00:00Z",
+     "is_current": true,
+     "source_count": 0,
+     "invalidated_at": null,
+     "invalidated_by": null,
+     "invalidated_known_at": null,
+     "relevance": null,
+     "relevance_at": null,
+     "certified_at": null,
+     "certified_by": null,
+     "certifications": []
+    }
+   ],
+   "picked": [
+    [
+     "2024-01-06T00:00:00+00:00",
+     "2024-01-06T00:00:00+00:00",
+     null
+    ],
+    [
+     "2024-01-06T00:00:00+00:00",
+     "2024-01-11T00:00:00+00:00",
+     {
+      "revision": 1,
+      "is_current": true,
+      "invalidated_by": null,
+      "certified_by": null
+     }
+    ]
+   ]
   }
  },
  "contradictions": {
@@ -5335,10 +5634,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5378,10 +5679,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5426,10 +5729,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": "2024-01-02T00:00:00Z",
-      "certified_by": "hr"
+      "certified_by": "hr",
+      "certifications": []
      }
     ],
     "admits": [
@@ -5494,10 +5799,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5542,10 +5849,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      },
      {
       "id": "relation:b",
@@ -5560,10 +5869,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5629,10 +5940,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5677,10 +5990,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      },
      {
       "id": "relation:b",
@@ -5695,10 +6010,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5775,10 +6092,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      },
      {
       "id": "relation:w",
@@ -5793,10 +6112,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5849,10 +6170,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -5937,10 +6260,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -6002,10 +6327,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      },
      {
       "id": "relation:b",
@@ -6020,10 +6347,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      },
      {
       "id": "relation:c",
@@ -6038,10 +6367,12 @@
       "source_count": 0,
       "invalidated_at": null,
       "invalidated_by": null,
+      "invalidated_known_at": null,
       "relevance": null,
       "relevance_at": null,
       "certified_at": null,
-      "certified_by": null
+      "certified_by": null,
+      "certifications": []
      }
     ],
     "admits": [
@@ -8471,10 +8802,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h0",
@@ -8489,10 +8822,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h1",
@@ -8507,10 +8842,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h2",
@@ -8525,10 +8862,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h3",
@@ -8543,10 +8882,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h4",
@@ -8561,10 +8902,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h5",
@@ -8579,10 +8922,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h6",
@@ -8597,10 +8942,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h7",
@@ -8615,10 +8962,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h8",
@@ -8633,10 +8982,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h9",
@@ -8651,10 +9002,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h10",
@@ -8669,10 +9022,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h11",
@@ -8687,10 +9042,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h12",
@@ -8705,10 +9062,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h13",
@@ -8723,10 +9082,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h14",
@@ -8741,10 +9102,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h15",
@@ -8759,10 +9122,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h16",
@@ -8777,10 +9142,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h17",
@@ -8795,10 +9162,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h18",
@@ -8813,10 +9182,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h19",
@@ -8831,10 +9202,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h20",
@@ -8849,10 +9222,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h21",
@@ -8867,10 +9242,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h22",
@@ -8885,10 +9262,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h23",
@@ -8903,10 +9282,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h24",
@@ -8921,10 +9302,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h25",
@@ -8939,10 +9322,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h26",
@@ -8957,10 +9342,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h27",
@@ -8975,10 +9362,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h28",
@@ -8993,10 +9382,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h29",
@@ -9011,10 +9402,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h30",
@@ -9029,10 +9422,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h31",
@@ -9047,10 +9442,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h32",
@@ -9065,10 +9462,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h33",
@@ -9083,10 +9482,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h34",
@@ -9101,10 +9502,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h35",
@@ -9119,10 +9522,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h36",
@@ -9137,10 +9542,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h37",
@@ -9155,10 +9562,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h38",
@@ -9173,10 +9582,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h39",
@@ -9191,10 +9602,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h40",
@@ -9209,10 +9622,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h41",
@@ -9227,10 +9642,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h42",
@@ -9245,10 +9662,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h43",
@@ -9263,10 +9682,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h44",
@@ -9281,10 +9702,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h45",
@@ -9299,10 +9722,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h46",
@@ -9317,10 +9742,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:h47",
@@ -9335,10 +9762,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:ha",
@@ -9353,10 +9782,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:hb",
@@ -9371,10 +9802,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:ny",
@@ -9389,10 +9822,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    }
   ],
   "keys": [
@@ -9877,10 +10312,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:ad",
@@ -9895,10 +10332,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    }
   ],
   "decisions": [
@@ -10422,10 +10861,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:x",
@@ -10440,10 +10881,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    },
    {
     "id": "relation:a",
@@ -10458,10 +10901,12 @@
     "source_count": 0,
     "invalidated_at": null,
     "invalidated_by": null,
+    "invalidated_known_at": null,
     "relevance": null,
     "relevance_at": null,
     "certified_at": null,
-    "certified_by": null
+    "certified_by": null,
+    "certifications": []
    }
   ],
   "preferences": [

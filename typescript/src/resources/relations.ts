@@ -110,7 +110,8 @@ export class Relations extends Resource {
         this.graph.schemaCheck,
         { ...conflicts, ...(strict && { contradiction: "strict" }), warnings },
       );
-      if (judged && llm !== null) warnings.push(...(await judgeContradictions(tx, ns, llm, [created], conflicts.caps)));
+      if (judged && llm !== null)
+        warnings.push(...(await judgeContradictions(tx, ns, llm, [created], conflicts.caps, created.created_at)));
       return created;
     });
     warnSchema(warnings);

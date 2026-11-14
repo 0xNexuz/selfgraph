@@ -187,7 +187,11 @@ async def check_readiness() -> dict[str, Any]:
 
 
 async def check_answerable(
-    question: str, terms: list[str] | None = None, as_of: str | None = None, depth: PositiveInt = 3
+    question: str,
+    terms: list[str] | None = None,
+    as_of: str | None = None,
+    known_at: str | None = None,
+    depth: PositiveInt = 3,
 ) -> dict[str, Any]:
     """Check whether the graph holds what a question asks about before retrieving or answering. terms are the
     key phrases of the question (names, types, attributes); pass them when you can, else they are read from the
@@ -195,9 +199,18 @@ async def check_answerable(
     with nothing stored for it is schema_only and counts as missing. verdict is answerable, partial (missing lists
     what the graph lacks), uncertain (matched entities are not connected within depth hops, or only through a hub),
     or not_answerable. A note means the check is lexical and embedding seeds may still find the missing terms, so
-    try retrieve before concluding. as_of (ISO 8601) judges the graph as it stood then."""
+    try retrieve before concluding. as_of (ISO 8601) judges the graph as it stood then; known_at judges only what
+    the graph held at that time, leaving out facts and corrections written later."""
     g = await _graph_handle()
-    return to_jsonable(await g.check_answerable(question, terms=terms, as_of=parse_time(as_of, "as_of"), depth=depth))
+    return to_jsonable(
+        await g.check_answerable(
+            question,
+            terms=terms,
+            as_of=parse_time(as_of, "as_of"),
+            known_at=parse_time(known_at, "known_at"),
+            depth=depth,
+        )
+    )
 
 
 async def insert_text(
@@ -690,13 +703,16 @@ async def retrieve(
     max_nodes: PositiveInt = 200,
     budget_tokens: PositiveInt = 3000,
     as_of: str | None = None,
+    known_at: str | None = None,
     seeds: str | None = None,
     skip_hubs: StrictBool = False,
 ) -> dict[str, Any]:
     """Retrieve graph context for a query by keyword seeds and bounded BFS, DFS, or PageRank ("ppr") ranking.
-    as_of (ISO 8601; no offset means UTC) reads the graph as it stood at that time. strategy and seeds (bm25,
-    synonyms, embeddings) default to the server's level. hubs lists entities with 50 or more relations the walk
-    reached; context lines through one are marked (via hub), as weak links. skip_hubs stops the walk at hubs."""
+    as_of (ISO 8601; no offset means UTC) reads the graph as it stood at that time. known_at reads only what the
+    graph held at that time, leaving out facts and corrections written later; alone it also sets as_of. strategy
+    and seeds (bm25, synonyms, embeddings) default to the server's level. hubs lists entities with 50 or more
+    relations the walk reached; context lines through one are marked (via hub), as weak links. skip_hubs stops the
+    walk at hubs."""
     g = await _graph_handle()
     return to_jsonable(
         await g.retrieve(
@@ -707,6 +723,7 @@ async def retrieve(
             max_nodes=max_nodes,
             budget_tokens=budget_tokens,
             as_of=parse_time(as_of, "as_of"),
+            known_at=parse_time(known_at, "known_at"),
             seeds=seeds,
             skip_hubs=skip_hubs,
         )

@@ -18,6 +18,7 @@ from .ids import decision_id, entity_id, normalize_rel_type, preference_id, prof
 from .llm import build_llm_client
 from .models import (
     AnswerabilityReport,
+    Certification,
     CypherResult,
     DecayResult,
     DecisionStep,
@@ -61,7 +62,7 @@ from .schema import Definition, EntityType, PropertySpec, RelationEndpoint, Rela
 from .sync import SyncSelfGraph
 from .tiers import Level
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 if TYPE_CHECKING:
     from .stores.cypher import CypherStore, Neo4jStore
@@ -106,6 +107,7 @@ __all__ = [
     "Embedder",
     "Level",
     "Entity",
+    "Certification",
     "Relation",
     "Preference",
     "DecisionStep",

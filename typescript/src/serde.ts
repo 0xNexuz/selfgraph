@@ -113,6 +113,7 @@ export function encodeRelationProps(args: {
   source_count: number;
   invalidated_at?: Date | null;
   invalidated_by?: string | null;
+  invalidated_known_at?: Date | null;
 }): Props {
   return {
     id: args.id,
@@ -125,6 +126,7 @@ export function encodeRelationProps(args: {
     source_count: args.source_count,
     invalidated_at: toIso(args.invalidated_at),
     invalidated_by: args.invalidated_by ?? null,
+    invalidated_known_at: toIso(args.invalidated_known_at),
   };
 }
 
@@ -142,10 +144,14 @@ export function decodeRelation(props: Props, edge: { from_entity: string; to_ent
     source_count: count(props.source_count),
     invalidated_at: fromIso(props.invalidated_at),
     invalidated_by: optStr(props.invalidated_by),
+    invalidated_known_at: fromIso(props.invalidated_known_at),
     relevance: optNum(props.relevance),
     relevance_at: fromIso(props.relevance_at),
     certified_at: fromIso(props.certified_at),
     certified_by: optStr(props.certified_by),
+    certifications: loads<Array<{ by: string; at: string; until: string | null }>>(props.certifications_json, []).map(
+      (c) => ({ by: c.by, at: fromIso(c.at)!, until: fromIso(c.until) }),
+    ),
   };
 }
 

@@ -81,11 +81,13 @@ const relation = (id: string, from: string, to: string): Relation => ({
   is_current: true,
   invalidated_at: null,
   invalidated_by: null,
+  invalidated_known_at: null,
   source_count: 0,
   relevance: null,
   relevance_at: null,
   certified_at: null,
   certified_by: null,
+  certifications: [],
 });
 
 function suite(spec: StoreSpec): void {
@@ -464,6 +466,9 @@ describe("agent trust over the CLI and MCP", () => {
     const ossie = cli(["schema", "export", "--to", "ossie"]).out as { ontology: Array<{ concept: string }> };
     expect(ossie.ontology[0]!.concept).toBe("Person");
     expect((cli(["retrieve", "Ann", "--skip-hubs"]).out as { hubs: string[] }).hubs).toEqual([]);
+    const past = ["--known-at", "2000-01-01"];
+    expect((cli(["retrieve", "Ann", ...past]).out as { subgraph: { entities: [] } }).subgraph.entities).toEqual([]);
+    expect((cli(["check-answerable", "Ann", ...past]).out as { verdict: string }).verdict).toBe("not_answerable");
     const inserted = cli(["insert", "text", "Ann works at Acme.", "--source-id", "s", "--replace-source"]);
     expect((inserted.out as { source_diff: unknown }).source_diff).not.toBeNull();
     const vault = join(dir, "vault");
@@ -482,6 +487,11 @@ describe("agent trust over the CLI and MCP", () => {
       expect(
         ((await callTool("retrieve", { query: "Ann", skip_hubs: true })).result as { hubs: string[] }).hubs,
       ).toEqual([]);
+      const past = { known_at: "2000-01-01T00:00:00Z" };
+      const early = (await callTool("retrieve", { query: "Ann", ...past })).result as { subgraph: { entities: [] } };
+      expect(early.subgraph.entities).toEqual([]);
+      const unknown = (await callTool("check_answerable", { question: "Ann", ...past })).result as { verdict: string };
+      expect(unknown.verdict).toBe("not_answerable");
     } finally {
       await close();
     }

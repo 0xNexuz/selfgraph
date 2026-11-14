@@ -35,6 +35,7 @@ await graph.retrieve(
     max_nodes=200,       # entities to collect
     budget_tokens=3000,  # size cap on the context
     as_of=None,          # read the graph at this time
+    known_at=None,       # read only what the graph held at this time
     seeds=None,          # "bm25", "synonyms", or "embeddings"; default by level
     skip_hubs=False,     # do not walk through hubs other than the seeds
 )
@@ -94,6 +95,34 @@ What follows from these rules:
   later.
 - A fact inserted today with a 2020 `event_time` shows, with its entities, from
   2020 on.
+
+## As the graph knew it
+
+`as_of` answers what was true at a time, using everything stored since. A
+correction learned today and backdated to last week changes what `as_of` last
+week returns. `known_at` answers what the graph held at a time instead, so you
+can see what an agent would have read then:
+
+```python
+await graph.retrieve("where does Ann work", as_of="2025-06-01")                         # Globex, the correction
+await graph.retrieve("where does Ann work", as_of="2025-06-01", known_at="2025-06-10")  # Acme, before the correction
+await graph.retrieve("where does Ann work", known_at="2025-06-10")                      # the same, as_of defaults to known_at
+```
+
+With `known_at`, the `as_of` rules apply only to what was written by then:
+
+| Record | Counts when |
+|--------|-------------|
+| Relation and preference versions | Their `created_at` is at or before `known_at`. |
+| A retirement | Its `invalidated_known_at`, when the retirement was written, is at or before `known_at`. A retirement written later is not applied, and the version reads as current. |
+| A certification | The one in force at `known_at`, from the relation's `certifications`; one made later reads as uncertified, and one removed later as still certified. |
+| `source_count` | Counts the sources whose evidence was recorded by `known_at`. |
+| Entities and decisions | Their `created_at` is at or before `known_at`. |
+| Passages | Their source version was stored by `known_at`, the evidence linking it to the entity was recorded by then, and a [replacement](inserting.md#replacing-a-source) counts only while it was in force then. |
+
+`check_answerable` takes `known_at` too. Changes that keep no record are not
+undone: a delete, a merge or unmerge, a decay score, a decision update, or an
+entity's changed properties read as they are now.
 
 ## How it works
 

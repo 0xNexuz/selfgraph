@@ -150,6 +150,7 @@ async def _retrieve(graph, args):
         max_nodes=args.max_nodes,
         budget_tokens=args.budget_tokens,
         as_of=args.as_of,
+        known_at=args.known_at,
         seeds=args.seeds,
         skip_hubs=args.skip_hubs,
     )
@@ -429,9 +430,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--term", action="append", help="a key phrase to check instead of the question's words (repeatable)"
     )
     ca.add_argument("--as-of", type=_time("as_of"), help=f"judge the graph as of this time ({_ISO})")
+    ca.add_argument("--known-at", type=_time("known_at"), help=f"judge only what the graph held at this time ({_ISO})")
     ca.add_argument("--depth", type=int, default=3, help="most hops between matched entities (default 3)")
     ca.set_defaults(
-        func=lambda g, a: g.check_answerable(" ".join(a.question), terms=a.term, as_of=a.as_of, depth=a.depth)
+        func=lambda g, a: g.check_answerable(
+            " ".join(a.question), terms=a.term, as_of=a.as_of, known_at=a.known_at, depth=a.depth
+        )
     )
     ex = sub.add_parser("export", help="export the graph").add_subparsers(dest="target", required=True)
     eo = ex.add_parser("obsidian", help="write the namespace as an Obsidian vault of Markdown notes into DIRECTORY")
@@ -459,6 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--max-nodes", type=int, default=200, help="entity cap (default 200)")
     rt.add_argument("--budget-tokens", type=int, default=3000, help="context budget (default 3000)")
     rt.add_argument("--as-of", type=_time("as_of"), help=f"read the graph as of this time ({_ISO})")
+    rt.add_argument("--known-at", type=_time("known_at"), help=f"read only what the graph held at this time ({_ISO})")
     rt.add_argument("--skip-hubs", action="store_true", help="do not walk through entities with 50 or more relations")
     rt.add_argument("--context-only", action="store_true", help="print only the context text, not the JSON result")
     rt.set_defaults(func=_retrieve)

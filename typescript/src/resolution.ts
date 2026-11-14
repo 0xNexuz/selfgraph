@@ -1336,7 +1336,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     const withdrawn = latest !== undefined && !latest.is_current && !existed;
     if (withdrawn && (await runner.nodeExists(ns, L_SOURCE_VERSION, latest.invalidated_by!))) {
       const edge = await runner.getCurrentEdge(ns, rel!.id);
-      [rel] = await ops.retireRelations(runner, ns, [[edge!, latest.invalidated_by!, latest.invalidated_at!]]);
+      [rel] = await ops.retireRelations(runner, ns, [[edge!, latest.invalidated_by!, latest.invalidated_at!]], at);
     }
     restored.set(rw.id, rel!.id);
     relations.push(rel!);

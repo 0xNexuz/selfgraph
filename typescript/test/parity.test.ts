@@ -248,8 +248,15 @@ describe("retrieval ranking matches Python (NFC + casefold tokens, specificity, 
 describe("contradiction and as-of rules match Python", () => {
   const dates = (o: Record<string, unknown>) => {
     const out: Record<string, unknown> = { ...o };
-    for (const key of ["created_at", "event_time", "invalidated_at", "certified_at"]) {
+    for (const key of ["created_at", "event_time", "invalidated_at", "invalidated_known_at", "certified_at"]) {
       if (typeof out[key] === "string") out[key] = parseIso(out[key] as string);
+    }
+    if (Array.isArray(out.certifications)) {
+      out.certifications = (out.certifications as Array<{ by: string; at: string; until: string | null }>).map((c) => ({
+        by: c.by,
+        at: parseIso(c.at),
+        until: c.until === null ? null : parseIso(c.until),
+      }));
     }
     return out;
   };
@@ -260,7 +267,33 @@ describe("contradiction and as-of rules match Python", () => {
     )) {
       const versions = c.versions.map(dates) as unknown as Array<Relation | Preference>;
       for (const [at, revision] of Object.entries(c.picked)) {
-        expect(versionAsOf(versions, parseIso(at))?.revision ?? null, `${name} at ${at}`).toBe(revision);
+        expect(versionAsOf(versions, { valid: parseIso(at), known: null })?.revision ?? null, `${name} at ${at}`).toBe(
+          revision,
+        );
+      }
+    }
+    for (const [name, c] of Object.entries(
+      fx.known_at as Record<
+        string,
+        {
+          versions: Array<Record<string, unknown>>;
+          picked: Array<[string, string | null, Record<string, unknown> | null]>;
+        }
+      >,
+    )) {
+      const versions = c.versions.map(dates) as unknown as Relation[];
+      for (const [valid, known, seen] of c.picked) {
+        const got = versionAsOf(versions, { valid: parseIso(valid), known: known === null ? null : parseIso(known) });
+        const shown =
+          got === null
+            ? null
+            : {
+                revision: got.revision,
+                is_current: got.is_current,
+                invalidated_by: got.invalidated_by,
+                certified_by: got.certified_by,
+              };
+        expect(shown, `${name} at ${valid} known ${known}`).toEqual(seen);
       }
     }
     const caps = contradictionCaps(Schema.parse(fx.contradictions.schema));

@@ -168,15 +168,22 @@ export const TOOLS: Tool[] = [
       "with nothing stored for it is schema_only and counts as missing. verdict is answerable, partial (missing lists " +
       "what the graph lacks), uncertain (matched entities are not connected within depth hops, or only through a hub), " +
       "or not_answerable. A note means the check is lexical and embedding seeds may still find the missing terms, so " +
-      "try retrieve before concluding. as_of (ISO 8601) judges the graph as it stood then.",
+      "try retrieve before concluding. as_of (ISO 8601) judges the graph as it stood then; known_at judges only what " +
+      "the graph held at that time, leaving out facts and corrections written later.",
     input: {
       question: str,
       terms: z.array(z.string()).nullish(),
       as_of: optStr,
+      known_at: optStr,
       depth: z.number().int().min(1).default(3),
     },
     run: (g, a) =>
-      g.checkAnswerable(a.question, { terms: a.terms ?? null, as_of: time(a.as_of, "as_of"), depth: a.depth }),
+      g.checkAnswerable(a.question, {
+        terms: a.terms ?? null,
+        as_of: time(a.as_of, "as_of"),
+        known_at: time(a.known_at, "known_at"),
+        depth: a.depth,
+      }),
   }),
   tool({
     name: "get_schema",
@@ -642,9 +649,11 @@ export const TOOLS: Tool[] = [
     name: "retrieve",
     description:
       'Retrieve graph context for a query by keyword seeds and bounded BFS, DFS, or PageRank ("ppr") ranking. ' +
-      "as_of (ISO 8601; no offset means UTC) reads the graph as it stood at that time. strategy and seeds (bm25, " +
-      "synonyms, embeddings) default to the server's level. hubs lists entities with 50 or more relations the walk " +
-      "reached; context lines through one are marked (via hub), as weak links. skip_hubs stops the walk at hubs.",
+      "as_of (ISO 8601; no offset means UTC) reads the graph as it stood at that time. known_at reads only what the " +
+      "graph held at that time, leaving out facts and corrections written later; alone it also sets as_of. strategy " +
+      "and seeds (bm25, synonyms, embeddings) default to the server's level. hubs lists entities with 50 or more " +
+      "relations the walk reached; context lines through one are marked (via hub), as weak links. skip_hubs stops the " +
+      "walk at hubs.",
     input: {
       query: str,
       strategy: optStr,
@@ -653,6 +662,7 @@ export const TOOLS: Tool[] = [
       max_nodes: z.number().int().min(1).default(RETRIEVE_DEFAULTS.max_nodes),
       budget_tokens: z.number().int().min(1).default(RETRIEVE_DEFAULTS.budget_tokens),
       as_of: optStr,
+      known_at: optStr,
       seeds: optStr,
       skip_hubs: z.boolean().default(false),
     },
@@ -665,6 +675,7 @@ export const TOOLS: Tool[] = [
         max_nodes: a.max_nodes,
         budget_tokens: a.budget_tokens,
         as_of: time(a.as_of, "as_of"),
+        known_at: time(a.known_at, "known_at"),
         seeds: a.seeds as SeedTier | null | undefined,
       }),
   }),

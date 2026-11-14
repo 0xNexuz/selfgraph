@@ -29,6 +29,7 @@ export { type Logger, type LogLevel, setLogger } from "./internal/log.js";
 export { buildLlmClient, type LLMArg } from "./llm/index.js";
 export {
   type AnswerabilityReport,
+  type Certification,
   type CypherResult,
   type CypherRow,
   DateTimeInput,
