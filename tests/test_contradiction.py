@@ -462,3 +462,16 @@ def test_a_relation_ends_at_the_earliest_endpoint_that_displaces_it_in_any_order
         ended = run(g.relations.versions(ann_acme))[0]
         assert (ended.invalidated_by, ended.invalidated_at) == (bob_acme, utc(2022)), batches
         assert run(g.relations.get(bob_acme)).is_current
+
+
+def test_undated_restatement_keeps_event_time_and_supersede_order():
+    g = graph(contradiction="supersede")
+    insert(g, works_at("acme", 2020), source_id="a")
+    insert(g, works_at("acme"), source_id="b")
+    current = run(g.relations.get(ACME))
+    assert (current.event_time, current.revision, current.source_count) == (utc(2020), 1, 2)
+    res = insert(g, works_at("globex", 2022), source_id="c")
+    assert [w.code for w in res.warnings] == ["relation_superseded"]
+    assert [r.id for r in run(g.relations.list()).items] == [GLOBEX]
+    as_of = {r.id for r in run(g.retrieve("Ann", as_of=utc(2023))).subgraph.relations}
+    assert as_of == {GLOBEX}

@@ -1698,6 +1698,33 @@ def effective_time(version: Relation | Preference | DecisionTrace) -> datetime:
     return aware(version.event_time or version.created_at)
 
 
+def _named_event_time(named: datetime | None, default: datetime | None) -> datetime | None:
+    """Combine an input's event_time with an insert-level default; neither means no time was named.
+
+    @param named (datetime | None): the time on the relation or preference input.
+    @param default (datetime | None): the insert's default event_time.
+    @return (datetime | None): the named time, else the default, else None.
+    """
+    return named if named is not None else default
+
+
+def _restated_event_time(named: datetime | None, *, stored: datetime | None, keep_stored: bool) -> datetime | None:
+    """Pick the event_time for an upsert of an existing version.
+
+    A write that does not name a time keeps the stored time when the version is still current, matching
+    relations.update. A reassertion of a retired version with no named time leaves event_time unset so the
+    effective time is the write's creation time.
+
+    @param named (datetime | None): the time named on this write, after applying the insert default.
+    @param stored (datetime | None): the current version's event_time.
+    @param keep_stored (bool): True when the stored version is current and should keep its time.
+    @return (datetime | None): the event_time to store.
+    """
+    if named is not None:
+        return named
+    return stored if keep_stored else None
+
+
 def _rank(rel: Relation) -> tuple[datetime, int, datetime]:
     """Order a relation among others at one endpoint: by effective time, then revision, then creation time.
 
@@ -2112,11 +2139,11 @@ async def upsert_relations(
     retires: dict[tuple[str, int], dict] = {}
     out: list[tuple[str, int, Relation]] = []
     for rid, rtype, rel, _ in keyed:
-        event_time = rel.event_time or default_event_time
-        effective = aware(event_time or created_at)
+        named = _named_event_time(rel.event_time, default_event_time)
         edge = current.get(rid)
         write = True
         if edge is None:
+            event_time = named
             props = encode_relation_props(
                 ns=ns,
                 id=rid,
@@ -2133,6 +2160,8 @@ async def upsert_relations(
                 rid, (edge["from_id"], edge["type"], edge["to_id"]), (rel.from_entity, rtype, rel.to_entity)
             )
             prev = _relation_of(edge)
+            event_time = _restated_event_time(named, stored=prev.event_time, keep_stored=prev.is_current)
+            effective = aware(event_time or created_at)
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
             reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
@@ -2817,7 +2846,7 @@ async def upsert_preference(
     _validate_strength(pref.strength)
     _validate_own_id("preference", pref.id)
     pid = pref.id or _ids.preference_id(pref.subject_entity, pref.stance, pref.key, pref.value_entity)
-    event_time = pref.event_time or default_event_time
+    named = _named_event_time(pref.event_time, default_event_time)
     await _require_preference_refs(runner, ns, pref.value_entity, pref.about_entity)
     profile_id = await _ensure_profile(runner, ns, pref.subject_entity, created_at)
 
@@ -2833,6 +2862,13 @@ async def upsert_preference(
             f"preference {pid!r} already exists with different subject/stance/key/value; "
             "these identify the preference and are immutable; create a new preference to change them"
         )
+    if current is None:
+        event_time, strength, about_entity = named, pref.strength, pref.about_entity
+    else:
+        event_time = _restated_event_time(named, stored=current.event_time, keep_stored=True)
+        strength = current.strength if pref.strength is None else pref.strength
+        about_entity = current.about_entity if pref.about_entity is None else pref.about_entity
+    _validate_strength(strength)
     merged_props = _merge_props(current.properties if current is not None else None, pref.properties)
     props = encode_preference_props(
         ns=ns,
@@ -2840,8 +2876,8 @@ async def upsert_preference(
         revision=1 if current is None else current.revision + 1,
         subject_entity=pref.subject_entity,
         key=_ids.normalize_text(pref.key),
-        about_entity=pref.about_entity,
-        strength=pref.strength,
+        about_entity=about_entity,
+        strength=strength,
         properties=merged_props,
         event_time=event_time,
         created_at=created_at,
@@ -2850,8 +2886,8 @@ async def upsert_preference(
 
     if (
         current is not None
-        and current.strength == pref.strength
-        and current.about_entity == pref.about_entity
+        and current.strength == strength
+        and current.about_entity == about_entity
         and current.properties == merged_props
         and to_iso(current.event_time) == to_iso(event_time)
     ):
