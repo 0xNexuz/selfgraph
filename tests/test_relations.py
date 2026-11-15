@@ -35,6 +35,18 @@ def test_create_and_versions():
     assert [v.revision for v in oldest_first] == [1, 2]
 
 
+def test_relation_versions_distinguish_json_booleans_from_numbers():
+    g = new_graph()
+    seed(g)
+    r = run(g.relations.create("person:soham", "WORKS_AT", "company:hydradb", properties={"flags": [1]}))
+
+    run(g.relations.update(r.id, set_properties={"flags": [True]}))
+    run(g.relations.update(r.id, set_properties={"flags": [True]}))
+    latest, first = run(g.relations.versions(r.id))
+    assert latest.revision == 2 and latest.properties["flags"][0] is True
+    assert type(first.properties["flags"][0]) is int
+
+
 def test_remove_properties_in_update():
     g = new_graph()
     seed(g)
