@@ -5,6 +5,7 @@ import json
 import os
 import re
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 from ..errors import StoreError, ValidationError
@@ -57,6 +58,7 @@ _SCHEMA = (
 _DATABASES: dict[str, Any] = {}
 _OPEN_STORES: dict[str, int] = {}
 _MAX_SKIP = 10_000_000
+_RECONNECT_EVERY = 500
 
 
 def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
@@ -160,7 +162,9 @@ class KuzuStore(AutoCommitStore):
                 raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
         self._path = path
         self._db = _DATABASES[path]
-        self._conn = kuzu.Connection(self._db)
+        self._connect = partial(kuzu.Connection, self._db)
+        self._conn = self._connect()
+        self._statements = 0
         _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
         self._lock = asyncio.Lock()
 
@@ -177,6 +181,11 @@ class KuzuStore(AutoCommitStore):
 
         async with self._lock:
             self._require_open()
+            self._statements += 1
+            if self._statements > _RECONNECT_EVERY:
+                self._conn.close()
+                self._conn = self._connect()
+                self._statements = 1
             try:
                 columns, rows = await asyncio.to_thread(_exec)
                 return CypherResult(columns=columns, rows=rows)

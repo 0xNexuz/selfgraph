@@ -260,6 +260,29 @@ def test_kuzu_relative_path_uses_each_stores_working_directory(tmp_path, monkeyp
         assert first.entities.get(entity.id) == entity
 
 
+def test_kuzu_reopens_its_connection_without_changing_results(tmp_path):
+    pytest.importorskip("kuzu")
+    store = KuzuStore(str(tmp_path / "r.kuzu"))
+    g = SelfGraph(store, namespace="reconnect")
+    run(g.initialize())
+    first = store._conn
+    people = [{"id": f"person:p{i}", "type": "Person", "name": f"Person {i}"} for i in range(30)]
+    knows = [{"from_entity": f"person:p{i}", "type": "KNOWS", "to_entity": f"person:p{i - 1}"} for i in range(1, 30)]
+    run(g.insert.facts({"entities": people, "relations": knows}))
+
+    async def reads():
+        return [(await g.run_cypher("RETURN $i AS i", {"i": i})).rows for i in range(600)]
+
+    assert run(reads()) == [[{"i": i}] for i in range(600)]
+    run(g.insert.facts({"relations": [{**r, "properties": {"since": 2020}} for r in knows]}))
+    rels = run(g.relations.list(type="KNOWS", limit=100)).items
+    assert store._conn is not first
+    assert len(run(g.entities.list(limit=100)).items) == 30
+    assert sorted((r.revision, r.is_current, r.properties["since"]) for r in rels) == [(2, True, 2020)] * 29
+    assert "person:p7" in {e.id for e in run(g.retrieve("Person 7")).subgraph.entities}
+    run(g.close())
+
+
 def test_bind_params_checks_references_and_drops_unused():
     assert bind_params("RETURN $a AS a", {"a": 1, "b": 2}) == {"a": 1}
     assert bind_params("RETURN '$a' AS a, `$b` AS b /* $c */ // $d", None) == {}

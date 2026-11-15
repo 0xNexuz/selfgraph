@@ -81,6 +81,7 @@ interface KuzuModule {
 const DATABASES = new Map<string, KuzuDatabase>();
 const OPEN_STORES = new Map<string, number>();
 const MAX_SKIP = 10_000_000;
+const RECONNECT_EVERY = 500;
 
 function normalize(value: unknown): unknown {
   if (value === null || value === undefined) return null;
@@ -220,8 +221,11 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       DATABASES.set(this.path, db);
     }
     OPEN_STORES.set(this.path, (OPEN_STORES.get(this.path) ?? 0) + 1);
-    return new kuzu.Connection(db);
+    this.connect = () => new kuzu.Connection(db);
+    return this.connect();
   });
+  private connect!: () => KuzuConnection;
+  private statements = 0;
   private queue: Promise<unknown> = Promise.resolve();
 
   /**
@@ -244,7 +248,14 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   }
 
   private async exec(query: string, params?: Record<string, unknown> | null): Promise<CypherResult> {
-    const conn = await this.conn.get();
+    let conn = await this.conn.get();
+    if (++this.statements > RECONNECT_EVERY && !this.closed) {
+      const stale = conn;
+      conn = this.connect();
+      this.conn.set(conn);
+      this.statements = 1;
+      await stale.close?.();
+    }
     const res =
       params && Object.keys(params).length
         ? await conn.execute(await conn.prepare(query), params)
