@@ -218,8 +218,12 @@ await graph.decisions.create(
   retired. They are kept in order and not checked to form a path.
 - `status` defaults to `"completed"`.
 - The derived id hashes the actor and title. A second `create` with both equal
-  raises `ConflictError`, while `insert.facts` updates the stored decision.
-  Use distinct titles or an explicit `id` for distinct decisions.
+  raises `ConflictError`, while `insert.facts` and `insert.text` update the
+  stored decision. Use distinct titles or an explicit `id` for distinct decisions.
+- An insert that restates a stored decision keeps every field it leaves out. A
+  missing field or an empty `steps` or `alternative_entities` keeps the stored
+  value, and a given one replaces it. A new decision without a `status` is
+  `"completed"`. To clear a field, use `decisions.update(clear=[...])`.
 
 ## Listing and iterating
 

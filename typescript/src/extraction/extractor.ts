@@ -8,7 +8,6 @@ import { EDGE_TYPES, preferenceStanceOf } from "../labels.js";
 import { summarizeError } from "../llm/index.js";
 import {
   DateTimeInput,
-  DEFAULT_STATUS,
   Extraction,
   ExtractionInstructions,
   ExtractionPrompts,
@@ -65,7 +64,7 @@ const DecisionsOut = z.object({
       rationale: z.string().nullable(),
       outcome_name: z.string().nullable(),
       alternative_names: z.array(z.string()),
-      status: Status,
+      status: Status.nullable(),
       steps: z.array(z.object({ from_name: z.string(), type: z.string(), to_name: z.string() })),
     }),
   ),
@@ -104,7 +103,7 @@ export interface RawDecision {
   rationale?: string | null;
   outcome_name?: string | null;
   alternative_names?: string[];
-  status?: Status;
+  status?: Status | null;
   steps?: Array<{ from_name: string; type: string; to_name: string }>;
   evidence?: ChunkEvidence | null;
 }
@@ -335,7 +334,7 @@ export function assembleExtraction(
         rationale: dec.rationale ?? null,
         outcome_entity: resolve(dec.outcome_name),
         alternative_entities: (dec.alternative_names ?? []).map(resolve).filter((a): a is string => Boolean(a)),
-        status: dec.status ?? DEFAULT_STATUS,
+        status: dec.status ?? null,
       });
     }
   }

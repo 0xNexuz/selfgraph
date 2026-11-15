@@ -269,6 +269,8 @@ async def write(graph):
     out["pref_update"] = to_jsonable(await graph.preferences.update(pref, strength=0.25))
     dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
     out["dec_update"] = to_jsonable(await graph.decisions.update(dec, status="active", rationale=None))
+    restated = {"title": "Pick HydraDB", "actor_entity": "person:jane-doe"}
+    out["dec_restate"] = to_jsonable(await graph.insert.facts({"decisions": [restated]}))
     out["ent_update"] = to_jsonable(
         await graph.entities.update("company:acme", aliases=["ACME", "Acme Co"], properties={"hq": "Paris", "n": 3})
     )

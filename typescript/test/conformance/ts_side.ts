@@ -276,6 +276,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   out.pref_update = toJsonable(await graph.preferences.update(pref, { strength: 0.25 }));
   const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
   out.dec_update = toJsonable(await graph.decisions.update(dec, { status: "active", rationale: null }));
+  const restated = { title: "Pick HydraDB", actor_entity: "person:jane-doe" };
+  out.dec_restate = toJsonable(await graph.insert.facts({ decisions: [restated] }));
   out.ent_update = toJsonable(
     await graph.entities.update("company:acme", { aliases: ["ACME", "Acme Co"], properties: { hq: "Paris", n: 3 } }),
   );
