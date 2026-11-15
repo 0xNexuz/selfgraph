@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -689,6 +689,25 @@ describe("store setup errors", () => {
     const neo4jRows = LABELS.map((label) => ({ type: "UNIQUENESS", labelsOrTypes: [label], properties: ["id", "ns"] }));
     expect(uniqueLabels(neo4jRows)).toEqual(new Set(LABELS));
     expect(uniqueLabels(neo4jRows.slice(1))).toEqual(new Set(LABELS.slice(1)));
+  });
+
+  it("opens relative Kuzu paths in each store's working directory", async () => {
+    const cwd = process.cwd();
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-cwd-"));
+    const other = join(dir, "other");
+    mkdirSync(other);
+    try {
+      process.chdir(dir);
+      await using first = new SelfGraph(new KuzuStore("graph.kuzu"));
+      const entity = await first.entities.create("Jane", "Person");
+      process.chdir(other);
+      await using second = new SelfGraph(new KuzuStore("graph.kuzu"));
+      expect(await second.entities.get(entity.id)).toBeNull();
+      expect(await first.entities.get(entity.id)).toEqual(entity);
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
