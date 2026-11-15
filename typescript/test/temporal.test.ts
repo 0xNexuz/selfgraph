@@ -598,6 +598,38 @@ function suite(spec: StoreSpec): void {
     }
   });
 
+  it("known_at keeps the retirement a late middle fact corrected", async () => {
+    const g = await graph("supersede");
+    await g.insert.facts({ entities: [{ type: "Company", name: "Initech" }] });
+    const acme = await g.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: at(2020) });
+    const initech = await g.relations.create("person:ann", "WORKS_AT", "company:initech", { event_time: at(2024) });
+    const learned = await instant();
+    const globex = await g.relations.create("person:ann", "WORKS_AT", "company:globex", { event_time: at(2022) });
+    const held = async (year: number, options: object = {}) =>
+      new Set(
+        (await g.retrieve("Ann", { as_of: new Date(Date.UTC(year, 5, 1)), ...options })).subgraph.relations.map(
+          (r) => r.id,
+        ),
+      );
+    expect([await held(2021), await held(2023), await held(2025)]).toEqual([
+      new Set([acme.id]),
+      new Set([globex.id]),
+      new Set([initech.id]),
+    ]);
+    const known = { known_at: learned };
+    expect([await held(2021, known), await held(2023, known), await held(2025, known)]).toEqual([
+      new Set([acme.id]),
+      new Set([acme.id]),
+      new Set([initech.id]),
+    ]);
+    const [fresh, old] = await g.relations.versions(acme.id);
+    expect([old!.invalidated_by, fresh!.invalidated_by, fresh!.revision]).toEqual([
+      initech.id,
+      globex.id,
+      old!.revision + 1,
+    ]);
+  });
+
   it("a late middle fact corrects the retired history it lands in", async () => {
     const [acme, globex, initech] = [annAt("acme", 2020), annAt("globex", 2022), annAt("initech", 2024)];
     const initechId = ids.relationId("person:ann", "WORKS_AT", "company:initech");

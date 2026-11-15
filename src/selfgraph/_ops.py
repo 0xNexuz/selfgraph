@@ -1816,7 +1816,7 @@ class Contradictions:
         "contradiction_out_of_order" when it was written by this write after that fact was current, else
         "relation_superseded". A relation retired by an earlier write whose invalidating fact is no longer the
         max_count-th newer one, because this write added a fact in between, is returned with its corrected
-        invalidation and no warning.
+        invalidation and no warning; the caller writes that as a new revision of it.
 
         @return (tuple[dict[str, tuple[str, datetime]], list[InsertWarning]]): each retired relation id with the
             id that invalidated it and when, and the warnings.
@@ -1904,7 +1904,10 @@ async def require_max_count(
 def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
     """Mark a relation version as no longer current because a newer relation superseded it.
 
-    @param edge (dict): the current edge row.
+    A version that was already retired takes a new revision instead, copying its content, so a known_at read from
+    before this write still sees the earlier retirement.
+
+    @param edge (dict): the edge row, current or already retired.
     @param by (str): the id of the relation that superseded it.
     @param at (datetime): the superseding relation's effective time.
     @param known (datetime): when the retirement is written, for reads with known_at.
@@ -1917,6 +1920,8 @@ def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
         "invalidated_by": by,
         "invalidated_known_at": to_iso(known),
     }
+    if not edge["props"]["is_current"]:
+        props.update(revision=int(edge["props"]["revision"]) + 1, created_at=to_iso(known))
     return {**edge, "props": props}
 
 

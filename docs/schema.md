@@ -255,6 +255,12 @@ A retired relation keeps its revision and gains four fields:
 Example: with facts from 2019, 2020, and 2022, the 2019 one is invalidated by the
 2020 one at 2020. An `as_of` of 2020-06 shows only the 2020 fact.
 
+A fact that arrives late and lands between a retired relation and the fact that retired it
+changes which fact displaced the retired one. The retired relation then takes a new revision
+that copies its content and carries the corrected `invalidated_by` and `invalidated_at`, so a
+[`known_at`](retrieval.md#as-the-graph-knew-it) read from before that write still sees the
+earlier retirement.
+
 - New versions are written before any retirement.
 - The ranking covers every current relation at the endpoint, including one being
   restated, such as one of two that a `warn` insert left current.

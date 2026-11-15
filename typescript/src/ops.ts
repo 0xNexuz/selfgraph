@@ -1842,7 +1842,8 @@ export class Contradictions {
    * that fact's effective time. Each retired relation gets one warning: "contradiction_out_of_order" when it was
    * written by this write after that fact was current, else "relation_superseded". A relation retired by an
    * earlier write whose invalidating fact is no longer the max_count-th newer one, because this write added a fact
-   * in between, is returned with its corrected invalidation and no warning.
+   * in between, is returned with its corrected invalidation and no warning; the caller writes that as a new
+   * revision of it.
    *
    * @return ([Map<string, [string, Date]>, InsertWarning[]]): each retired relation id with the id that invalidated it and when, and the warnings.
    */
@@ -1988,23 +1989,27 @@ export async function requireMaxCount(
 /**
  * Mark a relation version as no longer current because a newer relation superseded it.
  *
- * @param edge (EdgeRow): the current edge row.
+ * A version that was already retired takes a new revision instead, copying its content, so a known_at read from before this write still sees the earlier retirement.
+ *
+ * @param edge (EdgeRow): the edge row, current or already retired.
  * @param by (string): the id of the relation that superseded it.
  * @param at (Date): the superseding relation's effective time.
  * @param known (Date): when the retirement is written, for reads with known_at.
  * @return (EdgeRow): the edge row with its version retired.
  */
 function retiredEdge(edge: EdgeRow, by: string, at: Date, known: Date): EdgeRow {
-  return {
-    ...edge,
-    props: {
-      ...edge.props,
-      is_current: false,
-      invalidated_at: toIso(at),
-      invalidated_by: by,
-      invalidated_known_at: toIso(known),
-    },
+  const props: Record<string, unknown> = {
+    ...edge.props,
+    is_current: false,
+    invalidated_at: toIso(at),
+    invalidated_by: by,
+    invalidated_known_at: toIso(known),
   };
+  if (!edge.props.is_current) {
+    props.revision = (edge.props.revision as number) + 1;
+    props.created_at = toIso(known);
+  }
+  return { ...edge, props };
 }
 
 export interface ContradictionOptions {
@@ -2760,7 +2765,7 @@ export async function certifyRelation(
     until: toIso(c === held ? at : c.until),
   }));
   if (by !== null) history.push({ by, at: toIso(at), until: null });
-  const props = {
+  const props: Record<string, unknown> = {
     ...edge.props,
     certified_at: by === null ? null : toIso(at),
     certified_by: by,
