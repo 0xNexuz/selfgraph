@@ -6,6 +6,7 @@ import { jsonIso, toIso } from "../internal/time.js";
 import * as m from "../maintenance.js";
 import type { DateTimeInput, DecayResult, DedupeGroup, DedupeResult, PruneResult, Relation } from "../models.js";
 import * as ops from "../ops.js";
+import { canonicalRelationType } from "../schema.js";
 import { checkOptions, keysOf, parseTime, requireBool, requireList } from "../validate.js";
 import { Resource } from "./common.js";
 
@@ -147,7 +148,9 @@ export class Maintenance extends Resource {
     }
     const narrowed = types !== null || relTypes !== null;
     const entityTypes = narrowed ? new Set((types ?? []).map(ops.cleanText)) : null;
-    const relationTypes = narrowed ? new Set((relTypes ?? []).map(normalizeRelType)) : null;
+    const relationTypes = narrowed
+      ? new Set((relTypes ?? []).map((type) => normalizeRelType(canonicalRelationType(type, this.graph.schema))))
+      : null;
     const matches = (
       relevance: number | null,
       stamps: Array<Date | null>,
