@@ -4,7 +4,6 @@ import asyncio
 import heapq
 import logging
 import math
-import re
 from collections import deque
 from collections.abc import Collection, Iterable
 from functools import partial
@@ -27,7 +26,7 @@ from ._serde import (
 )
 from .errors import ValidationError
 from .extraction.chunking import count_tokens
-from .ids import normalize_text, profile_id
+from .ids import _word_runs, normalize_text, profile_id
 from .models import (
     AnswerabilityReport,
     Entity,
@@ -164,7 +163,7 @@ def _token_list(text: str) -> list[str]:
     @param text (str): the text to tokenize.
     @return (list[str]): the content tokens, repeats kept.
     """
-    return [t for t in re.findall(r"[^\W_]+", _fold(text)) if t not in _STOPWORDS]
+    return [t for t in _word_runs(_fold(text)) if t not in _STOPWORDS]
 
 
 def _tokens(text: str) -> set[str]:
@@ -182,7 +181,7 @@ def _short_tokens(text: str) -> set[str]:
     @param text (str): the text to tokenize.
     @return (set[str]): the distinct casefolded one-character tokens.
     """
-    return {t for t in re.findall(r"[^\W_]+", _fold(text)) if len(t) == 1}
+    return {t for t in _word_runs(_fold(text)) if len(t) == 1}
 
 
 def _entity_text(e: Entity) -> str:
