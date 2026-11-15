@@ -287,6 +287,9 @@ async def write(graph):
     out["ent_update"] = to_jsonable(
         await graph.entities.update("company:acme", aliases=["ACME", "Acme Co"], properties={"hq": "Paris", "n": 3})
     )
+    out["ent_type_case"] = to_jsonable(
+        await graph.insert.facts({"entities": [{"type": "company", "name": "Acme, Inc."}]})
+    )
     out["rel_create"] = to_jsonable(
         await graph.relations.create(
             "thing:grace-hopper",

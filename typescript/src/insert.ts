@@ -258,7 +258,14 @@ export class Insert {
         });
       }
 
-      const entities = await ops.upsertEntities(tx, ns, resolved.entities, [...baseEvidence], createdAt);
+      const entities = await ops.upsertEntities(
+        tx,
+        ns,
+        resolved.entities,
+        [...baseEvidence],
+        createdAt,
+        new Set(activeSchema?.entities.map((t) => t.name) ?? []),
+      );
       const relations = await ops.upsertRelations(
         tx,
         ns,

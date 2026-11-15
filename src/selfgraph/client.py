@@ -630,7 +630,12 @@ class SelfGraph:
                 )
 
             entities = await _ops.upsert_entities(
-                tx, ns, list(resolved.entities), evidence=list(base_evidence), created_at=created_at
+                tx,
+                ns,
+                list(resolved.entities),
+                evidence=list(base_evidence),
+                created_at=created_at,
+                schema_types=frozenset(t.name for t in active_schema.entities) if active_schema is not None else (),
             )
             relations = await _ops.upsert_relations(
                 tx,

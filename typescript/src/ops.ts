@@ -864,12 +864,15 @@ export async function getEntity(runner: Runner, ns: string, eid: string): Promis
  * Insert-semantics upsert of many entities: keep stored names, record new surface forms as aliases, merge the rest.
  *
  * Entities are read and written in batches; a repeated id merges into the earlier input, as sequential upserts would.
+ * A stored entity keeps its type when an input spells it with other case or spacing, unless the input's type is a
+ * schema type name.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
  * @param ents (readonly ParsedEntityInput[]): the entities to upsert, in order.
  * @param evidence (Evidence[]): evidence recorded for every entity.
  * @param createdAt (Date): the timestamp for the created and updated fields.
+ * @param schemaTypes (ReadonlySet<string>): the schema's entity type names, which a stored entity's type may adopt.
  * @return (Entity[]): each input's stored entity, in input order.
  */
 export async function upsertEntities(
@@ -878,6 +881,7 @@ export async function upsertEntities(
   ents: readonly ParsedEntityInput[],
   evidence: Evidence[],
   createdAt: Date,
+  schemaTypes: ReadonlySet<string> = new Set(),
 ): Promise<Entity[]> {
   const keyed = ents.map((ent) => {
     const etype = cleanText(ent.type);
@@ -900,7 +904,8 @@ export async function upsertEntities(
   const current = new Map(stored);
   const writes = new Map<string, Props>();
   const out: Entity[] = [];
-  for (const { eid, etype, ename, ent } of keyed) {
+  for (const { eid, etype: given, ename, ent } of keyed) {
+    let etype = given;
     const prev = current.get(eid);
     const sources = (prev?.source_count ?? 0) + takeGained(gained, eid);
     let props: Props;
@@ -918,6 +923,7 @@ export async function upsertEntities(
         updated_at: createdAt,
       });
     } else {
+      if (!schemaTypes.has(etype)) etype = prev.type;
       const aliases = aliasList(prev.name, [...prev.aliases, ...ent.aliases, ename]);
       const externalIds = { ...prev.external_ids, ...ent.external_ids };
       const properties = mergeProps(prev.properties, ent.properties);

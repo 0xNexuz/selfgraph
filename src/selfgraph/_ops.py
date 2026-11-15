@@ -927,16 +927,20 @@ async def upsert_entities(
     *,
     evidence: list[Evidence],
     created_at: datetime,
+    schema_types: Collection[str] = (),
 ) -> list[Entity]:
     """Insert-semantics upsert of many entities: keep stored names, record new surface forms as aliases, merge the rest.
 
     Entities are read and written in batches; a repeated id merges into the earlier input, as sequential upserts would.
+    A stored entity keeps its type when an input spells it with other case or spacing, unless the input's type is a
+    schema type name.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param ents (list[EntityInput]): entities to upsert, in order.
     @param evidence (list[Evidence]): evidence recorded for every entity.
     @param created_at (datetime): timestamp for created and updated fields.
+    @param schema_types (Collection[str]): the schema's entity type names, which a stored entity's type may adopt.
     @return (list[Entity]): each input's stored entity, in input order.
     """
     keyed = []
@@ -974,6 +978,8 @@ async def upsert_entities(
                 updated_at=created_at,
             )
         else:
+            if etype not in schema_types:
+                etype = prev.type
             merged_aliases = _alias_list(prev.name, [*prev.aliases, *ent.aliases, ename])
             merged_external = {**prev.external_ids, **ent.external_ids}
             merged_properties = _merge_props(prev.properties, ent.properties)

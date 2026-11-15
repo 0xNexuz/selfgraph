@@ -64,6 +64,22 @@ def test_update_rejects_unknown_options_and_type_changes_but_keeps_a_case_only_t
     assert run(s.entities.update("person:bob", type="PERSON")).type == "Person"
 
 
+def test_insert_keeps_the_stored_type_when_only_its_case_differs():
+    g = fresh_graph("ent")
+    ibm = {"type": "Company", "name": "International Business Machines", "aliases": ["IBM"]}
+    first = run(g.insert.facts({"entities": [ibm, {"type": "COMPANY", "name": "International Business Machines"}]}))
+    assert [e.type for e in first.entities] == ["Company"]
+    again = run(g.insert.facts({"entities": [{"type": "company", "name": "International Business Machines"}]}))
+    assert (again.entities[0].type, again.entities[0].updated_at) == ("Company", first.entities[0].updated_at)
+    run(g.insert.facts({"entities": [{"type": "Company", "name": "IBM"}]}))
+    assert [(e.id, e.type) for e in run(g.entities.list()).items] == [
+        ("company:international-business-machines", "Company")
+    ]
+    run(g.entities.create("Bob", "person"))
+    s = new_graph(namespace=g.namespace, schema={"entities": [{"name": "Person"}]})
+    assert run(s.insert.facts({"entities": [{"type": "person", "name": "Bob"}]})).entities[0].type == "Person"
+
+
 def test_explicit_ids_are_canonical_on_every_input_path():
     g = new_graph()
     t = run(g.entities.create("X", "T", id="T:X"))
