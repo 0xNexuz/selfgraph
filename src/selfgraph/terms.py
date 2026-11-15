@@ -10,16 +10,32 @@ __all__ = ["expand_tokens", "grounded_terms", "schema_forms", "stem"]
 
 Tokenize = Callable[[str], set[str]]
 
+_ES_PLURALS = ("sses", "shes", "xes")
+_S_SINGULARS = ("ss", "us", "is")
+_VOWELS = "aeiou"
+_IE_PLURALS = frozenset({"calories", "cookies", "hoodies", "movies", "rookies", "selfies", "zombies"})
+_UNCHANGED = frozenset({"news", "series", "species"})
+
 
 def stem(token: str) -> str:
-    """Strip a plain plural ending so "customers" and "customer" compare equal.
+    """Strip a plural ending so "customers" and "customer", or "addresses" and "address", compare equal.
+
+    A plural in -es after ss, x, sh, or a consonant and ch or us loses the "es"; a singular in -us, -is, or -ss is kept
+    whole. The few -ie nouns in _IE_PLURALS lose only their s, and the words in _UNCHANGED are the same in both
+    numbers.
 
     @param token (str): a casefolded token.
-    @return (str): the token without a trailing plural s.
+    @return (str): the token in its singular form.
     """
+    if token in _UNCHANGED:
+        return token
     if token.endswith("ies") and len(token) > 4:
-        return token[:-3] + "y"
-    if token.endswith("s") and not token.endswith("ss") and len(token) > 3:
+        return token[:-1] if token in _IE_PLURALS else token[:-3] + "y"
+    if len(token) > 4 and (
+        token.endswith(_ES_PLURALS) or (token.endswith(("ches", "uses")) and token[-5] not in _VOWELS)
+    ):
+        return token[:-2]
+    if token.endswith("s") and not token.endswith(_S_SINGULARS) and len(token) > 3:
         return token[:-1]
     return token
 

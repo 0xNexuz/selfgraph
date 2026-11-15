@@ -1,20 +1,37 @@
 import { normalizeRelType } from "./ids.js";
-import { cpLen } from "./internal/py.js";
 import { canonicalEntityType, canonicalRelationType, entityIndex, lineage, type ParsedSchema } from "./schema.js";
 
 export type Tokenize = (text: string) => Set<string>;
 
 export type SchemaTermKind = "type" | "definition" | "relation";
 
+const ES_PLURALS = ["sses", "shes", "xes"];
+const S_SINGULARS = ["ss", "us", "is"];
+const VOWELS = "aeiou";
+const IE_PLURALS = new Set(["calories", "cookies", "hoodies", "movies", "rookies", "selfies", "zombies"]);
+const UNCHANGED = new Set(["news", "series", "species"]);
+
 /**
- * Strip a plain plural ending so "customers" and "customer" compare equal.
+ * Strip a plural ending so "customers" and "customer", or "addresses" and "address", compare equal.
+ *
+ * A plural in -es after ss, x, sh, or a consonant and ch or us loses the "es"; a singular in -us, -is, or -ss is kept whole. The few -ie nouns in IE_PLURALS lose only their s, and the words in UNCHANGED are the same in both numbers.
  *
  * @param token (string): a casefolded token.
- * @return (string): the token without a trailing plural s.
+ * @return (string): the token in its singular form.
  */
 export function stem(token: string): string {
-  if (token.endsWith("ies") && cpLen(token) > 4) return `${token.slice(0, -3)}y`;
-  if (token.endsWith("s") && !token.endsWith("ss") && cpLen(token) > 3) return token.slice(0, -1);
+  if (UNCHANGED.has(token)) return token;
+  const chars = Array.from(token);
+  const n = chars.length;
+  if (token.endsWith("ies") && n > 4) return IE_PLURALS.has(token) ? token.slice(0, -1) : `${token.slice(0, -3)}y`;
+  if (
+    n > 4 &&
+    (ES_PLURALS.some((end) => token.endsWith(end)) ||
+      ((token.endsWith("ches") || token.endsWith("uses")) && !VOWELS.includes(chars[n - 5]!)))
+  ) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith("s") && !S_SINGULARS.some((end) => token.endsWith(end)) && n > 3) return token.slice(0, -1);
   return token;
 }
 
