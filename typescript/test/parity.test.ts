@@ -487,6 +487,12 @@ describe("answerability, readiness lint, exports, and Cypher advice match Python
     expect(vault).toEqual(o.vault);
   });
 
+  it("accepts and rejects schema endpoint types identically", () => {
+    for (const [raw, expected] of fx.schema_endpoints as Array<[unknown, boolean]>) {
+      expect(Schema.safeParse(raw).success, JSON.stringify(raw)).toBe(expected);
+    }
+  });
+
   it("reads Cypher labels, types, and name literals identically", () => {
     for (const [query, expected] of fx.cypher_names as Array<[string, unknown]>) {
       expect(cypherNames(query), query).toEqual(expected);

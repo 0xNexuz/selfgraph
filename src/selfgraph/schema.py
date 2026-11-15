@@ -142,7 +142,6 @@ class Schema(TopInputModel):
                     break
                 seen.add(current.name)
                 current = index.get(current.parent) if current.parent is not None else None
-        names_exact = {entity.name for entity in self.entities}
         types: set[str] = set()
         for i, relation in enumerate(self.relations):
             try:
@@ -156,7 +155,7 @@ class Schema(TopInputModel):
             for side, end in (("from", relation.from_), ("to", relation.to)):
                 at = f"relations[{i}].{side}"
                 for j, name in enumerate(end.types if self.entities else ()):
-                    if canonical_entity_type(name, self) not in names_exact:
+                    if canonical_entity_type(name, self).casefold() not in names:
                         raise ValueError(f"{at}.types[{j}]: unknown type {name!r}")
                 if end.max_count is not None and end.max_count < 1:
                     raise ValueError(f"{at}.max_count: must be >= 1")
