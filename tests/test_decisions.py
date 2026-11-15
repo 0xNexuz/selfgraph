@@ -114,39 +114,44 @@ def trace_links(g, tid):
 
 
 @pytest.mark.parametrize(
-    "lost",
+    ("with_step", "lost", "extra"),
     [
-        [(L_TRACE, "decision:pick", "MADE_DECISION")],
-        [(L_TRACE, "decision:pick", "RESULTED_IN"), (L_TRACE, "decision:pick", "CONSIDERED")],
-        [(L_STEP, "decision:pick:step:0", "FROM"), (L_STEP, "decision:pick:step:0", "TO")],
+        (False, [(L_TRACE, "MADE_DECISION")], []),
+        (True, [(L_TRACE, "MADE_DECISION")], []),
+        (True, [(L_TRACE, "RESULTED_IN"), (L_TRACE, "CONSIDERED")], []),
+        (True, [(L_STEP, "FROM"), (L_STEP, "TO")], []),
+        (True, [], [("CONSIDERED", "company:beta")]),
+        (True, [], [("CONSIDERED", "person:ann")]),
     ],
 )
-def test_reinserting_a_decision_restores_links_a_partial_write_left_out(lost):
+def test_reinserting_a_decision_repairs_links_a_partial_write_left_wrong(with_step, lost, extra):
     g = fresh_graph("relink")
     create_entities(g, "Person:Ann", "Company:Acme", "Company:Beta", "Team:X", "Team:Y")
     rel = run(g.relations.create("team:x", "SELECTED", "team:y"))
-    facts = {
-        "decisions": [
-            {
-                "id": "decision:pick",
-                "title": "Pick a vendor",
-                "steps": [rel.id],
-                "actor_entity": "person:ann",
-                "outcome_entity": "company:acme",
-                "alternative_entities": ["company:beta"],
-            }
-        ]
+    decision = {
+        "id": "decision:pick",
+        "title": "Pick a vendor",
+        "steps": [rel.id] if with_step else [],
+        "actor_entity": "person:ann",
+        "outcome_entity": "company:acme",
+        "alternative_entities": ["company:beta"],
     }
-    run(g.insert.facts(facts))
+    run(g.insert.facts({"decisions": [decision]}))
     whole = trace_links(g, "decision:pick")
-    assert len(whole) == 5
-    for label, node, rtype in lost:
+    assert len(whole) == (5 if with_step else 3)
+    for label, rtype in lost:
+        node = "decision:pick:step:0" if label == L_STEP else "decision:pick"
         run(g.store.delete_edges_touching_by_type(g.namespace, label, node, rtype))
-    assert len(trace_links(g, "decision:pick")) == 5 - len(lost)
-    run(g.insert.facts(facts))
+    if extra:
+        rows = [(rtype, "decision:pick", to, {"ns": g.namespace}) for rtype, to in extra]
+        run(g.store.create_edges(g.namespace, L_TRACE, L_ENTITY, rows))
+    assert trace_links(g, "decision:pick") != whole
+    run(g.insert.facts({"decisions": [decision]}))
     assert trace_links(g, "decision:pick") == whole
-    run(g.insert.facts(facts))
+    repaired = run(g.decisions.get("decision:pick")).updated_at
+    run(g.insert.facts({"decisions": [decision]}))
     assert trace_links(g, "decision:pick") == whole
+    assert run(g.decisions.get("decision:pick")).updated_at == repaired
 
 
 def test_decision_steps_default_to_empty():
