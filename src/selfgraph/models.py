@@ -24,6 +24,7 @@ __all__ = [
     "Entity",
     "Certification",
     "Relation",
+    "GraphDiff",
     "Preference",
     "DecisionStep",
     "DecisionTrace",
@@ -391,6 +392,15 @@ class Relation(BaseModel):
     certified_at: datetime | None = None
     certified_by: str | None = None
     certifications: list[Certification] = Field(default_factory=list)
+
+
+class GraphDiff(BaseModel):
+    since: datetime
+    until: datetime
+    relations_added: list[Relation] = Field(default_factory=list)
+    relations_retired: list[Relation] = Field(default_factory=list)
+    relations_revised: list[Relation] = Field(default_factory=list)
+    entities_created: list[Entity] = Field(default_factory=list)
 
 
 class Preference(BaseModel):

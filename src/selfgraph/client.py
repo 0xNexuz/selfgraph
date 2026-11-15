@@ -9,6 +9,7 @@ from functools import partial
 from typing import Any
 
 from . import _ops, tiers
+from ._diff import graph_diff
 from ._export import obsidian_vault
 from ._maintenance import inspect, scan_entities, scan_relations
 from ._serde import L_TRACE, aware, now
@@ -27,6 +28,7 @@ from .models import (
     Extraction,
     ExtractionInstructions,
     ExtractionPrompts,
+    GraphDiff,
     InsertResult,
     InsertWarning,
     JsonValue,
@@ -421,6 +423,29 @@ class SelfGraph:
         if report.missing and self._seeds == "embeddings":
             report.note = _LEXICAL_NOTE
         return report
+
+    async def diff(self, since: datetime | str, until: datetime | str | None = None) -> GraphDiff:
+        """List stored changes in the known-time window (since, until], defaulting until to now.
+
+        Uses created_at and invalidated_known_at, not event_time. Returns each new revision,
+        one retirement per relation and retirement time, and newly created entities. Deleted records,
+        overwritten retirements, and edits to entity fields are not tracked. Reassertions count as revisions.
+        A relation can appear in several lists in one window. Reads scan the namespace;
+        concurrent writes are not isolated. Returned fields reflect stored records, not snapshots.
+
+        @param since (datetime | str): exclusive lower bound, naive times read as UTC.
+        @param until (datetime | str | None): inclusive upper bound, or now.
+        @return (GraphDiff): additions, retirements, revisions, and entities created.
+        """
+        start = _ops.parse_time(since, "since")
+        end = _ops.parse_time(until, "until")
+        if start is None:
+            raise ValidationError("since is required")
+        start = aware(start)
+        end = now() if end is None else aware(end)
+        if end < start:
+            raise ValidationError("until must be at or after since")
+        return await graph_diff(await self._reader(), self.namespace, start, end)
 
     async def readiness(self) -> Readiness:
         """Report whether the graph can answer: the store is reachable and the namespace holds entities, with counts
