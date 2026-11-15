@@ -882,7 +882,8 @@ async def validate_facts(
     for dec in facts.decisions:
         _validate_own_id("decision", dec.id)
         _require_datetime("decision event_time", dec.event_time)
-        _require_choice("decision status", dec.status, _STATUSES)
+        if dec.status is not None:
+            _require_choice("decision status", dec.status, _STATUSES)
         _require_text("decision title", dec.title)
         _require_optional_text("decision summary", dec.summary)
         _require_optional_text("decision rationale", dec.rationale)

@@ -1270,7 +1270,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
             rationale=back.rationale,
             outcome_entity=back.outcome_entity,
             alternative_entities=back.alternative_entities,
-            status=back.status,
+            status=back.status or "completed",
             event_time=back.event_time,
             created_at=at,
         )

@@ -149,6 +149,23 @@ describe("LLM extraction through the AI SDK", () => {
     expect(res.warnings).toEqual([]);
   });
 
+  it("keeps a stored decision's fields when the model restates it without them", async () => {
+    let restate = false;
+    const model = mockModel((kind) => {
+      if (kind !== "decisions" || !restate) return REPLIES[kind];
+      const [dec] = (REPLIES.decisions as { decisions: object[] }).decisions;
+      return { decisions: [{ ...dec, rationale: null, status: null }] };
+    });
+    const g = open({ llm: model });
+    const text = "Soham on the Platform Team chose HydraDB over Neo4j for temporal history.";
+    const [dec] = (await g.insert.text(text, { source_id: "chat" })).decisions;
+    expect(dec!.status).toBe("completed");
+    await g.decisions.update(dec!.id, { status: "active" });
+    restate = true;
+    const [again] = (await g.insert.text(`${text} Again.`, { source_id: "notes" })).decisions;
+    expect(again).toMatchObject({ id: dec!.id, status: "active", rationale: "temporal history" });
+  });
+
   it("re-asks when a reply does not match the schema", async () => {
     let entityCalls = 0;
     const model = mockModel((kind) => {

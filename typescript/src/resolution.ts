@@ -10,6 +10,7 @@ import { L_ENTITY, L_EVIDENCE, L_MERGE, L_MERGE_ENTRY, L_SOURCE_VERSION, L_TRACE
 import { type LLMArg, resolveLlm } from "./llm/index.js";
 import { scanLiveMerges } from "./maintenance.js";
 import {
+  DEFAULT_STATUS,
   type DecisionTrace,
   DecisionTraceInput,
   type Entity,
@@ -1399,7 +1400,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       rationale: back.rationale,
       outcome_entity: back.outcome_entity,
       alternative_entities: back.alternative_entities,
-      status: back.status,
+      status: back.status ?? DEFAULT_STATUS,
       event_time: back.event_time,
       created_at: at,
     });

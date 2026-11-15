@@ -827,7 +827,7 @@ export async function validateFacts(
   for (const dec of facts.decisions) {
     validateOwnId("decision", dec.id);
     requireDatetime("decision event_time", dec.event_time);
-    requireChoice("decision status", dec.status, STATUSES);
+    if (dec.status !== null) requireChoice("decision status", dec.status, STATUSES);
     requireStr("decision title", dec.title);
     requireOptionalText("decision summary", dec.summary);
     requireOptionalText("decision rationale", dec.rationale);

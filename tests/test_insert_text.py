@@ -258,3 +258,12 @@ def test_llm_relations_cite_their_chunk_and_progress_is_logged(caplog):
     evidence = run(g.relations.evidence(rel.id, limit=100)).items
     assert {ev.chunk_id for ev in evidence} == {_ids.chunk_id(res.source_version, i) for i in range(total)}
     assert all(ev.source_version == res.source_version for ev in evidence)
+
+
+def test_llm_restatement_keeps_the_stored_decision_fields():
+    g = fresh_graph("restate", llm=FakeLLM(_full_responses()))
+    [dec] = run(g.insert.text("The team selected HydraDB.", source_id="m1")).decisions
+    assert dec.status == "completed"
+    run(g.decisions.update(dec.id, status="active", rationale="needs temporal history"))
+    [again] = run(g.insert.text("The team picked HydraDB again.", source_id="m2")).decisions
+    assert (again.id, again.status, again.rationale) == (dec.id, "active", "needs temporal history")

@@ -76,6 +76,61 @@ function suite(spec: StoreSpec) {
     await other?.close();
   });
 
+  it("keeps the fields a restated decision leaves out", async () => {
+    const g = fresh();
+    await g.insert.facts({
+      entities: [
+        { id: "team:core", type: "Team", name: "Core" },
+        { id: "company:hydradb", type: "Company", name: "HydraDB" },
+        { id: "company:neo4j", type: "Company", name: "Neo4j" },
+      ],
+      relations: [
+        { id: "relation:a", from_entity: "team:core", type: "SELECTED", to_entity: "company:hydradb" },
+        { id: "relation:b", from_entity: "team:core", type: "TESTED", to_entity: "company:neo4j" },
+      ],
+    });
+    const title = { title: "Select the graph database", actor_entity: "team:core" };
+    const full = {
+      ...title,
+      steps: ["relation:a", "relation:b"],
+      summary: "embedded wins",
+      rationale: "needs temporal history",
+      outcome_entity: "company:hydradb",
+      alternative_entities: ["company:neo4j"],
+      status: "active" as const,
+      event_time: "2024-03-01T00:00:00Z",
+    };
+    await g.insert.facts({ decisions: [full] }, { source_id: "design" });
+    const [kept] = (await g.insert.facts({ decisions: [title] }, { source_id: "notes" })).decisions;
+    expect(await g.decisions.get(kept!.id)).toEqual(kept);
+    expect(kept).toMatchObject({
+      summary: "embedded wins",
+      rationale: "needs temporal history",
+      outcome_entity: "company:hydradb",
+      alternative_entities: ["company:neo4j"],
+      status: "active",
+      event_time: new Date("2024-03-01T00:00:00Z"),
+    });
+    expect(kept!.steps.map((s) => s.relation_id)).toEqual(["relation:a", "relation:b"]);
+    const given = {
+      rationale: "no server",
+      outcome_entity: "company:neo4j",
+      status: "reversed" as const,
+      steps: ["relation:b"],
+    };
+    const [changed] = (await g.insert.facts({ decisions: [{ ...title, ...given }] })).decisions;
+    expect(changed).toMatchObject({
+      summary: "embedded wins",
+      rationale: "no server",
+      outcome_entity: "company:neo4j",
+      status: "reversed",
+    });
+    expect(changed!.steps.map((s) => s.relation_id)).toEqual(["relation:b"]);
+    const [dated] = (await g.insert.facts({ decisions: [title] }, { event_time: "2025-01-01T00:00:00Z" })).decisions;
+    expect(dated!.event_time).toEqual(new Date("2025-01-01T00:00:00Z"));
+    expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
+  });
+
   it("canonicalizes explicit entity ids on every input path", async () => {
     const g = fresh();
     expect((await g.entities.create("X", "T", { id: "T:X" })).id).toBe("t:x");

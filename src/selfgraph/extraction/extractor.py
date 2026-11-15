@@ -86,7 +86,7 @@ class _DecOut(BaseModel):
     rationale: str | None = None
     outcome_name: str | None = None
     alternative_names: list[str] = Field(default_factory=list)
-    status: Status = "completed"
+    status: Status | None = None
     steps: list[_StepOut] = Field(default_factory=list)
     _evidence: EvidenceInput | None = PrivateAttr(default=None)
 
