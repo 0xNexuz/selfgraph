@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 import json
@@ -41,6 +42,7 @@ __all__ = ["configure", "close", "build_server", "run_stdio", "TOOLS"]
 
 _settings: GraphSettings | None = None
 _graph: SelfGraph | None = None
+_opening: asyncio.Future[SelfGraph] | None = None
 
 _WRITE_CLAUSE = re.compile(
     r"\b(CREATE|INSERT|MERGE|DELETE|DETACH|SET|REMOVE|DROP|ALTER|RENAME|TRUNCATE|FOREACH|COPY|LOAD|IMPORT|"
@@ -131,9 +133,10 @@ def configure(settings: GraphSettings | None = None) -> None:
 
     @param settings (GraphSettings | None): the backend settings, or None to read the environment.
     """
-    global _settings, _graph
+    global _settings, _graph, _opening
     _settings = settings or settings_from_env()
     _graph = None
+    _opening = None
 
 
 async def close() -> None:
@@ -147,23 +150,44 @@ async def close() -> None:
         await graph.close()
 
 
+async def _open_graph() -> SelfGraph:
+    """Build and initialise a graph from the current settings.
+
+    @return (SelfGraph): the initialised graph.
+    """
+    graph = build_graph(_settings)  # type: ignore[arg-type]
+    try:
+        await graph.initialize()
+    except BaseException:
+        await graph.close()
+        raise
+    return graph
+
+
 async def _graph_handle() -> SelfGraph:
     """Return the shared graph, opening and initialising it on first use.
 
-    No lock is taken: an MCP server runs one event loop, so at worst a rare
-    concurrent first call builds a second graph and the first assignment wins.
+    Concurrent first calls share one open, so the store is initialised once.
 
     @return (SelfGraph): the shared, initialised graph.
     """
-    global _graph
-    if _graph is None:
+    global _graph, _opening
+    if _graph is not None:
+        return _graph
+    if _opening is None:
         if _settings is None:
             configure()
-        graph = build_graph(_settings)  # type: ignore[arg-type]
-        await graph.initialize()
-        if _graph is None:
-            _graph = graph
-    return _graph
+        _opening = asyncio.ensure_future(_open_graph())
+    opening = _opening
+    try:
+        graph = await asyncio.shield(opening)
+    except BaseException:
+        if _opening is opening and opening.done():
+            _opening = None
+        raise
+    if _opening is opening:
+        _graph, _opening = graph, None
+    return graph
 
 
 async def get_schema(format: Literal["selfgraph", "neo4j", "ossie"] = "selfgraph") -> dict[str, Any] | None:
