@@ -252,6 +252,10 @@ Text is split into chunks of up to 512 tokens with a 64-token overlap. Without
 or `chunk_text` raises `ValidationError`. Without `overlap_tokens` the overlap is
 `min(64, max_tokens // 4)`, so a small `max_tokens` works on its own.
 `count_tokens` uses the tokenizer when installed and estimates otherwise.
+tiktoken downloads `cl100k_base` on first use. When that load fails, for example
+with no network, SelfGraph logs one warning on the `selfgraph` logger and
+estimates for the rest of the process. Set `TIKTOKEN_CACHE_DIR` to a directory
+holding the cached encoding to run offline.
 
 ## Unknown keys
 
