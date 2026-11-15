@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from ..errors import StoreError, ValidationError
+from ..errors import StoreError, TransientError, ValidationError
 from ..ids import quote_label
 from ..models import CypherResult
 from ._cypher import AutoCommitStore, count_of, where_after, write_batches
@@ -55,6 +55,8 @@ _SCHEMA = (
     "is_current BOOLEAN, revision INT64, doc STRING)",
 )
 _DATABASES: dict[str, Any] = {}
+_LOCKS: dict[str, asyncio.Lock] = {}
+_WRITE_LOCKS: dict[str, asyncio.Lock] = {}
 _OPEN_STORES: dict[str, int] = {}
 _MAX_SKIP = 10_000_000
 
@@ -67,6 +69,8 @@ def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
     @return (StoreError): the error to raise.
     """
     message = f"{prefix}: {exc}"
+    if "Only one write transaction at a time" in str(exc):
+        return TransientError(f"{message}; another writer is using this Kuzu database, retry the write")
     if "Could not set lock on file" in str(exc):
         message += (
             "; another process (an MCP server or script) has this Kuzu database open; Kuzu allows one process at a time"
@@ -162,7 +166,9 @@ class KuzuStore(AutoCommitStore):
         self._db = _DATABASES[path]
         self._conn = kuzu.Connection(self._db)
         _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
-        self._lock = asyncio.Lock()
+        # every store on one path shares one database, so they share its locks too
+        self._lock = _LOCKS.setdefault(path, asyncio.Lock())
+        self._write_lock = _WRITE_LOCKS.setdefault(path, asyncio.Lock())
 
     async def _run(self, query: str, params: Mapping[str, Any] | None = None) -> CypherResult:
         def _exec():
