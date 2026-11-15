@@ -652,6 +652,50 @@ function suite(spec: StoreSpec): void {
     }
   });
 
+  it("a relation ends at the earliest endpoint that displaces it in any order", async () => {
+    const spec: Schema = {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [
+        { type: "WORKS_AT", from: { types: ["Person"], max_count: 1 }, to: { types: ["Company"], max_count: 1 } },
+      ],
+    };
+    const entities = [
+      { type: "Person", name: "Ann" },
+      { type: "Person", name: "Bob" },
+      { type: "Company", name: "Acme" },
+      { type: "Company", name: "Globex" },
+    ];
+    const link = (person: string, company: string, year: number) => ({
+      from_entity: `person:${person}`,
+      type: "WORKS_AT",
+      to_entity: `company:${company}`,
+      event_time: at(year),
+    });
+    const rels = [link("ann", "acme", 2020), link("ann", "globex", 2024), link("bob", "acme", 2022)];
+    const annAcme = ids.relationId("person:ann", "WORKS_AT", "company:acme");
+    const bobAcme = ids.relationId("person:bob", "WORKS_AT", "company:acme");
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ];
+    for (const order of orders) {
+      for (const batched of [false, true]) {
+        const g = open({ schema: spec, contradiction: "supersede" });
+        await g.insert.facts({ entities });
+        for (const batch of batched ? [order] : order.map((i) => [i])) {
+          await g.insert.facts({ relations: batch.map((i) => rels[i]!) });
+        }
+        const [ended] = await g.relations.versions(annAcme);
+        expect([ended!.invalidated_by, ended!.invalidated_at]).toEqual([bobAcme, at(2022)]);
+        expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
+      }
+    }
+  });
+
   it("rejects an invalid as_of and a closed graph", async () => {
     const g = await graph();
     await expect(g.retrieve("Ann", { as_of: 5 as never })).rejects.toThrow("as_of must be a datetime, got number");

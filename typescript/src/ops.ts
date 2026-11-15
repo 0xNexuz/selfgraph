@@ -1764,6 +1764,14 @@ export class Contradictions {
     this.where.set(rid, keys.add(key));
   }
 
+  private newer(facts: ReadonlyMap<string, Rank>, rid: string): Array<[Rank, string]> {
+    const mine: [Rank, string] = [facts.get(rid)!, rid];
+    return [...facts]
+      .map(([o, r]) => [r, o] as [Rank, string])
+      .filter((pair) => compareRanked(pair, mine) > 0)
+      .sort(compareRanked);
+  }
+
   private drop(rid: string): void {
     for (const key of this.where.get(rid) ?? []) {
       const group = this.groups.get(key)!;
@@ -1849,14 +1857,18 @@ export class Contradictions {
    */
   settle(): [Map<string, [string, Date]>, InsertWarning[]] {
     const retired = new Map<string, [string, Date]>();
-    const warnings: InsertWarning[] = [];
+    const why = new Map<string, [string, number, string]>();
+    const slots: Array<InsertWarning | string> = [];
     for (const [key, limit] of this.dirty) {
       const group = this.groups.get(key) ?? new Map<string, Rank>();
+      const facts = new Map([...(this.past.get(key) ?? []), ...group]);
       const ranked = [...group.keys()].sort((a, b) => compareRanked([group.get(b)!, b], [group.get(a)!, a]));
       const [canonical, side, endpoint] = JSON.parse(key) as [string, string, string];
-      for (const old of ranked.slice(limit)) {
+      for (const old of ranked) {
+        const newer = this.newer(facts, old);
+        if (newer.length < limit) continue;
         if (this.certified.has(old)) {
-          warnings.push(
+          slots.push(
             insertWarning(
               "certified_kept",
               `relation ${old} is certified, so it stays current beside newer ${canonical} relations at ${side} ` +
@@ -1865,50 +1877,52 @@ export class Contradictions {
           );
           continue;
         }
-        const facts = new Map([...(this.past.get(key) ?? []), ...group]);
-        const mine: [Rank, string] = [facts.get(old)!, old];
-        const newer = [...facts]
-          .map(([o, r]) => [r, o] as [Rank, string])
-          .filter((pair) => compareRanked(pair, mine) > 0)
-          .sort(compareRanked);
-        const by = newer[limit - 1]![1];
-        retired.set(old, [by, this.times.get(by)!]);
-        this.drop(old);
-        if ((this.order.get(by) ?? 0) < (this.order.get(old) ?? 0)) {
-          const keeper = ranked[limit - 1]!;
-          warnings.push(
-            insertWarning(
-              "contradiction_out_of_order",
-              `relation ${old} is older than current ${canonical} relation ${keeper} at ${side} entity ${endpoint}, ` +
-                `so ${keeper} stays current`,
-            ),
-          );
-        } else {
-          warnings.push(
-            insertWarning(
-              "relation_superseded",
-              `relation ${old} was superseded by ${by}, a newer ${canonical} relation at ${side} entity ${endpoint} ` +
-                `(max_count ${limit})`,
-            ),
-          );
-        }
-      }
-      const facts = new Map([...(this.past.get(key) ?? []), ...group]);
-      for (const rid of this.past.get(key)?.keys() ?? []) {
-        const was = this.ended.get(rid);
-        if (retired.has(rid) || was === undefined || !facts.has(was[0])) continue;
-        const mine: [Rank, string] = [facts.get(rid)!, rid];
-        const newer = [...facts]
-          .map(([o, r]) => [r, o] as [Rank, string])
-          .filter((pair) => compareRanked(pair, mine) > 0)
-          .sort(compareRanked);
-        if (newer.length < limit) continue;
         const by = newer[limit - 1]![1];
         const at = this.times.get(by)!;
-        if (by !== was[0] || at.getTime() !== was[1].getTime()) {
+        if (!retired.has(old)) slots.push(old);
+        if (!retired.has(old) || at.getTime() < retired.get(old)![1].getTime()) {
+          retired.set(old, [by, at]);
+          why.set(old, [key, limit, ranked.length >= limit ? ranked[limit - 1]! : by]);
+        }
+      }
+      for (const rid of this.past.get(key)?.keys() ?? []) {
+        const was = this.ended.get(rid);
+        const newer = this.newer(facts, rid);
+        if (retired.has(rid) || was === undefined || newer.length < limit) continue;
+        const by = newer[limit - 1]![1];
+        const at = this.times.get(by)!;
+        if ((by !== was[0] || at.getTime() !== was[1].getTime()) && (facts.has(was[0]) || at < was[1])) {
           retired.set(rid, [by, at]);
           this.ended.set(rid, [by, at]);
         }
+      }
+    }
+    const warnings: InsertWarning[] = [];
+    for (const slot of slots) {
+      if (typeof slot !== "string") {
+        warnings.push(slot);
+        continue;
+      }
+      const [by] = retired.get(slot)!;
+      const [key, limit, keeper] = why.get(slot)!;
+      const [canonical, side, endpoint] = JSON.parse(key) as [string, string, string];
+      this.drop(slot);
+      if ((this.order.get(by) ?? 0) < (this.order.get(slot) ?? 0)) {
+        warnings.push(
+          insertWarning(
+            "contradiction_out_of_order",
+            `relation ${slot} is older than current ${canonical} relation ${keeper} at ${side} entity ${endpoint}, ` +
+              `so ${keeper} stays current`,
+          ),
+        );
+      } else {
+        warnings.push(
+          insertWarning(
+            "relation_superseded",
+            `relation ${slot} was superseded by ${by}, a newer ${canonical} relation at ${side} entity ${endpoint} ` +
+              `(max_count ${limit})`,
+          ),
+        );
       }
     }
     this.dirty.clear();
@@ -2765,7 +2779,7 @@ export async function certifyRelation(
     until: toIso(c === held ? at : c.until),
   }));
   if (by !== null) history.push({ by, at: toIso(at), until: null });
-  const props: Record<string, unknown> = {
+  const props = {
     ...edge.props,
     certified_at: by === null ? null : toIso(at),
     certified_by: by,

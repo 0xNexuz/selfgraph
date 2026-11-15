@@ -1752,6 +1752,11 @@ class Contradictions:
         self._past.get(key, {}).pop(rid, None)
         self._where.setdefault(rid, {})[key] = None
 
+    @staticmethod
+    def _newer(facts: dict[str, tuple], rid: str) -> list[tuple[tuple, str]]:
+        mine = (facts[rid], rid)
+        return sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
+
     def _drop(self, rid: str) -> None:
         for key in self._where.pop(rid, {}):
             self._past.setdefault(key, {})[rid] = self._groups[key].pop(rid)
@@ -1822,14 +1827,19 @@ class Contradictions:
             id that invalidated it and when, and the warnings.
         """
         retired: dict[str, tuple[str, datetime]] = {}
-        warnings: list[InsertWarning] = []
+        why: dict[str, tuple[tuple[str, str, str], int, str]] = {}
+        slots: list[InsertWarning | str] = []
         for key, limit in self._dirty.items():
             group = self._groups.get(key, {})
+            facts = {**self._past.get(key, {}), **group}
             ranked = sorted(group, key=lambda o: (group[o], o), reverse=True)
             canonical, side, endpoint = key
-            for old in ranked[limit:]:
+            for old in ranked:
+                newer = self._newer(facts, old)
+                if len(newer) < limit:
+                    continue
                 if old in self._certified:
-                    warnings.append(
+                    slots.append(
                         InsertWarning(
                             code="certified_kept",
                             message=f"relation {old} is certified, so it stays current beside newer {canonical} "
@@ -1837,41 +1847,45 @@ class Contradictions:
                         )
                     )
                     continue
-                facts = {**self._past.get(key, {}), **group}
-                mine = (facts[old], old)
-                newer = sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
                 (at, _, _), by = newer[limit - 1]
-                retired[old] = (by, at)
-                self._drop(old)
-                if self._order.get(by, 0) < self._order.get(old, 0):
-                    keeper = ranked[limit - 1]
-                    warnings.append(
-                        InsertWarning(
-                            code="contradiction_out_of_order",
-                            message=f"relation {old} is older than current {canonical} relation {keeper} "
-                            f"at {side} entity {endpoint}, so {keeper} stays current",
-                        )
-                    )
-                else:
-                    warnings.append(
-                        InsertWarning(
-                            code="relation_superseded",
-                            message=f"relation {old} was superseded by {by}, a newer {canonical} relation "
-                            f"at {side} entity {endpoint} (max_count {limit})",
-                        )
-                    )
-            facts = {**self._past.get(key, {}), **group}
+                if old not in retired:
+                    slots.append(old)
+                if old not in retired or at < retired[old][1]:
+                    retired[old] = (by, at)
+                    why[old] = (key, limit, ranked[limit - 1] if len(ranked) >= limit else by)
             for rid in self._past.get(key, {}):
-                if rid in retired or rid not in self._ended or self._ended[rid][0] not in facts:
-                    continue
-                mine = (facts[rid], rid)
-                newer = sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
-                if len(newer) < limit:
+                newer = self._newer(facts, rid)
+                if rid in retired or rid not in self._ended or len(newer) < limit:
                     continue
                 (at, _, _), by = newer[limit - 1]
-                if (by, at) != self._ended[rid]:
+                ended_by, ended_at = self._ended[rid]
+                if (by, at) != (ended_by, ended_at) and (ended_by in facts or at < ended_at):
                     retired[rid] = (by, at)
                     self._ended[rid] = (by, at)
+        warnings: list[InsertWarning] = []
+        for slot in slots:
+            if not isinstance(slot, str):
+                warnings.append(slot)
+                continue
+            by = retired[slot][0]
+            (canonical, side, endpoint), limit, keeper = why[slot]
+            self._drop(slot)
+            if self._order.get(by, 0) < self._order.get(slot, 0):
+                warnings.append(
+                    InsertWarning(
+                        code="contradiction_out_of_order",
+                        message=f"relation {slot} is older than current {canonical} relation {keeper} "
+                        f"at {side} entity {endpoint}, so {keeper} stays current",
+                    )
+                )
+            else:
+                warnings.append(
+                    InsertWarning(
+                        code="relation_superseded",
+                        message=f"relation {slot} was superseded by {by}, a newer {canonical} relation "
+                        f"at {side} entity {endpoint} (max_count {limit})",
+                    )
+                )
         self._dirty.clear()
         return retired, warnings
 

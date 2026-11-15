@@ -261,6 +261,9 @@ that copies its content and carries the corrected `invalidated_by` and `invalida
 [`known_at`](retrieval.md#as-the-graph-knew-it) read from before that write still sees the
 earlier retirement.
 
+A relation constrained at both endpoints ends at the earliest time either endpoint displaces it,
+whichever order the facts arrive in.
+
 - New versions are written before any retirement.
 - The ranking covers every current relation at the endpoint, including one being
   restated, such as one of two that a `warn` insert left current.

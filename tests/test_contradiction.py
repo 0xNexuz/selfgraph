@@ -1,3 +1,4 @@
+import itertools
 import re
 
 import pytest
@@ -423,3 +424,38 @@ def test_a_late_middle_fact_corrects_the_retired_history_it_lands_in():
             return {r.id for r in run(g.retrieve("Ann", as_of=utc(year, 6))).subgraph.relations}
 
         assert (valid(2021), valid(2023), valid(2025)) == ({ACME}, {globex}, {initech})
+
+
+def test_a_relation_ends_at_the_earliest_endpoint_that_displaces_it_in_any_order():
+    spec = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [
+            {
+                "type": "WORKS_AT",
+                "from": {"types": ["Person"], "max_count": 1},
+                "to": {"types": ["Company"], "max_count": 1},
+            }
+        ],
+    }
+    people = [{"type": t, "name": n} for t, n in (("Person", "Ann"), ("Person", "Bob"), ("Company", "Acme"))]
+    people.append({"type": "Company", "name": "Globex"})
+
+    def link(person, company, year):
+        return {
+            "from_entity": f"person:{person}",
+            "type": "WORKS_AT",
+            "to_entity": f"company:{company}",
+            "event_time": utc(year),
+        }
+
+    rels = [link("ann", "acme", 2020), link("ann", "globex", 2024), link("bob", "acme", 2022)]
+    ann_acme, bob_acme = (ids.relation_id(f"person:{p}", "WORKS_AT", "company:acme") for p in ("ann", "bob"))
+    for order in itertools.permutations(rels):
+        for batched in (False, True):
+            g = fresh_graph("contra", schema=spec, contradiction="supersede")
+            run(g.insert.facts({"entities": people}))
+            for batch in [list(order)] if batched else [[rel] for rel in order]:
+                insert(g, *batch)
+            ended = run(g.relations.versions(ann_acme))[0]
+            assert (ended.invalidated_by, ended.invalidated_at) == (bob_acme, utc(2022))
+            assert run(g.relations.get(bob_acme)).is_current
