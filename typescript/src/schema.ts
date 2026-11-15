@@ -517,7 +517,7 @@ export function validateAgainstSchema(
     }
   }
 
-  const counts = new Map<string, { rtype: string; side: string; eid: string; n: number }>();
+  const counts = new Map<string, { rtype: string; side: string; eid: string; ids: Set<string> }>();
   for (const rel of facts.relations) {
     const rtype = normalizeRelType(rel.type);
     const matched = relations.get(rtype);
@@ -528,6 +528,7 @@ export function validateAgainstSchema(
       continue;
     }
     const canonical = normalizeRelType(matched.type);
+    const rid = rel.id || relationId(rel.from_entity, canonical, rel.to_entity);
     const sides: Array<[string, ParsedEndpoint, string]> = [
       ["from", matched.from, rel.from_entity],
       ["to", matched.to, rel.to_entity],
@@ -549,8 +550,8 @@ export function validateAgainstSchema(
       }
       const key = `${canonical}\x1f${side}\x1f${eid}`;
       const existing = counts.get(key);
-      if (existing) existing.n += 1;
-      else counts.set(key, { rtype: canonical, side, eid, n: 1 });
+      if (existing) existing.ids.add(rid);
+      else counts.set(key, { rtype: canonical, side, eid, ids: new Set([rid]) });
     }
     warnings.push(...checkProperties("relation", ref, rel.properties, matched.properties));
   }
@@ -560,8 +561,9 @@ export function validateAgainstSchema(
     for (const side of ["from", "to"] as const) {
       const { min_count: low, max_count: high } = relation[side];
       if (low === null && high === null) continue;
-      for (const { rtype: ctype, side: cside, eid, n } of counts.values()) {
+      for (const { rtype: ctype, side: cside, eid, ids } of counts.values()) {
         if (ctype !== rtype || cside !== side) continue;
+        const n = ids.size;
         const bounds: Array<[string, number | null, boolean]> = [
           ["below min", low, low !== null && n < low],
           ["above max", high, options.maxCount !== false && high !== null && n > high],

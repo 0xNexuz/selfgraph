@@ -149,6 +149,74 @@ def test_render_catalog():
     assert render_schema_catalog(Schema.model_validate({})) == ("", "")
 
 
+@pytest.mark.parametrize("side", ["from", "to"])
+@pytest.mark.parametrize("bound", ["min_count", "max_count"])
+@pytest.mark.parametrize(
+    ("first_id", "second_id", "distinct"),
+    [
+        (None, None, 1),
+        ("relation:same", "relation:same", 1),
+        (None, ids.relation_id("person:p", "WORKS_AT", "company:c"), 1),
+        ("relation:a", "relation:b", 2),
+    ],
+)
+def test_cardinality_counts_distinct_relation_ids(side, bound, first_id, second_id, distinct):
+    limit = 2 if bound == "min_count" else 1
+    spec = {"relations": [{"type": "WORKS_AT", side: {bound: limit}}]}
+    facts = _o(rels=[("person:p", "WORKS_AT", "company:c", rid) for rid in (first_id, second_id)])
+    found = warnings(spec, facts)
+    broken = distinct < limit if bound == "min_count" else distinct > limit
+    assert [w.code for w in found] == (["cardinality_violation"] if broken else [])
+    if broken:
+        assert f"has {distinct} WORKS_AT ({side})" in found[0].message
+
+
+@pytest.mark.parametrize("side", ["from", "to"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_strict_schema_accepts_repeated_relation_ids(side, explicit):
+    schema = {"relations": [{"type": "WORKS_AT", side: {"max_count": 1}}]}
+    g = fresh_graph("distinct", schema=schema, schema_mode="strict", resolver="exact")
+    run(g.entities.create("Ann", "Person"))
+    run(g.entities.create("Acme", "Company"))
+    relation = {"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme"}
+    if explicit:
+        relation["id"] = "relation:job"
+    result = run(g.insert.facts({"relations": [relation, {**relation, "properties": {"since": 2020}}]}))
+    assert result.warnings == []
+    stored = run(g.relations.list()).items
+    assert len(stored) == 1 and stored[0].properties == {"since": 2020}
+
+
+@pytest.mark.parametrize("side", ["from", "to"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_strict_schema_rejects_repeated_relation_ids_below_minimum(side, explicit):
+    schema = {"relations": [{"type": "WORKS_AT", side: {"min_count": 2}}]}
+    g = fresh_graph("distinct", schema=schema, schema_mode="strict", resolver="exact")
+    run(g.entities.create("Ann", "Person"))
+    run(g.entities.create("Acme", "Company"))
+    relation = {"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme"}
+    if explicit:
+        relation["id"] = "relation:job"
+    with pytest.raises(ValidationError, match=f"has 1 WORKS_AT \\({side}\\) in this insert, below min 2"):
+        run(g.insert.facts({"relations": [relation, relation]}))
+    assert run(g.relations.list()).items == []
+
+
+def test_repeated_relation_inputs_still_check_each_property():
+    schema = {
+        "relations": [
+            {"type": "WORKS_AT", "from": {"max_count": 1}, "properties": [{"name": "since", "type": "integer"}]}
+        ]
+    }
+    g = fresh_graph("distinct", schema=schema, schema_mode="strict", resolver="exact")
+    run(g.entities.create("Ann", "Person"))
+    run(g.entities.create("Acme", "Company"))
+    relation = {"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme"}
+    with pytest.raises(ValidationError, match="property 'since' should be integer"):
+        run(g.insert.facts({"relations": [relation, {**relation, "properties": {"since": "bad"}}]}))
+    assert run(g.relations.list()).items == []
+
+
 def test_insert_schema_modes_per_graph_and_per_call():
     g = new_graph()
     schema = {

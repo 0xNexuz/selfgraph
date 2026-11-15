@@ -80,6 +80,22 @@ SCHEMA_SPEC = {
 SCHEMA_CASES = [
     {
         "entities": [
+            {"id": "person:p", "type": "Person", "name": "P", "properties": {"age": 30}},
+            {"id": "company:c", "type": "Company", "name": "C"},
+        ],
+        "relations": [
+            {"from_entity": "person:p", "type": "WORKS_AT", "to_entity": "company:c"},
+            {"from_entity": "person:p", "type": "works at", "to_entity": "company:c"},
+            {
+                "id": ids.relation_id("person:p", "WORKS_AT", "company:c"),
+                "from_entity": "person:p",
+                "type": "WORKS_AT",
+                "to_entity": "company:c",
+            },
+        ],
+    },
+    {
+        "entities": [
             {"id": "manager:m", "type": "Manager", "name": "M", "properties": {"age": 30}},
             {"id": "org:o", "type": "org", "name": "O"},
         ],

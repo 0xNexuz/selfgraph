@@ -583,7 +583,7 @@ def validate_against_schema(
             type_of_id[eid] = matched
             warnings.extend(_check_properties("entity", ref, ent.properties, _property_specs(matched, entities)))
 
-    counts: dict[tuple[str, str, str], int] = {}
+    counts: dict[tuple[str, str, str], set[str]] = {}
     for rel in facts.relations:
         rtype = normalize_rel_type(rel.type)
         matched = relations.get(rtype)
@@ -595,6 +595,7 @@ def validate_against_schema(
                 )
             continue
         canonical = normalize_rel_type(matched.type)
+        rid = rel.id or relation_id(rel.from_entity, canonical, rel.to_entity)
         for side, endpoint, eid in (("from", matched.from_, rel.from_entity), ("to", matched.to, rel.to_entity)):
             end_type = type_of_id.get(eid)
             if end_type is not None:
@@ -608,7 +609,7 @@ def validate_against_schema(
                         message=f"relation {ref} {side} entity {eid} is not one of {endpoint.types}",
                     )
                 )
-            counts[(canonical, side, eid)] = counts.get((canonical, side, eid), 0) + 1
+            counts.setdefault((canonical, side, eid), set()).add(rid)
         warnings.extend(_check_properties("relation", ref, rel.properties, matched.properties))
 
     for relation in schema.relations if cardinality else ():
@@ -616,9 +617,10 @@ def validate_against_schema(
         for side, endpoint in (("from", relation.from_), ("to", relation.to)):
             if endpoint.min_count is None and endpoint.max_count is None:
                 continue
-            for (ctype, cside, eid), n in counts.items():
+            for (ctype, cside, eid), relation_ids in counts.items():
                 if ctype != rtype or cside != side:
                     continue
+                n = len(relation_ids)
                 low, high = endpoint.min_count, endpoint.max_count
                 for bound, limit, broken in (
                     ("below min", low, low is not None and n < low),
