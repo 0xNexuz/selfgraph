@@ -2,6 +2,7 @@ import pytest
 from helpers import create_entities, fresh_graph, new_graph, run, skip_on_generic
 
 from selfgraph import ConflictError, NotFoundError, ValidationError
+from selfgraph._serde import L_ENTITY, L_STEP, L_TRACE
 
 
 def seed(g):
@@ -103,6 +104,49 @@ def test_delete_trace_keeps_relations():
     assert dr.deleted_decisions == 1
     assert run(g.decisions.get(dec.id)) is None
     assert run(g.relations.get(r1.id)) is not None
+
+
+def trace_links(g, tid):
+    made = run(g.store.match_edges(g.namespace, from_label=L_ENTITY, to_label=L_TRACE, to_in=[tid]))
+    out = run(g.store.match_edges(g.namespace, from_label=L_TRACE, to_label=L_ENTITY, from_in=[tid]))
+    ends = run(g.store.match_edges(g.namespace, from_label=L_STEP, to_label=L_ENTITY, from_in=[f"{tid}:step:0"]))
+    return sorted((e["type"], e["from_id"], e["to_id"]) for e in made + out + ends)
+
+
+@pytest.mark.parametrize(
+    "lost",
+    [
+        [(L_TRACE, "decision:pick", "MADE_DECISION")],
+        [(L_TRACE, "decision:pick", "RESULTED_IN"), (L_TRACE, "decision:pick", "CONSIDERED")],
+        [(L_STEP, "decision:pick:step:0", "FROM"), (L_STEP, "decision:pick:step:0", "TO")],
+    ],
+)
+def test_reinserting_a_decision_restores_links_a_partial_write_left_out(lost):
+    g = fresh_graph("relink")
+    create_entities(g, "Person:Ann", "Company:Acme", "Company:Beta", "Team:X", "Team:Y")
+    rel = run(g.relations.create("team:x", "SELECTED", "team:y"))
+    facts = {
+        "decisions": [
+            {
+                "id": "decision:pick",
+                "title": "Pick a vendor",
+                "steps": [rel.id],
+                "actor_entity": "person:ann",
+                "outcome_entity": "company:acme",
+                "alternative_entities": ["company:beta"],
+            }
+        ]
+    }
+    run(g.insert.facts(facts))
+    whole = trace_links(g, "decision:pick")
+    assert len(whole) == 5
+    for label, node, rtype in lost:
+        run(g.store.delete_edges_touching_by_type(g.namespace, label, node, rtype))
+    assert len(trace_links(g, "decision:pick")) == 5 - len(lost)
+    run(g.insert.facts(facts))
+    assert trace_links(g, "decision:pick") == whole
+    run(g.insert.facts(facts))
+    assert trace_links(g, "decision:pick") == whole
 
 
 def test_decision_steps_default_to_empty():

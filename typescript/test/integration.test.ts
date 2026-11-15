@@ -429,6 +429,74 @@ function suite(spec: StoreSpec) {
     expect(await graph.decisions.get(t.id)).toBeNull();
   });
 
+  it.each([
+    [[["DecisionTrace", "decision:pick", "MADE_DECISION"]]],
+    [
+      [
+        ["DecisionTrace", "decision:pick", "RESULTED_IN"],
+        ["DecisionTrace", "decision:pick", "CONSIDERED"],
+      ],
+    ],
+    [
+      [
+        ["DecisionStep", "decision:pick:step:0", "FROM"],
+        ["DecisionStep", "decision:pick:step:0", "TO"],
+      ],
+    ],
+  ])("reinserting a decision restores links a partial write left out (%j)", async (lost) => {
+    const g = fresh();
+    for (const [name, type] of [
+      ["Ann", "Person"],
+      ["Acme", "Company"],
+      ["Beta", "Company"],
+      ["X", "Team"],
+      ["Y", "Team"],
+    ] as const) {
+      await g.entities.create(name, type);
+    }
+    const rel = await g.relations.create("team:x", "SELECTED", "team:y");
+    const facts = {
+      decisions: [
+        {
+          id: "decision:pick",
+          title: "Pick a vendor",
+          steps: [rel.id],
+          actor_entity: "person:ann",
+          outcome_entity: "company:acme",
+          alternative_entities: ["company:beta"],
+        },
+      ],
+    };
+    const links = async () => {
+      const ns = g.namespace;
+      const made = await g.store.matchEdges(ns, {
+        from_label: "Entity",
+        to_label: "DecisionTrace",
+        to_in: ["decision:pick"],
+      });
+      const out = await g.store.matchEdges(ns, {
+        from_label: "DecisionTrace",
+        to_label: "Entity",
+        from_in: ["decision:pick"],
+      });
+      const ends = await g.store.matchEdges(ns, {
+        from_label: "DecisionStep",
+        to_label: "Entity",
+        from_in: ["decision:pick:step:0"],
+      });
+      return [...made, ...out, ...ends].map((e) => [e.type, e.from_id, e.to_id].join(" ")).sort();
+    };
+    await g.insert.facts(facts);
+    const whole = await links();
+    expect(whole).toHaveLength(5);
+    for (const [label, node, type] of lost) await g.store.deleteEdgesTouchingByType(g.namespace, label, node, type);
+    expect(await links()).toHaveLength(5 - lost.length);
+    await g.insert.facts(facts);
+    expect(await links()).toEqual(whole);
+    await g.insert.facts(facts);
+    expect(await links()).toEqual(whole);
+  });
+
   it("unlinks what a decision clears or a deleted about_entity, and null keeps a field", async () => {
     const g = fresh();
     for (const [name, type] of [
