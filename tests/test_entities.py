@@ -116,6 +116,10 @@ def test_property_values_and_keys_are_checked_and_null_clears_a_key():
 
     assert run(g.entities.create("Max", "Person", properties={"n": 2**53 - 1})).properties == {"n": 2**53 - 1}
     with pytest.raises(
+        ValidationError, match=r"integer 9007199254740992 is outside the safe range; store it as a string"
+    ):
+        run(g.entities.create("Bob", "Person", properties={"n": 2**53}))
+    with pytest.raises(
         ValidationError, match=r"integer 9007199254740993 is outside the safe range; store it as a string"
     ):
         run(g.entities.create("Bob", "Person", properties={"n": 2**53 + 1}))
