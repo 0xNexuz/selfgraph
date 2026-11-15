@@ -389,6 +389,22 @@ describe("LLM extraction through the AI SDK", () => {
     expect([assembled.relations, assembled.decisions[0]!.steps]).toEqual([[], []]);
   });
 
+  it("drops a relation whose endpoint name is invalid with one warning instead of failing the insert", () => {
+    const warnings: InsertWarning[] = [];
+    const facts = assembleExtraction(
+      [{ type: "Person", name: "Ann" }],
+      [{ from_name: "Bob\nLee", type: "KNOWS", to_name: "Ann" }],
+      [],
+      [],
+      warnings,
+    );
+    expect(facts.entities.map((e) => e.name)).toEqual(["Ann"]);
+    expect(facts.relations).toEqual([]);
+    expect(warnings.map((w) => w.message)).toEqual([
+      "dropped an extracted entity: entity name cannot contain control or surrogate characters",
+    ]);
+  });
+
   it("uses chat completions for the openai provider with a base_url and reports a refused connection as its root cause", async () => {
     const paths: string[] = [];
     const server = createServer((req, res) => {

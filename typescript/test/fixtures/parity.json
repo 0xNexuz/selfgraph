@@ -2829,7 +2829,11 @@
   "Apple Inc. and Microsoft Corp. compete. 3M Company too? Yes. NASA launched Apollo 11.": "4755af5f39cc3ac993fab4c1",
   "\ud83d\ude80 Rocket Labs launched from New Zealand. The Team cheered.": "3318620d93fe75c7058fc950",
   "He met She. They saw It, This! Those were Acme's. Neo4j and S3 work with GPT-4.": "d0ca301ee16916fd377532ea",
-  "The rain fell. A Storm hit Paris; Berlin, Rome: Madrid! Done?": "926e2e0443af7a1aec0beea5"
+  "The rain fell. A Storm hit Paris; Berlin, Rome: Madrid! Done?": "926e2e0443af7a1aec0beea5",
+  "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.": "a8e4af8e260111cef200e124",
+  "Jane Doe met\nBob Smith at Acme.": "63b309d13b6549122a3aa3d8",
+  "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing": "5926862df84c66dca48c94df",
+  "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n": "9c50063883995db8f620e66d"
  },
  "quote_label": {
   "Entity": "Entity",
@@ -3157,6 +3161,46 @@
    "rain",
    "rome",
    "storm"
+  ],
+  "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.": [
+   "2019",
+   "acme",
+   "ann",
+   "company",
+   "doe",
+   "founded",
+   "handbook",
+   "jane",
+   "works"
+  ],
+  "Jane Doe met\nBob Smith at Acme.": [
+   "acme",
+   "bob",
+   "doe",
+   "jane",
+   "met",
+   "smith"
+  ],
+  "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing": [
+   "ann",
+   "attendees",
+   "bob",
+   "carol",
+   "king",
+   "lee",
+   "smith"
+  ],
+  "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n": [
+   "acme",
+   "ann",
+   "bob",
+   "globex",
+   "hooli",
+   "inc",
+   "initech",
+   "lee",
+   "report",
+   "works"
   ],
   "Stra\u00dfe STRASSE": [
    "strasse"
@@ -4476,7 +4520,11 @@
    23,
    14,
    29,
-   17
+   17,
+   26,
+   10,
+   13,
+   29
   ]
  },
  "extract": [
@@ -4878,6 +4926,328 @@
       "from_entity": "thing:rome",
       "type": "RELATED_TO",
       "to_entity": "thing:madrid",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     }
+    ],
+    "preferences": [],
+    "decisions": []
+   }
+  },
+  {
+   "text": "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.",
+   "facts": {
+    "entities": [
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Acme Handbook",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Acme",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Jane Doe",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Company Handbook",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Ann",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     }
+    ],
+    "relations": [
+     {
+      "id": null,
+      "from_entity": "thing:acme-handbook",
+      "type": "RELATED_TO",
+      "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:acme",
+      "type": "RELATED_TO",
+      "to_entity": "thing:jane-doe",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:company-handbook",
+      "type": "RELATED_TO",
+      "to_entity": "thing:ann",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:ann",
+      "type": "RELATED_TO",
+      "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     }
+    ],
+    "preferences": [],
+    "decisions": []
+   }
+  },
+  {
+   "text": "Jane Doe met\nBob Smith at Acme.",
+   "facts": {
+    "entities": [
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Jane Doe",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Bob Smith",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Acme",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     }
+    ],
+    "relations": [
+     {
+      "id": null,
+      "from_entity": "thing:jane-doe",
+      "type": "RELATED_TO",
+      "to_entity": "thing:bob-smith",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:bob-smith",
+      "type": "RELATED_TO",
+      "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     }
+    ],
+    "preferences": [],
+    "decisions": []
+   }
+  },
+  {
+   "text": "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing",
+   "facts": {
+    "entities": [
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Attendees",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Ann Smith",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Bob Lee",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Carol King",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     }
+    ],
+    "relations": [
+     {
+      "id": null,
+      "from_entity": "thing:attendees",
+      "type": "RELATED_TO",
+      "to_entity": "thing:ann-smith",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:ann-smith",
+      "type": "RELATED_TO",
+      "to_entity": "thing:bob-lee",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:bob-lee",
+      "type": "RELATED_TO",
+      "to_entity": "thing:carol-king",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     }
+    ],
+    "preferences": [],
+    "decisions": []
+   }
+  },
+  {
+   "text": "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n",
+   "facts": {
+    "entities": [
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Acme Report",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Ann",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Acme",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Bob Lee",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Initech Inc",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Globex",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Hooli",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     }
+    ],
+    "relations": [
+     {
+      "id": null,
+      "from_entity": "thing:acme-report",
+      "type": "RELATED_TO",
+      "to_entity": "thing:ann",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:ann",
+      "type": "RELATED_TO",
+      "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:bob-lee",
+      "type": "RELATED_TO",
+      "to_entity": "thing:initech-inc",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:initech-inc",
+      "type": "RELATED_TO",
+      "to_entity": "thing:globex",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:globex",
+      "type": "RELATED_TO",
+      "to_entity": "thing:hooli",
       "properties": {},
       "event_time": null,
       "evidence": []

@@ -1,6 +1,6 @@
 import { LLM_HINT } from "../errors.js";
 import { log } from "../internal/log.js";
-import { PY_WS_CLASS, pyStrip } from "../internal/py.js";
+import { PY_WS_CLASS, pySplit, pySplitLines, pyStrip } from "../internal/py.js";
 import { insertWarning, type ParsedDocument, type ParsedExtraction } from "../models.js";
 import type { Extractor } from "../protocols.js";
 import { assembleExtraction, FALLBACK_TYPE, type RawEntity, type RawRelation, WarningSink } from "./extractor.js";
@@ -22,7 +22,8 @@ function regexExtract(text: string): { entities: RawEntity[]; relations: RawRela
   const entities: RawEntity[] = [];
   const relations: RawRelation[] = [];
   for (const sentence of text.split(SENT)) {
-    const raw = Array.from(sentence.matchAll(CAP), (m) => pyStrip(pyStrip(m[0]), ".,;:!?"));
+    const found = pySplitLines(sentence).flatMap((line) => Array.from(line.matchAll(CAP), (m) => m[0]));
+    const raw = found.map((n) => pyStrip(pySplit(n).join(" "), ".,;:!?"));
     const names = [...new Set(raw.filter((n) => n && !STOPNAMES.has(n.toLowerCase())))];
     entities.push(...names.map((name) => ({ type: FALLBACK_TYPE, name })));
     for (let i = 0; i + 1 < names.length; i++) {
@@ -40,6 +41,6 @@ export class NERExtractor extends WarningSink implements Extractor {
     const message = `extracted without an LLM using heuristic regex; for model-based extraction, ${LLM_HINT}`;
     log(`basic_extraction: ${message}`);
     this.warnings = [insertWarning("basic_extraction", message)];
-    return assembleExtraction(entities, relations, [], []);
+    return assembleExtraction(entities, relations, [], [], this.warnings);
   }
 }
