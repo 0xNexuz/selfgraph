@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 from pydantic import ValidationError as PydanticValidationError
@@ -14,8 +15,9 @@ from .._ops import (
     _require_optional_text,
     _validate_entity_identity,
     _validate_strength,
+    parse_time,
 )
-from .._serde import EDGE_TYPES, preference_stance_of
+from .._serde import EDGE_TYPES, aware, preference_stance_of
 from ..errors import ExtractionError, ValidationError
 from ..llm.base import summarize_error
 from ..models import (
@@ -52,8 +54,35 @@ class _RelOut(BaseModel):
     type: str
     to_name: str
     properties: dict[str, JsonValue] = Field(default_factory=dict)
-    event_time: datetime | None = None
+    event_time: str | None = None
     _evidence: EvidenceInput | None = PrivateAttr(default=None)
+
+
+def _lenient_event_time(value: Any) -> datetime | None:
+    """Parse an extracted event_time; a bare year becomes Jan 1 UTC, and unparseable values become None.
+
+    @param value (Any): a datetime, ISO text, a four-digit year, or None.
+    @return (datetime | None): the time, or None when absent or not parseable.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return aware(value)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and 1000 <= value <= 9999:
+        return aware(datetime(value, 1, 1, tzinfo=timezone.utc))
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if len(text) == 4 and text.isdigit():
+            return aware(datetime(int(text), 1, 1, tzinfo=timezone.utc))
+        try:
+            return parse_time(text, "event_time")
+        except ValidationError:
+            return None
+    return None
 
 
 class _RelationsOut(BaseModel):
@@ -385,7 +414,9 @@ class LLMExtractor(_WarningSink):
                             _PrefOut(subject_name=rel.from_name, stance=stance, key=key, value_name=rel.to_name)
                         )
                         continue
-                    add_relation(from_id, rel.type, to_id, rel.properties, rel.event_time, rel._evidence)
+                    add_relation(
+                        from_id, rel.type, to_id, rel.properties, _lenient_event_time(rel.event_time), rel._evidence
+                    )
                 except ValidationError as exc:
                     _dropped(sink, "relation", exc, rel.type)
 

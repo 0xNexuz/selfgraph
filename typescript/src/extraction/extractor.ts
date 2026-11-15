@@ -4,10 +4,10 @@ import { ExtractionError, ValidationError } from "../errors.js";
 import * as ids from "../ids.js";
 import { log } from "../internal/log.js";
 import { pySplit, pyStrip, utf8 } from "../internal/py.js";
+import { parseIso } from "../internal/time.js";
 import { EDGE_TYPES, preferenceStanceOf } from "../labels.js";
 import { summarizeError } from "../llm/index.js";
 import {
-  DateTimeInput,
   Extraction,
   ExtractionInstructions,
   ExtractionPrompts,
@@ -162,10 +162,29 @@ function admitted(warnings: InsertWarning[], kind: string, check: () => void, rt
   }
 }
 
-function lenientTime(value: string | Date | null | undefined): Date | null {
+/**
+ * Parse an extracted event_time; a bare year becomes Jan 1 UTC, and unparseable values become null.
+ *
+ * @param value (string | Date | number | null | undefined): a Date, ISO text, a four-digit year, or null.
+ * @return (Date | null): the time, or null when absent or not parseable.
+ */
+export function lenientTime(value: string | Date | number | null | undefined): Date | null {
   if (value == null) return null;
-  const parsed = DateTimeInput.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1000 && value <= 9999) {
+    return parseIso(`${value}-01-01`);
+  }
+  if (typeof value === "string") {
+    const text = pyStrip(value);
+    if (!text) return null;
+    if (/^\d{4}$/.test(text)) return parseIso(`${text}-01-01`);
+    try {
+      return parseIso(text);
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /**
