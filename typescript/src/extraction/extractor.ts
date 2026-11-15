@@ -198,9 +198,19 @@ export function assembleExtraction(
   const resolve = (name: string | null | undefined): string | null => {
     if (name == null || !pyStrip(name)) return null;
     const key = norm(name);
-    let ent =
-      registry.get(key) ??
-      [...registry.values()].find((e) => ids.entityId(e.type, name) === ids.entityId(e.type, e.name));
+    let ent: RawEntity | undefined;
+    try {
+      ent =
+        registry.get(key) ??
+        [...registry.values()].find((e) => ids.entityId(e.type, name) === ids.entityId(e.type, e.name));
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      if (!rejected.has(key)) {
+        rejected.add(key);
+        warnings.push(insertWarning("extraction_partial_failure", `dropped an extracted entity: ${error.message}`));
+      }
+      return null;
+    }
     if (ent === undefined) {
       if (isNoiseName(name) || rejected.has(key)) return null;
       ent = { type: FALLBACK_TYPE, name: pyStrip(name) };

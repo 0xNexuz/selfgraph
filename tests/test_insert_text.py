@@ -93,6 +93,43 @@ def test_insert_text_without_llm_uses_ner_extractor(caplog):
     assert all("pass llm= to SelfGraph" in w.message for w in res.warnings if w.code == "basic_extraction")
 
 
+@pytest.mark.parametrize(
+    ("text", "names"),
+    [
+        ("# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.", ["Acme Handbook", "Acme", "Jane Doe"]),
+        ("Company Handbook\nAnn works at Acme.", ["Company Handbook", "Ann", "Acme"]),
+        ("Attendees:\nAnn Smith\nBob Lee", ["Attendees", "Ann Smith", "Bob Lee"]),
+        ("Acme Report\r\nAnn works at Acme.", ["Acme Report", "Ann", "Acme"]),
+        ("Ann\tSmith works at Acme.", ["Ann Smith", "Acme"]),
+        ("Acme Report\fAnn works at Acme.", ["Acme Report", "Ann", "Acme"]),
+        ("Acme Report\u2028Ann works at Acme.", ["Acme Report", "Ann", "Acme"]),
+    ],
+    ids=["heading", "title-line", "list", "crlf", "tab", "form-feed", "line-separator"],
+)
+def test_regex_extraction_stops_names_at_line_breaks(text, names):
+    res = run(fresh_graph("lines", extraction="regex").insert.text(text))
+    assert sorted(e.name for e in res.entities) == sorted(names)
+    assert [w.code for w in res.warnings] == ["basic_extraction"]
+
+
+def test_regex_extraction_still_relates_names_in_a_sentence_wrapped_across_lines():
+    res = run(fresh_graph("wrapped", extraction="regex").insert.text("Jane Doe met\nBob Smith at Acme."))
+    assert {(r.from_entity, r.to_entity) for r in res.relations} == {
+        ("thing:jane-doe", "thing:bob-smith"),
+        ("thing:bob-smith", "thing:acme"),
+    }
+
+
+def test_extracted_relation_with_an_invalid_endpoint_is_dropped_with_a_warning():
+    g = new_graph(llm=extracting_llm([("Person", "Ann")], [("Bob\nLee", "KNOWS", "Ann")]))
+    res = run(g.insert.text("Bob Lee knows Ann.", source_id="bad-endpoint"))
+    assert [e.id for e in res.entities] == ["person:ann"]
+    assert res.relations == []
+    assert [w.message for w in res.warnings if w.code == "extraction_partial_failure"] == [
+        "dropped an extracted entity: entity name cannot contain control or surrogate characters"
+    ]
+
+
 def test_custom_extractor_bypasses_the_llm_and_receives_the_insert_metadata():
     seen = []
 
