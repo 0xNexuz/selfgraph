@@ -591,6 +591,23 @@ def _dump(model: BaseModel, **kwargs: Any) -> dict[str, Any]:
     return model.model_dump(mode="json", **kwargs)
 
 
+def _fold_absorbed(base: EntityInput, ent: EntityInput) -> EntityInput:
+    """Fold a repeat of a merged candidate into the input recorded for it, as an upsert of the absorbed id would.
+
+    @param base (EntityInput): the absorbed input recorded so far.
+    @param ent (EntityInput): the repeated candidate.
+    @return (EntityInput): the input unmerge restores, keeping the recorded name and taking the repeat's aliases,
+        external ids, and properties.
+    """
+    return base.model_copy(
+        update={
+            "aliases": _ops._alias_list(base.name, [*base.aliases, *ent.aliases, ent.name]),
+            "external_ids": {**base.external_ids, **ent.external_ids},
+            "properties": _ops._merge_props(base.properties, ent.properties),
+        }
+    )
+
+
 async def plan_resolution(
     runner: Any, ns: str, facts: Extraction, resolver: EntityResolver, schema: Schema | None, created_at: datetime
 ) -> Resolution:
@@ -663,6 +680,7 @@ async def plan_resolution(
             merge = merges[eid]
             target = pool.get(merge.survivor_id) or batch[merge.survivor_id]
             merge.note(_absorb_into(target, ent, ename))
+            merge.candidate = _fold_absorbed(merge.candidate, ent)
             entities[i] = _redirect(ent, target)
             continue
         if ent.id is not None or eid in stored or eid in batch:
@@ -996,6 +1014,7 @@ async def save_merges(
             rec = prev.model_copy(
                 update={
                     "source_ids": _ops._dedup_list([*prev.source_ids, *rec.source_ids]),
+                    "absorbed": _dump(_fold_absorbed(EntityInput.model_validate(prev.absorbed), merge.candidate)),
                     "added_aliases": _ops._dedup_list([*prev.added_aliases, *merge.added_aliases]),
                     "added_external_ids": _ops._dedup_list([*prev.added_external_ids, *merge.added_external_ids]),
                     "added_properties": _ops._dedup_list([*prev.added_properties, *merge.added_properties]),

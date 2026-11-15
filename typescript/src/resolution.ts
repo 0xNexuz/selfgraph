@@ -580,6 +580,22 @@ const dumpEntity = (e: ParsedEntityInput): JsonObject => ({
   properties: { ...e.properties },
 });
 
+/**
+ * Fold a repeat of a merged candidate into the input recorded for it, as an upsert of the absorbed id would.
+ *
+ * @param base (ParsedEntityInput): the absorbed input recorded so far.
+ * @param ent (ParsedEntityInput): the repeated candidate.
+ * @return (ParsedEntityInput): the input unmerge restores, keeping the recorded name and taking the repeat's aliases, external ids, and properties.
+ */
+function foldAbsorbed(base: ParsedEntityInput, ent: ParsedEntityInput): ParsedEntityInput {
+  return {
+    ...base,
+    aliases: ops.aliasList(base.name, [...base.aliases, ...ent.aliases, ent.name]),
+    external_ids: { ...base.external_ids, ...ent.external_ids },
+    properties: ops.mergeProps(base.properties, ent.properties),
+  };
+}
+
 const dumpRelation = (r: ParsedRelationInput): JsonObject => ({
   id: r.id,
   from_entity: r.from_entity,
@@ -766,6 +782,7 @@ export async function planResolution(
     if (merged !== undefined) {
       const target = pool.get(merged.survivor_id) ?? batch.get(merged.survivor_id)!;
       noteAdded(merged, absorbInto(target, ent, ename));
+      merged.candidate = foldAbsorbed(merged.candidate, ent);
       entities[i] = redirect(ent, target);
       continue;
     }
@@ -1141,6 +1158,7 @@ export async function saveMerges(
       rec = {
         ...prev,
         source_ids: ops.dedupList([...prev.source_ids, ...rec.source_ids]),
+        absorbed: dumpEntity(foldAbsorbed(parseOrThrow(EntityInput, prev.absorbed, "entity"), merge.candidate)),
         added_aliases: ops.dedupList([...prev.added_aliases, ...merge.added_aliases]),
         added_external_ids: ops.dedupList([...prev.added_external_ids, ...merge.added_external_ids]),
         added_properties: ops.dedupList([...prev.added_properties, ...merge.added_properties]),
