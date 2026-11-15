@@ -790,6 +790,7 @@ OSSIE_SCHEMAS = [
             {"name": "Person", "description": "a human", "properties": [{"name": "age", "type": "integer"}]},
             {"name": "Employee", "parent": "Person", "properties": [{"name": "since", "type": "datetime"}]},
             {"name": "Company", "properties": [{"name": "meta", "type": "json"}, {"name": "ok", "type": "boolean"}]},
+            {"name": "Division"},
         ],
         "relations": [
             {
