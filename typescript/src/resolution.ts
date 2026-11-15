@@ -1304,6 +1304,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   };
 
   const restored = new Map<string, string>();
+  const origRestored = new Map<string, string>();
   const moved: Moved = [];
   const relations: Relation[] = [];
   for (const rw of rec.rewrites.filter((r) => r.kind === "relation")) {
@@ -1339,6 +1340,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       [rel] = await ops.retireRelations(runner, ns, [[edge!, latest.invalidated_by!, latest.invalidated_at!]], at);
     }
     restored.set(rw.id, rel!.id);
+    origRestored.set(ridOf(original), rel!.id);
     relations.push(rel!);
     moved.push([rw, { ...rw, id: rel!.id, rewritten: dumpRelation(back), existed, dropped: false }]);
     await ops.repointSteps(runner, ns, touching, restored);
@@ -1377,6 +1379,30 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     for (const [i, o] of original.alternative_entities.entries()) {
       alternatives.push(await end(o, rewritten.alternative_entities[i]!));
     }
+    const droppedOrigIds = new Set(
+      rec.rewrites
+        .filter((r) => r.kind === "relation" && r.dropped)
+        .map((r) => ridOf(parseOrThrow(RelationInput, r.original, "relation"))),
+    );
+    const currentSteps = current?.steps.map((s) => s.relation_id) ?? rewritten.steps;
+    let currIdx = 0;
+    const restoredSteps: string[] = [];
+    for (const s of original.steps) {
+      if (droppedOrigIds.has(s)) {
+        restoredSteps.push(origRestored.get(s) ?? restored.get(s) ?? s);
+      } else {
+        const currId = currentSteps[currIdx++] ?? s;
+        if (origRestored.has(s)) {
+          restoredSteps.push(origRestored.get(s)!);
+        } else if (restored.has(s)) {
+          restoredSteps.push(restored.get(s)!);
+        } else if (await ops.relationExists(runner, ns, s)) {
+          restoredSteps.push(s);
+        } else {
+          restoredSteps.push(currId);
+        }
+      }
+    }
     const back: ParsedDecisionTraceInput = {
       ...original,
       title: kept.title,
@@ -1384,7 +1410,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       rationale: kept.rationale,
       status: kept.status,
       event_time: kept.event_time,
-      steps: rewritten.steps.map((s) => restored.get(s) ?? s),
+      steps: restoredSteps,
       actor_entity: await end(original.actor_entity, rewritten.actor_entity),
       outcome_entity: await end(original.outcome_entity, rewritten.outcome_entity),
       alternative_entities: alternatives,

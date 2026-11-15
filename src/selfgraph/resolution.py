@@ -1170,6 +1170,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         return original if await exists(original) else rewritten
 
     restored: dict[str, str] = {}
+    orig_restored: dict[str, str] = {}
     moved: list[tuple[MergeRewrite, MergeRewrite]] = []
     relations = []
     for rw in (r for r in rec.rewrites if r.kind == "relation"):
@@ -1203,6 +1204,8 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
                 runner, ns, [(edge, versions[0].invalidated_by, versions[0].invalidated_at)], at
             )
         restored[rw.id] = rel.id
+        orig_id = original.id or _ids.relation_id(original.from_entity, original.type, original.to_entity)
+        orig_restored[orig_id] = rel.id
         relations.append(rel)
         moved.append((rw, _moved_to(rw, rel.id, _dump(back, exclude={"evidence"}), existed)))
         await _ops._repoint_steps(runner, ns, touching, restored)
@@ -1250,9 +1253,34 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         alternatives = [
             await end(o, r) for o, r in zip(original.alternative_entities, rewritten.alternative_entities, strict=True)
         ]
+        dropped_orig_ids = {
+            RelationInput.model_validate(r.original).id
+            or _ids.relation_id(
+                RelationInput.model_validate(r.original).from_entity,
+                RelationInput.model_validate(r.original).type,
+                RelationInput.model_validate(r.original).to_entity,
+            )
+            for r in rec.rewrites
+            if r.kind == "relation" and r.dropped
+        }
+        curr_step_iter = iter([s.relation_id for s in current.steps] if current else rewritten.steps)
+        restored_steps = []
+        for s in original.steps:
+            if s in dropped_orig_ids:
+                restored_steps.append(orig_restored.get(s, restored.get(s, s)))
+            else:
+                curr_id = next(curr_step_iter, s)
+                if s in orig_restored:
+                    restored_steps.append(orig_restored[s])
+                elif s in restored:
+                    restored_steps.append(restored[s])
+                elif await _ops.relation_exists(runner, ns, s):
+                    restored_steps.append(s)
+                else:
+                    restored_steps.append(curr_id)
         back = base.model_copy(
             update={
-                "steps": [restored.get(s, s) for s in rewritten.steps],
+                "steps": restored_steps,
                 "actor_entity": await end(original.actor_entity, rewritten.actor_entity),
                 "outcome_entity": await end(original.outcome_entity, rewritten.outcome_entity),
                 "alternative_entities": [a for a in alternatives if a is not None],

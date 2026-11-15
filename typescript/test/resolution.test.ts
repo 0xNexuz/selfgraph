@@ -218,6 +218,57 @@ function suite(spec: StoreSpec) {
     expect(restored.relations.map((r) => [r.id, r.from_entity, r.to_entity])).toEqual([[rid, BIG_BLUE, IBM]]);
   });
 
+  it("restores decision steps dropped as self-loops on unmerge", async () => {
+    const g = open({ resolver: "fuzzy" });
+    const rid = relationId(BIG_BLUE, "OWNS", IBM);
+    const batch = {
+      entities: [IBM_SEED, { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } }],
+      relations: [{ from_entity: BIG_BLUE, type: "OWNS", to_entity: IBM }],
+      decisions: [{ title: "acquisition", steps: [rid] }],
+    };
+    const res = await g.insert.facts(batch);
+    const [merge] = res.merges;
+    const [dec] = res.decisions;
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([]);
+    const restored = await g.entities.unmerge(merge!.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([rid]);
+    expect(restored.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([rid]);
+  });
+
+  it("restores dropped decision steps and preserves sibling merge steps", async () => {
+    const g = open({ resolver: "fuzzy" });
+    const ridLoop = relationId(BIG_BLUE, "OWNS", IBM);
+    const ridBob = relationId(BOB, "WORKS_AT", IBM);
+    const ridRobert = relationId(ROBERT, "WORKS_AT", IBM);
+    const batch = {
+      entities: [
+        IBM_SEED,
+        { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+        { type: "Person", name: "Robert", aliases: ["Bob"] },
+        { type: "Person", name: "Bob" },
+      ],
+      relations: [
+        { from_entity: BIG_BLUE, type: "OWNS", to_entity: IBM },
+        { from_entity: BOB, type: "WORKS_AT", to_entity: IBM },
+      ],
+      decisions: [{ title: "acquisition", steps: [ridLoop, ridBob] }],
+    };
+    const res = await g.insert.facts(batch);
+    expect(res.merges).toHaveLength(2);
+    const mergeBB = res.merges.find((m) => m.absorbed_id === BIG_BLUE)!;
+    const mergeBob = res.merges.find((m) => m.absorbed_id === BOB)!;
+    const [dec] = res.decisions;
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridRobert]);
+
+    const restored = await g.entities.unmerge(mergeBB.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridRobert]);
+    expect(restored.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridRobert]);
+
+    const restored2 = await g.entities.unmerge(mergeBob.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
+    expect(restored2.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
+  });
+
   const JANE = entityId("Person", "Jane Doe");
   const JD = entityId("Person", "JD");
   const JANE_DOES = entityId("Person", "Jane Does");
