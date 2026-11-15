@@ -72,8 +72,7 @@ class _SlowGraph:
 def slow_graph(monkeypatch):
     graph = _SlowGraph()
     monkeypatch.setattr(srv, "build_graph", lambda settings: graph)
-    run(srv.close())
-    srv.configure(srv.GraphSettings(store="kuzu"))
+    run(srv.configure(srv.GraphSettings(store="kuzu")))
     yield graph
     run(srv.close())
 
@@ -95,10 +94,9 @@ def test_configure_while_opening_closes_the_graph(slow_graph):
     async def scenario():
         first = asyncio.ensure_future(srv._graph_handle())
         await slow_graph.started.wait()
-        srv.configure(srv.GraphSettings(store="kuzu"))
+        await srv.configure(srv.GraphSettings(store="kuzu"))
         with pytest.raises(asyncio.CancelledError):
             await first
-        await asyncio.sleep(0)
 
     run(scenario())
     assert slow_graph.closed == 1
