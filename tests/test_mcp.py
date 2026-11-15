@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import json
 import logging
@@ -31,6 +32,26 @@ def test_tools_build_and_read_graph():
         if RAW_CYPHER:
             rows = run(srv.run_cypher("MATCH (e:Entity {id:'company:hydradb', ns:'default'}) RETURN e.id AS id"))
             assert {"id": "company:hydradb"} in rows["rows"]
+
+
+def test_concurrent_first_calls_open_one_graph(monkeypatch):
+    opened = []
+    real = srv.build_graph
+
+    def counting(settings):
+        graph = real(settings)
+        opened.append(graph)
+        return graph
+
+    monkeypatch.setattr(srv, "build_graph", counting)
+
+    async def first_calls():
+        return await asyncio.gather(*(srv.check_readiness() for _ in range(5)))
+
+    with mcp_session():
+        results = run(first_calls())
+    assert len(opened) == 1
+    assert all(result["reachable"] for result in results)
 
 
 def test_build_server_contract():
