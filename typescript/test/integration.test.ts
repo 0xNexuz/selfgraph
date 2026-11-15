@@ -241,6 +241,13 @@ function suite(spec: StoreSpec) {
     expect(res.warnings).toEqual([]);
     expect((await g.entities.create("Bea", "Human")).id).toBe("person:bea");
     expect((await g.relations.create("person:bea", "employed by", "company:acme")).type).toBe("WORKS_AT");
+    const byAlias = await g.relations.list({ type: "employed by" });
+    expect(byAlias.items.map((r) => r.type)).toEqual(["WORKS_AT", "WORKS_AT"]);
+    const iterated: string[] = [];
+    for await (const r of g.relations.iterate({ type: "employed by" })) {
+      iterated.push(r.type);
+    }
+    expect(iterated).toEqual(["WORKS_AT", "WORKS_AT"]);
   });
 
   it("inserts facts idempotently, merging on change", async () => {

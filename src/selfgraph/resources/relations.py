@@ -73,10 +73,21 @@ class Relations(Resource):
         limit: int = DEFAULT_PAGE_LIMIT,
         include_invalidated: bool = False,
     ) -> Page[Relation]:
+        """List current relations, optionally filtered by endpoints and type.
+
+        @param from_entity (str | None): filter by source entity.
+        @param type (str | None): filter by relation type; with a schema, an alias matches its type.
+        @param to_entity (str | None): filter by target entity.
+        @param cursor (str | None): the cursor from a previous page, or None to start.
+        @param limit (int): page size.
+        @param include_invalidated (bool): also list relations a contradiction invalidated.
+        @return (Page[Relation]): relations ordered by id.
+        """
+        rtype = canonical_relation_type(type, self._c.schema) if isinstance(type, str) and type.strip() else type
         return await self._page(
             _ops.list_relations,
             from_entity=from_entity,
-            type=type,
+            type=rtype,
             to_entity=to_entity,
             cursor=cursor,
             limit=limit,
@@ -96,7 +107,7 @@ class Relations(Resource):
         """Yield every relation across pages, following the list cursor.
 
         @param from_entity (str | None): filter by source entity.
-        @param type (str | None): filter by relation type.
+        @param type (str | None): filter by relation type; with a schema, an alias matches its type.
         @param to_entity (str | None): filter by target entity.
         @param limit (int): the page size per fetch, not a cap; iteration yields every match.
         @param include_invalidated (bool): also yield relations a contradiction invalidated.

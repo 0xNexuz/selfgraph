@@ -129,12 +129,22 @@ export class Relations extends Resource {
     return this.graph.read((store, ns) => ops.getRelationCurrent(store, ns, id));
   }
 
+  /**
+   * List current relations, optionally filtered by endpoints and type.
+   *
+   * @param options (RelationListOptions): from_entity, type, to_entity, cursor, limit, and include_invalidated; with a schema, an alias matches its type.
+   * @return (Page<Relation>): relations ordered by id.
+   */
   async list(options: RelationListOptions = {}): Promise<Page<Relation>> {
     checkOptions("relations.list", options, LIST_KEYS);
+    const rtype =
+      typeof options.type === "string" && pyStrip(options.type)
+        ? canonicalRelationType(options.type, this.graph.schema)
+        : options.type;
     return this.pageById("relation", options, (store, ns, window) =>
       ops.listRelations(store, ns, {
         from_entity: options.from_entity,
-        type: options.type,
+        type: rtype,
         to_entity: options.to_entity,
         include_invalidated: options.include_invalidated,
         ...window,
@@ -145,7 +155,7 @@ export class Relations extends Resource {
   /**
    * Yield every match across pages, following the list cursor.
    *
-   * @param options (object): the list filters, and limit: the page size per fetch, not a cap; iteration yields every match.
+   * @param options (object): the list filters, and limit: the page size per fetch, not a cap; iteration yields every match; with a schema, an alias matches its type.
    * @return (AsyncGenerator<Relation>): every matching relation.
    */
   iterate(options: Omit<RelationListOptions, "cursor"> = {}): AsyncGenerator<Relation> {

@@ -1,5 +1,5 @@
 import pytest
-from helpers import create_entities, new_graph, run, utc
+from helpers import create_entities, fresh_graph, new_graph, run, utc
 
 from selfgraph import ConflictError, NotFoundError
 
@@ -82,3 +82,27 @@ def test_multiple_relations_same_endpoints():
     assert r1.id != r2.id
     both = run(g.relations.list(from_entity="person:soham"))
     assert {x.type for x in both.items} == {"WORKS_AT", "FOUNDED"}
+
+
+def test_the_type_filter_follows_schema_relation_aliases():
+    schema = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [
+            {"type": "WORKS_AT", "aliases": ["employed_by", "works at"]},
+            {"type": "LIKES", "aliases": ["fond of"]},
+        ],
+    }
+    g = fresh_graph("rel", schema=schema)
+    seed(g)
+    create_entities(g, "Company:Neo4j")
+    r1 = run(g.relations.create("person:soham", "WORKS_AT", "company:hydradb"))
+    run(g.relations.create("person:soham", "LIKES", "company:neo4j"))
+
+    for alias in ("employed_by", "works at", "WORKS_AT", "EMPLOYED_BY"):
+        res = run(g.relations.list(type=alias))
+        assert [r.id for r in res.items] == [r1.id]
+
+    async def collect():
+        return [r.id async for r in g.relations.iterate(type="employed_by")]
+
+    assert run(collect()) == [r1.id]
