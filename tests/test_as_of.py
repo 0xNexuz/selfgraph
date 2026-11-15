@@ -1,19 +1,11 @@
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from helpers import cli, create_entities, employment_graph, fresh_graph, mcp_session, run, utc, works_at
+from helpers import cli, create_entities, employment_graph, fresh_graph, instant, mcp_session, run, utc, works_at
 
 from selfgraph import EntityInput, Extraction, StoreError, ValidationError
 from selfgraph._ops import _retired
 from selfgraph.runtime import to_jsonable
-
-
-def instant():
-    time.sleep(0.01)
-    stamp = datetime.now(timezone.utc)
-    time.sleep(0.01)
-    return stamp
 
 
 class Names:
