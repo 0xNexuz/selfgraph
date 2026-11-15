@@ -161,6 +161,7 @@ async def _diff(graph, args):
     if args.json:
         return result
     lines = [f"Changes ({result.since.isoformat()}, {result.until.isoformat()}]"]
+    lines += [f"Note: {limitation}" for limitation in result.limitations]
     lines += [f"+ entity {e.id}" for e in result.entities_created]
     lines += [
         f"+ relation {r.id} revision {r.revision}: {r.from_entity} -[{r.type}]-> {r.to_entity}"

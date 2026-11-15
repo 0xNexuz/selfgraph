@@ -234,7 +234,7 @@ the notes into a folder you can open as a vault.
 - A decision note, in `decisions/`, links its actor, outcome, alternatives, and
   steps in order.
 
-## Changes between known times (Python)
+## Changes between known times
 
 `await graph.diff(since, until=None)` returns `GraphDiff` with `relations_added`,
 `relations_revised`, `relations_retired`, and `entities_created`. `SyncSelfGraph`
@@ -245,7 +245,9 @@ mean UTC. Retired relations include `invalidated_by`.
 Each new relation revision is listed. Reassertions count as revisions. A relation
 created, revised, and retired in the same window appears in all three lists.
 This scans the namespace's stored records, not an isolated snapshot or an audit
-log. Deleted records and overwritten retirement history cannot be recovered.
+log. Deletes and merges are not visible. The result includes
+`limitations: ["Deletes and merges are not visible."]`. Deleted records and
+overwritten retirement history cannot be recovered.
 Returned entity fields and relation metadata reflect stored values, not their
 historical values. Preferences, decisions, and entity edits are not included.
-TypeScript support is not included yet.
+TypeScript uses `await graph.diff(since, until)`. Both SDKs return the same fields.

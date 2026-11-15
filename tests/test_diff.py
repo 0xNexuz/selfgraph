@@ -34,6 +34,7 @@ def test_diff_entities_empty_window_validation_and_namespace():
     end = instant()
     d = run(g.diff(start.isoformat(), end))
     assert [e.id for e in d.entities_created] == ["person:ann", "person:bob"]
+    assert d.limitations == ["Deletes and merges are not visible."]
     assert d.relations_added == d.relations_retired == d.relations_revised == []
     assert run(g.diff(end, end)).entities_created == []
     assert run(fresh_graph("other").diff(start, end)).entities_created == []
@@ -96,6 +97,7 @@ def test_diff_sync_cli_and_mcp(capsys):
         assert cli(g, [*flags, "--json"], capsys) == expected
         run(dispatch(g, build_parser().parse_args(flags)))
         summary = capsys.readouterr().out
+        assert "Note: Deletes and merges are not visible." in summary
         assert "+ entity person:ann" in summary
         assert "1 entities created, 0 relations added, 0 revised, 0 retired" in summary
         assert run(server.graph_diff(start.isoformat(), end.isoformat())) == expected
@@ -215,3 +217,21 @@ def test_diff_retirement_boundaries_reassertion_and_delete_limit():
     run(g.relations.delete(acme.id))
     deleted = run(g.diff(before_delete))
     assert deleted.relations_added == deleted.relations_revised == deleted.relations_retired == []
+
+
+def test_bolt_edge_pages_order_revisions_within_each_relation(monkeypatch):
+    from selfgraph.models import CypherResult
+    from selfgraph.stores._cypher import CypherPrimitives
+
+    store = CypherPrimitives()
+    queries = []
+
+    async def capture(query, params):
+        queries.append((query, params))
+        return CypherResult(columns=[], rows=[])
+
+    monkeypatch.setattr(store, "_run", capture)
+    run(store.match_edges("test", from_label="Entity", current_only=False, skip=500, limit=500))
+    query, params = queries[0]
+    assert "ORDER BY r.id, r.revision SKIP $skip LIMIT $limit" in query
+    assert params["skip"] == params["limit"] == 500

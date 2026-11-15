@@ -990,6 +990,8 @@ async def write(graph):
         "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
         "single_extra": extra_single_node["id"] if extra_single_node else None,
     }
+    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
+    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     return out
 
 
@@ -1226,6 +1228,36 @@ async def all_evidence(list_fn, oid):
         cursor = page.next_cursor
 
 
+async def diff_windows(graph):
+    d = await graph.diff("1900-01-01", "2100-01-01")
+    times = sorted(
+        {
+            at
+            for r in [*d.relations_added, *d.relations_revised, *d.relations_retired]
+            for at in (r.created_at, r.invalidated_known_at)
+            if at is not None
+        }
+    )
+    out = []
+    for since in times:
+        for until in times:
+            if since > until:
+                continue
+            d = await graph.diff(since, until)
+            out.append(
+                {
+                    "since": since.isoformat().replace("+00:00", "Z"),
+                    "until": until.isoformat().replace("+00:00", "Z"),
+                    "added": [[r.id, r.revision] for r in d.relations_added],
+                    "revised": [[r.id, r.revision] for r in d.relations_revised],
+                    "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
+                    "entities": [e.id for e in d.entities_created],
+                    "limitations": d.limitations,
+                }
+            )
+    return out
+
+
 async def dump(graph, ns):
     store = graph.store
     entities = [e async for e in graph.entities.iterate(limit=3)]
@@ -1276,6 +1308,8 @@ async def dump(graph, ns):
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
+            "diff": await graph.diff("1900-01-01", "2100-01-01"),
+            "diff_windows": await diff_windows(graph),
             "answerable": answerable,
             "prune_types": pruned,
             "known_at_sources": {

@@ -63,7 +63,8 @@ function mask(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
-        if (k === "created_at" || k === "updated_at" || k === "invalidated_known_at") return [k, "<ts>"];
+        if (["created_at", "updated_at", "invalidated_at", "invalidated_known_at", "since", "until"].includes(k))
+          return [k, "<ts>"];
         if (k === "ns") return [k, "<ns>"];
         if (k === "message") return [k, "<message>"];
         if (k === "evidence_json" && typeof v === "string") return [k, mask(v)];

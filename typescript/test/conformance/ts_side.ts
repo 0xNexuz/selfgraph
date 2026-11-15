@@ -25,6 +25,7 @@ import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
+import { diffWindows } from "./diff.js";
 
 const LENIENT_EVENT_TIMES = [
   "2021",
@@ -1015,6 +1016,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
     single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
   };
+  await graph.insert.text("Mira knows Niko.", { source_id: "diff-source" });
+  await graph.insert.text("Mira knows Omar.", { source_id: "diff-source", replace_source: true });
   return out;
 }
 
@@ -1160,6 +1163,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
+    diff: await graph.diff("1900-01-01", "2100-01-01"),
+    diff_windows: await diffWindows(graph),
     answerable,
     filters:
       store instanceof KuzuStore

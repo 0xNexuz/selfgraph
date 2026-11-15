@@ -401,6 +401,7 @@ class GraphDiff(BaseModel):
     relations_retired: list[Relation] = Field(default_factory=list)
     relations_revised: list[Relation] = Field(default_factory=list)
     entities_created: list[Entity] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=lambda: ["Deletes and merges are not visible."])
 
 
 class Preference(BaseModel):
