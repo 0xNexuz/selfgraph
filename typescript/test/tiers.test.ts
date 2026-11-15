@@ -307,20 +307,22 @@ function suite(spec: StoreSpec): void {
   });
 
   it("fromTables maps only integer SQL types to integer", () => {
-    const types = [
+    const ints = [
       "int",
       "INT UNSIGNED",
       "bigint(20)",
       "int8",
       "UInt32",
       "serial",
-      "point",
-      "interval",
-      "geometry(Point)",
+      "hugeint",
+      "uhugeint",
+      "byteint",
+      "varint",
     ];
+    const types = [...ints, "point", "interval", "geometry(Point)"];
     const schema = fromTables([{ name: "t", columns: types.map((type, i) => ({ name: `c${i}`, type })) }]);
     expect(schema.entities[0]!.properties.map((p) => p.type)).toEqual([
-      ...Array(6).fill("integer"),
+      ...Array(ints.length).fill("integer"),
       ...Array(3).fill("string"),
     ]);
   });

@@ -13,7 +13,7 @@ _TYPES = (
     (re.compile(r"bool"), "boolean"),
     (re.compile(r"json"), "json"),
     (re.compile(r"date|time"), "datetime"),
-    (re.compile(r"(?<![a-z])u?(?:tiny|small|medium|big)?int(?:eger|\d*)(?![a-z])|serial"), "integer"),
+    (re.compile(r"(?<![a-z])u?(?:tiny|small|medium|big|huge|byte|var)?int(?:eger|\d*)(?![a-z])|serial"), "integer"),
     (re.compile(r"float|double|real|numeric|decimal|money"), "float"),
 )
 

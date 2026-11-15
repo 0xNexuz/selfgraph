@@ -9,7 +9,7 @@ const TYPES: ReadonlyArray<readonly [RegExp, string]> = [
   [/bool/, "boolean"],
   [/json/, "json"],
   [/date|time/, "datetime"],
-  [/(?<![a-z])u?(?:tiny|small|medium|big)?int(?:eger|\d*)(?![a-z])|serial/, "integer"],
+  [/(?<![a-z])u?(?:tiny|small|medium|big|huge|byte|var)?int(?:eger|\d*)(?![a-z])|serial/, "integer"],
   [/float|double|real|numeric|decimal|money/, "float"],
 ];
 const WORD = new RegExp(`[${PY_WORD_CLASS.replace("_", "")}]+`, "gu");
