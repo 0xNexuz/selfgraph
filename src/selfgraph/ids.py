@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+from ._marks import MARK_CLASS
 from .errors import ValidationError
 
 __all__ = [
@@ -147,11 +148,9 @@ def _require_no_control(label: str, value: str) -> None:
 
 _WS = re.compile(r"\s+")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_PUNCT = re.compile(r"[^\w\s]+")
-_NON_IDENT = re.compile(r"[^\w]+")
-_RUN_BREAK = re.compile(r"[\s_]+")
-_WORD_RUN = re.compile(r"[^\W_]+")
-_HIGH_PUNCT = re.compile(r"[^\w\s\x00-\x7f]")
+_MARK = re.compile(f"[{MARK_CLASS}]")
+_PUNCT = re.compile(rf"[^\w\s{MARK_CLASS}]+")
+_NON_IDENT = re.compile(rf"[^\w{MARK_CLASS}]+")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _ENTITY_SUFFIXES = frozenset(
     {
@@ -221,44 +220,23 @@ def _is_mark(ch: str) -> bool:
     """Report whether a character is a combining mark that is part of the word it follows.
 
     Vowel signs, viramas, nuktas, and tone marks are general category Mn or Mc and have no composed form for NFC
-    to fold them into. The variation selectors are left out, so an emoji presentation selector still drops with
-    its emoji.
+    to fold them into. The marks are the ones of Unicode 15.0, listed in _marks so that every Python and Node
+    version classifies them alike; the variation selectors are left out, so an emoji presentation selector still
+    drops with its emoji.
 
     @param ch (str): one character.
     @return (bool): True for a nonspacing or spacing mark other than a variation selector.
     """
-    if "\ufe00" <= ch <= "\ufe0f" or "\U000e0100" <= ch <= "\U000e01ef":
-        return False
-    return unicodedata.category(ch) in ("Mn", "Mc")
-
-
-def _keep_marks(run: str, fill: str) -> str:
-    """Rewrite a run of non-word characters, keeping its combining marks and filling each gap between them once.
-
-    @param run (str): a run of characters that are not letters, digits, or underscore.
-    @param fill (str): what replaces each stretch of the run that holds no mark.
-    @return (str): the marks of the run in order, with fill where other characters stood.
-    """
-    out: list[str] = []
-    for ch in run:
-        if _is_mark(ch):
-            out.append(ch)
-        elif not out or out[-1] != fill:
-            out.append(fill)
-    return "".join(out)
+    return _MARK.match(ch) is not None
 
 
 def _word_runs(text: str) -> list[str]:
     """Split text into its runs of letters and digits, each with the combining marks written on them.
 
-    Text that holds no combining mark is split in one pass.
-
     @param text (str): the text to split.
     @return (list[str]): the runs, in order; underscore, whitespace, punctuation, and symbols separate them.
     """
-    if text.isascii() or not any(map(_is_mark, _HIGH_PUNCT.findall(text))):
-        return _WORD_RUN.findall(text)
-    return [run for run in _RUN_BREAK.split(_PUNCT.sub(lambda m: _keep_marks(m.group(), " "), text)) if run]
+    return [run for run in _NON_IDENT.sub("_", text).split("_") if run]
 
 
 def normalize_text(value: str) -> str:
@@ -293,7 +271,7 @@ def _canonical_name(type: str, name: str) -> str:
     @return (str): the canonical hyphenated form.
     """
     name = normalize_text(name)
-    words = _PUNCT.sub(lambda m: _keep_marks(m.group(), " "), name.strip().lower()).split()
+    words = _PUNCT.sub(" ", name.strip().lower()).split()
     if slug(type) in _ORG_TYPES:
         if words and words[0] == "the":
             words = words[1:]
@@ -363,8 +341,7 @@ def normalize_rel_type(type: str) -> str:
     @return (str): the canonical relation type.
     """
     _require_str("relation type", type)
-    split = _CAMEL.sub("_", normalize_text(type).strip()).lower()
-    normalized = _NON_IDENT.sub(lambda m: _keep_marks(m.group(), "_"), split).strip("_").upper()
+    normalized = _NON_IDENT.sub("_", _CAMEL.sub("_", normalize_text(type).strip()).lower()).strip("_").upper()
     if not normalized:
         raise ValidationError("relation type cannot be empty; use a verb phrase, e.g. 'works at' or 'WORKS_AT'")
     return normalized

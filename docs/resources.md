@@ -51,7 +51,9 @@ A derived id is `type:name`, both slugged:
 - NFC-normalized, lowercased, and stripped;
 - whitespace runs turned into one hyphen;
 - punctuation, symbols, and emoji dropped from the name. Combining marks, such
-  as the vowel signs of Devanagari or Thai, are part of the word and stay.
+  as the vowel signs of Devanagari or Thai, are part of the word and stay. Both
+  SDKs take them from one fixed list, the marks of Unicode 15.0, so an id does
+  not depend on the Python or Node version.
 
 So `Acme` and `ACME` share an id, `Bob 😀` and `Bob` both become `person:bob`,
 type `Per son` gives `per-son:bob`, and `राम` and `रीमा` stay apart as

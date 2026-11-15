@@ -2,6 +2,7 @@ import { blake2b } from "@noble/hashes/blake2.js";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 
 import { ValidationError } from "./errors.js";
+import { MARK_CLASS } from "./internal/marks.js";
 import { cpLen, PY_WORD_CLASS, PY_WS_CLASS, pyCollapseWs, pyRepr, pySplit, pyStrip, utf8 } from "./internal/py.js";
 import type { Evidence } from "./models.js";
 import { requireStr } from "./validate.js";
@@ -21,11 +22,9 @@ export const RESERVED_ID_PREFIXES: ReadonlySet<string> = new Set(ID_PREFIXES);
 
 const tagged = (prefix: (typeof ID_PREFIXES)[number], rest: string): string => `${prefix}:${rest}`;
 
-const PUNCT = new RegExp(`[^${PY_WORD_CLASS}${PY_WS_CLASS}]+`, "gu");
-const NON_IDENT = new RegExp(`[^${PY_WORD_CLASS}]+`, "gu");
-const MARK = /^[\p{Mn}\p{Mc}]$/u;
-const VARIATION_SELECTOR = /^[\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]$/u;
-const WORD_RUN = /(?:[\p{L}\p{N}]|(?![\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}])[\p{Mn}\p{Mc}])+/gu;
+const MARK = new RegExp(`^[${MARK_CLASS}]$`, "u");
+const PUNCT = new RegExp(`[^${PY_WORD_CLASS}${PY_WS_CLASS}${MARK_CLASS}]+`, "gu");
+const NON_IDENT = new RegExp(`[^${PY_WORD_CLASS}${MARK_CLASS}]+`, "gu");
 const CAMEL = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g;
 const ENTITY_SUFFIXES = new Set([
   "inc",
@@ -83,29 +82,13 @@ function hashParts(...parts: Array<string | null | undefined>): string {
 }
 
 /**
- * Report whether a character is a combining mark that is part of the word it follows: a vowel sign, virama, nukta, or tone mark (general category Mn or Mc), which NFC cannot fold into a letter. The variation selectors are left out, so an emoji presentation selector still drops with its emoji.
+ * Report whether a character is a combining mark that is part of the word it follows: a vowel sign, virama, nukta, or tone mark (general category Mn or Mc), which NFC cannot fold into a letter. The marks are the ones of Unicode 15.0, listed in internal/marks so that every Node and Python version classifies them alike; the variation selectors are left out, so an emoji presentation selector still drops with its emoji.
  *
  * @param ch (string): one character.
  * @return (boolean): true for a nonspacing or spacing mark other than a variation selector.
  */
 export function isMark(ch: string): boolean {
-  return MARK.test(ch) && !VARIATION_SELECTOR.test(ch);
-}
-
-/**
- * Rewrite a run of non-word characters, keeping its combining marks and filling each gap between them once.
- *
- * @param run (string): a run of characters that are not letters, digits, or underscore.
- * @param fill (string): what replaces each stretch of the run that holds no mark.
- * @return (string): the marks of the run in order, with fill where other characters stood.
- */
-function keepMarks(run: string, fill: string): string {
-  const out: string[] = [];
-  for (const ch of run) {
-    if (isMark(ch)) out.push(ch);
-    else if (out[out.length - 1] !== fill) out.push(fill);
-  }
-  return out.join("");
+  return MARK.test(ch);
 }
 
 /**
@@ -115,7 +98,10 @@ function keepMarks(run: string, fill: string): string {
  * @return (string[]): the runs, in order; underscore, whitespace, punctuation, and symbols separate them.
  */
 export function wordRuns(text: string): string[] {
-  return text.match(WORD_RUN) ?? [];
+  return text
+    .replace(NON_IDENT, "_")
+    .split("_")
+    .filter((run) => run.length > 0);
 }
 
 /**
@@ -140,11 +126,7 @@ export function slug(text: string): string {
 
 function canonicalName(type: string, rawName: string): string {
   const name = normalizeText(rawName);
-  let words = pySplit(
-    pyStrip(name)
-      .toLowerCase()
-      .replace(PUNCT, (run) => keepMarks(run, " ")),
-  );
+  let words = pySplit(pyStrip(name).toLowerCase().replace(PUNCT, " "));
   if (ORG_TYPES.has(slug(type))) {
     if (words.length > 0 && words[0] === "the") words = words.slice(1);
     while (words.length > 1 && ENTITY_SUFFIXES.has(words[words.length - 1]!)) words = words.slice(0, -1);
@@ -215,8 +197,7 @@ export function canonicalEntityId(eid: unknown): string {
 export function normalizeRelType(type: string): string {
   requireStr("relation type", type);
   const split = pyStrip(normalizeText(type)).replace(CAMEL, "_");
-  const kept = split.toLowerCase().replace(NON_IDENT, (run) => keepMarks(run, "_"));
-  const normalized = pyStrip(kept, "_").toUpperCase();
+  const normalized = pyStrip(split.toLowerCase().replace(NON_IDENT, "_"), "_").toUpperCase();
   if (!normalized) {
     throw new ValidationError("relation type cannot be empty; use a verb phrase, e.g. 'works at' or 'WORKS_AT'");
   }

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel
 
-from selfgraph import _serde, ids
+from selfgraph import _marks, _serde, ids
 from selfgraph._export import obsidian_vault
 from selfgraph._maintenance import lint, relevance_score
 from selfgraph._ops import AsOf, Contradictions, version_as_of
@@ -61,6 +61,8 @@ NAMES = [
     "টাটা লিমিটেড Ltd",
     "Bob \u2764\ufe0f",
     "1\ufe0f\u20e3 first",
+    "\u0628\u0898\u062a",
+    "\u0628\u0897\u062a",
     "The Trial",
     "The Acme Corporation Inc",
     "snake_case_name",
@@ -115,6 +117,7 @@ ENTITY_ID_INPUTS = [
     "x:",
     "person: ",
 ]
+MARK_CHARS = "a \u093e\u0301\u0e34\U0001e94a\ufe0f\u20e3\U000e0100\u200d\u0898\u0897"
 BAD_STRINGS = ["tab\there", "nul\x00", "del\x7f", "c1\x85", "lone\ud800"]
 LABELS = ["Entity", "Big Company", "has`tick", "_x9", "9x", "Ünicode"]
 
@@ -1122,6 +1125,8 @@ def neo4j_cases():
 def main():
     out = {
         "slug": {t: attempt(ids.slug, t) for t in TYPES + NAMES},
+        "mark_ranges": _marks.MARK_RANGES,
+        "is_mark": {ch: ids._is_mark(ch) for ch in MARK_CHARS},
         "entity_id": [[t, n, attempt(ids.entity_id, t, n)] for t in TYPES for n in NAMES],
         "normalize_rel_type": {t: ids.normalize_rel_type(t) for t in REL_TYPES if t.strip(" !")},
         "canonical_entity_id": [[e, attempt(ids.canonical_entity_id, e)] for e in ENTITY_ID_INPUTS],

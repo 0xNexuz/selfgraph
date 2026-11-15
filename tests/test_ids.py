@@ -1,3 +1,6 @@
+import sys
+import unicodedata
+
 import pytest
 
 from selfgraph import ids
@@ -78,3 +81,18 @@ def test_names_without_combining_marks_keep_their_ids():
     assert ids.entity_id("Language", "C++") == "language:c"
     assert ids.entity_id("Company", "Acme, Inc.") == "company:acme"
     assert ids.normalize_rel_type("Works-At!!") == "WORKS_AT"
+
+
+def test_combining_marks_follow_one_pinned_table():
+    assert [ids._is_mark(ch) for ch in "\u093e\u0301\u0e34\U0001e94a"] == [True] * 4
+    assert [ids._is_mark(ch) for ch in "a \ufe0f\u20e3\U000e0100\u200d"] == [False] * 6
+    assert ids.entity_id("Person", "\u0628\u0898\u062a") == "person:\u0628\u0898\u062a"
+    assert ids.entity_id("Person", "\u0628\u0897\u062a") == "person:\u0628-\u062a"
+    if unicodedata.unidata_version != "15.0.0":
+        pytest.skip("the table is checked against the Unicode 15.0 data of Python 3.12")
+    marks = {
+        cp
+        for cp in range(sys.maxunicode + 1)
+        if unicodedata.category(chr(cp)) in ("Mn", "Mc") and not (0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF)
+    }
+    assert {cp for cp in range(sys.maxunicode + 1) if ids._is_mark(chr(cp))} == marks
