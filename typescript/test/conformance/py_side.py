@@ -203,6 +203,8 @@ FACTS = {
         {"type": "Database", "name": "HydraDB"},
         {"type": "Database", "name": "Postgres"},
         {"type": "Person", "name": "Zoë Ångström"},
+        {"type": "Person", "name": "राम"},
+        {"type": "Person", "name": "रीमा"},
     ],
     "relations": [
         {
@@ -218,6 +220,7 @@ FACTS = {
             "event_time": "2024-03-01T12:30:00.654321Z",
         },
         {"from_entity": ZOE, "type": "KNOWS", "to_entity": "person:jane-doe"},
+        {"from_entity": ids.entity_id("Person", "रीमा"), "type": "रहती है", "to_entity": "database:postgres"},
     ],
     "preferences": [
         {
@@ -337,6 +340,7 @@ async def dump(graph, ns):
     retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", depth=2)
     ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", strategy="ppr", depth=3, max_nodes=4)
     dfs = await graph.retrieve("Zoë ÅNGSTRÖM acme", strategy="dfs", depth=2)
+    marks = await graph.retrieve("रीमा कहाँ रहती है?", depth=1)
     tight = {
         walk: await graph.retrieve("Grace Hopper COBOL Jane acme", strategy=walk, k=1, depth=4, max_nodes=3)
         for walk in ("bfs", "dfs")
@@ -370,6 +374,7 @@ async def dump(graph, ns):
                 "entities": [e.id for e in ppr.subgraph.entities],
             },
             "retrieval_dfs": {"seeds": dfs.seeds, "context": dfs.context},
+            "retrieval_marks": {"seeds": marks.seeds, "context": marks.context},
             "retrieval_tight": {
                 walk: {
                     "entities": [e.id for e in r.subgraph.entities],

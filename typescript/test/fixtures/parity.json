@@ -33,6 +33,14 @@
   "Cafe\u0301 Ole\u0301": "cafe\u0301-ole\u0301",
   "Caf\u00e9 Ol\u00e9": "caf\u00e9-ol\u00e9",
   "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e": "\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
+  "\u0930\u093e\u092e": "\u0930\u093e\u092e",
+  "\u0930\u0940\u092e\u093e": "\u0930\u0940\u092e\u093e",
+  "\u0e01\u0e34\u0e19": "\u0e01\u0e34\u0e19",
+  "\u0e01\u0e31\u0e19": "\u0e01\u0e31\u0e19",
+  "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3": "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+  "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd": "\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd",
+  "Bob \u2764\ufe0f": "bob-\u2764\ufe0f",
+  "1\ufe0f\u20e3 first": "1\ufe0f\u20e3-first",
   "The Trial": "the-trial",
   "The Acme Corporation Inc": "the-acme-corporation-inc",
   "snake_case_name": "snake_case_name",
@@ -114,7 +122,7 @@
   [
    "Person",
    "\u0130stanbul",
-   "person:i-stanbul"
+   "person:i\u0307stanbul"
   ],
   [
    "Person",
@@ -158,7 +166,47 @@
   [
    "Person",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "person:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "person:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "Person",
+   "\u0930\u093e\u092e",
+   "person:\u0930\u093e\u092e"
+  ],
+  [
+   "Person",
+   "\u0930\u0940\u092e\u093e",
+   "person:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "Person",
+   "\u0e01\u0e34\u0e19",
+   "person:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "Person",
+   "\u0e01\u0e31\u0e19",
+   "person:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "Person",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "person:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "Person",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "person:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "Person",
+   "Bob \u2764\ufe0f",
+   "person:bob"
+  ],
+  [
+   "Person",
+   "1\ufe0f\u20e3 first",
+   "person:1-first"
   ],
   [
    "Person",
@@ -255,7 +303,7 @@
   [
    "Big Company",
    "\u0130stanbul",
-   "big-company:i-stanbul"
+   "big-company:i\u0307stanbul"
   ],
   [
    "Big Company",
@@ -299,7 +347,47 @@
   [
    "Big Company",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "big-company:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "big-company:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "Big Company",
+   "\u0930\u093e\u092e",
+   "big-company:\u0930\u093e\u092e"
+  ],
+  [
+   "Big Company",
+   "\u0930\u0940\u092e\u093e",
+   "big-company:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "Big Company",
+   "\u0e01\u0e34\u0e19",
+   "big-company:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "Big Company",
+   "\u0e01\u0e31\u0e19",
+   "big-company:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "Big Company",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "big-company:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "Big Company",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "big-company:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "Big Company",
+   "Bob \u2764\ufe0f",
+   "big-company:bob"
+  ],
+  [
+   "Big Company",
+   "1\ufe0f\u20e3 first",
+   "big-company:1-first"
   ],
   [
    "Big Company",
@@ -396,7 +484,7 @@
   [
    "  Org ",
    "\u0130stanbul",
-   "org:i-stanbul"
+   "org:i\u0307stanbul"
   ],
   [
    "  Org ",
@@ -440,7 +528,47 @@
   [
    "  Org ",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "org:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "org:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "  Org ",
+   "\u0930\u093e\u092e",
+   "org:\u0930\u093e\u092e"
+  ],
+  [
+   "  Org ",
+   "\u0930\u0940\u092e\u093e",
+   "org:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "  Org ",
+   "\u0e01\u0e34\u0e19",
+   "org:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "  Org ",
+   "\u0e01\u0e31\u0e19",
+   "org:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "  Org ",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "org:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "  Org ",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "org:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1"
+  ],
+  [
+   "  Org ",
+   "Bob \u2764\ufe0f",
+   "org:bob"
+  ],
+  [
+   "  Org ",
+   "1\ufe0f\u20e3 first",
+   "org:1-first"
   ],
   [
    "  Org ",
@@ -537,7 +665,7 @@
   [
    "\u00dcberType",
    "\u0130stanbul",
-   "\u00fcbertype:i-stanbul"
+   "\u00fcbertype:i\u0307stanbul"
   ],
   [
    "\u00dcberType",
@@ -581,7 +709,47 @@
   [
    "\u00dcberType",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "\u00fcbertype:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "\u00fcbertype:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "\u00dcberType",
+   "\u0930\u093e\u092e",
+   "\u00fcbertype:\u0930\u093e\u092e"
+  ],
+  [
+   "\u00dcberType",
+   "\u0930\u0940\u092e\u093e",
+   "\u00fcbertype:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "\u00dcberType",
+   "\u0e01\u0e34\u0e19",
+   "\u00fcbertype:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "\u00dcberType",
+   "\u0e01\u0e31\u0e19",
+   "\u00fcbertype:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "\u00dcberType",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "\u00fcbertype:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "\u00dcberType",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "\u00fcbertype:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "\u00dcberType",
+   "Bob \u2764\ufe0f",
+   "\u00fcbertype:bob"
+  ],
+  [
+   "\u00dcberType",
+   "1\ufe0f\u20e3 first",
+   "\u00fcbertype:1-first"
   ],
   [
    "\u00dcberType",
@@ -678,7 +846,7 @@
   [
    "a\u3000b",
    "\u0130stanbul",
-   "a-b:i-stanbul"
+   "a-b:i\u0307stanbul"
   ],
   [
    "a\u3000b",
@@ -722,7 +890,47 @@
   [
    "a\u3000b",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "a-b:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "a-b:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "a\u3000b",
+   "\u0930\u093e\u092e",
+   "a-b:\u0930\u093e\u092e"
+  ],
+  [
+   "a\u3000b",
+   "\u0930\u0940\u092e\u093e",
+   "a-b:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "a\u3000b",
+   "\u0e01\u0e34\u0e19",
+   "a-b:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "a\u3000b",
+   "\u0e01\u0e31\u0e19",
+   "a-b:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "a\u3000b",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "a-b:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "a\u3000b",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "a-b:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "a\u3000b",
+   "Bob \u2764\ufe0f",
+   "a-b:bob"
+  ],
+  [
+   "a\u3000b",
+   "1\ufe0f\u20e3 first",
+   "a-b:1-first"
   ],
   [
    "a\u3000b",
@@ -819,7 +1027,7 @@
   [
    "Company",
    "\u0130stanbul",
-   "company:i-stanbul"
+   "company:i\u0307stanbul"
   ],
   [
    "Company",
@@ -863,7 +1071,47 @@
   [
    "Company",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "company:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "company:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "Company",
+   "\u0930\u093e\u092e",
+   "company:\u0930\u093e\u092e"
+  ],
+  [
+   "Company",
+   "\u0930\u0940\u092e\u093e",
+   "company:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "Company",
+   "\u0e01\u0e34\u0e19",
+   "company:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "Company",
+   "\u0e01\u0e31\u0e19",
+   "company:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "Company",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "company:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "Company",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "company:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1"
+  ],
+  [
+   "Company",
+   "Bob \u2764\ufe0f",
+   "company:bob"
+  ],
+  [
+   "Company",
+   "1\ufe0f\u20e3 first",
+   "company:1-first"
   ],
   [
    "Company",
@@ -960,7 +1208,7 @@
   [
    "Organization",
    "\u0130stanbul",
-   "organization:i-stanbul"
+   "organization:i\u0307stanbul"
   ],
   [
    "Organization",
@@ -1004,7 +1252,47 @@
   [
    "Organization",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "organization:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "organization:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "Organization",
+   "\u0930\u093e\u092e",
+   "organization:\u0930\u093e\u092e"
+  ],
+  [
+   "Organization",
+   "\u0930\u0940\u092e\u093e",
+   "organization:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "Organization",
+   "\u0e01\u0e34\u0e19",
+   "organization:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "Organization",
+   "\u0e01\u0e31\u0e19",
+   "organization:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "Organization",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "organization:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "Organization",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "organization:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1"
+  ],
+  [
+   "Organization",
+   "Bob \u2764\ufe0f",
+   "organization:bob"
+  ],
+  [
+   "Organization",
+   "1\ufe0f\u20e3 first",
+   "organization:1-first"
   ],
   [
    "Organization",
@@ -1101,7 +1389,7 @@
   [
    "Work",
    "\u0130stanbul",
-   "work:i-stanbul"
+   "work:i\u0307stanbul"
   ],
   [
    "Work",
@@ -1145,7 +1433,47 @@
   [
    "Work",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "work:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "work:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "Work",
+   "\u0930\u093e\u092e",
+   "work:\u0930\u093e\u092e"
+  ],
+  [
+   "Work",
+   "\u0930\u0940\u092e\u093e",
+   "work:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "Work",
+   "\u0e01\u0e34\u0e19",
+   "work:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "Work",
+   "\u0e01\u0e31\u0e19",
+   "work:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "Work",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "work:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "Work",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "work:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "Work",
+   "Bob \u2764\ufe0f",
+   "work:bob"
+  ],
+  [
+   "Work",
+   "1\ufe0f\u20e3 first",
+   "work:1-first"
   ],
   [
    "Work",
@@ -1242,7 +1570,7 @@
   [
    " Bank ",
    "\u0130stanbul",
-   "bank:i-stanbul"
+   "bank:i\u0307stanbul"
   ],
   [
    " Bank ",
@@ -1286,7 +1614,47 @@
   [
    " Bank ",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "bank:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "bank:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   " Bank ",
+   "\u0930\u093e\u092e",
+   "bank:\u0930\u093e\u092e"
+  ],
+  [
+   " Bank ",
+   "\u0930\u0940\u092e\u093e",
+   "bank:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   " Bank ",
+   "\u0e01\u0e34\u0e19",
+   "bank:\u0e01\u0e34\u0e19"
+  ],
+  [
+   " Bank ",
+   "\u0e01\u0e31\u0e19",
+   "bank:\u0e01\u0e31\u0e19"
+  ],
+  [
+   " Bank ",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "bank:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   " Bank ",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "bank:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1"
+  ],
+  [
+   " Bank ",
+   "Bob \u2764\ufe0f",
+   "bank:bob"
+  ],
+  [
+   " Bank ",
+   "1\ufe0f\u20e3 first",
+   "bank:1-first"
   ],
   [
    " Bank ",
@@ -1383,7 +1751,7 @@
   [
    "U\u0308ber",
    "\u0130stanbul",
-   "\u00fcber:i-stanbul"
+   "\u00fcber:i\u0307stanbul"
   ],
   [
    "U\u0308ber",
@@ -1427,7 +1795,47 @@
   [
    "U\u0308ber",
    "\u0939\u093f\u0928\u094d\u0926\u0940 \u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e",
-   "\u00fcber:\u0939-\u0928-\u0926-\u0935-\u0915-\u092a-\u0921-\u092f"
+   "\u00fcber:\u0939\u093f\u0928\u094d\u0926\u0940-\u0935\u093f\u0915\u093f\u092a\u0940\u0921\u093f\u092f\u093e"
+  ],
+  [
+   "U\u0308ber",
+   "\u0930\u093e\u092e",
+   "\u00fcber:\u0930\u093e\u092e"
+  ],
+  [
+   "U\u0308ber",
+   "\u0930\u0940\u092e\u093e",
+   "\u00fcber:\u0930\u0940\u092e\u093e"
+  ],
+  [
+   "U\u0308ber",
+   "\u0e01\u0e34\u0e19",
+   "\u00fcber:\u0e01\u0e34\u0e19"
+  ],
+  [
+   "U\u0308ber",
+   "\u0e01\u0e31\u0e19",
+   "\u00fcber:\u0e01\u0e31\u0e19"
+  ],
+  [
+   "U\u0308ber",
+   "\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3",
+   "\u00fcber:\u05d3\u05b8\u05bc\u05d5\u05b4\u05d3"
+  ],
+  [
+   "U\u0308ber",
+   "\u099f\u09be\u099f\u09be \u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1 Ltd",
+   "\u00fcber:\u099f\u09be\u099f\u09be-\u09b2\u09bf\u09ae\u09bf\u099f\u09c7\u09a1-ltd"
+  ],
+  [
+   "U\u0308ber",
+   "Bob \u2764\ufe0f",
+   "\u00fcber:bob"
+  ],
+  [
+   "U\u0308ber",
+   "1\ufe0f\u20e3 first",
+   "\u00fcber:1-first"
   ],
   [
    "U\u0308ber",
@@ -1466,7 +1874,10 @@
   "HTTPServer": "HTTP_SERVER",
   "isPartOf2Things": "IS_PART_OF2_THINGS",
   "already_SNAKE_case": "ALREADY_SNAKE_CASE",
-  "\u00c9coleDe": "\u00c9COLE_DE"
+  "\u00c9coleDe": "\u00c9COLE_DE",
+  "\u092a\u093f\u0924\u093e": "\u092a\u093f\u0924\u093e",
+  "\u092a\u094b\u0924\u093e": "\u092a\u094b\u0924\u093e",
+  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948"
  },
  "canonical_entity_id": [
   [
@@ -1622,6 +2033,24 @@
    "\u00c9coleDe",
    "company:acme",
    "relation:f06b310869a60ef018ff4566"
+  ],
+  [
+   "person:jane",
+   "\u092a\u093f\u0924\u093e",
+   "company:acme",
+   "relation:b8e49173379ec987942606f9"
+  ],
+  [
+   "person:jane",
+   "\u092a\u094b\u0924\u093e",
+   "company:acme",
+   "relation:c20bb808bdb10fb43a016da9"
+  ],
+  [
+   "person:jane",
+   "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!",
+   "company:acme",
+   "relation:27dc83f95a7ff69a7abdbc7c"
   ]
  ],
  "preference_id": [
@@ -1737,7 +2166,10 @@
   "HTTPServer": "HTTP_SERVER",
   "isPartOf2Things": "IS_PART_OF2_THINGS",
   "already_SNAKE_case": "ALREADY_SNAKE_CASE",
-  "\u00c9coleDe": "\u00c9COLE_DE"
+  "\u00c9coleDe": "\u00c9COLE_DE",
+  "\u092a\u093f\u0924\u093e": "\u092a\u093f\u0924\u093e",
+  "\u092a\u094b\u0924\u093e": "\u092a\u094b\u0924\u093e",
+  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948"
  },
  "nfc_ids": [
   "preference:41c480c00563cb0d2772dc72",
@@ -3173,8 +3605,7 @@
    "\u13f0"
   ],
   "\u0130stanbul \u0131": [
-   "i",
-   "stanbul",
+   "i\u0307stanbul",
    "\u0131"
   ],
   "\ufb03 \ufb01 \ufb00": [
@@ -3189,13 +3620,19 @@
    "\u4e16\u754c",
    "\u6771\u4eac\u30bf\u30ef\u30fc"
   ],
+  "\u0930\u0940\u092e\u093e \u0915\u0939\u093e\u0901 \u0930\u0939\u0924\u0940 \u0939\u0948? \u0e01\u0e34\u0e19_\u0e01\u0e31\u0e19 \u2764\ufe0f": [
+   "\u0915\u0939\u093e\u0901",
+   "\u0930\u0939\u0924\u0940",
+   "\u0930\u0940\u092e\u093e",
+   "\u0939\u0948",
+   "\u0e01\u0e31\u0e19",
+   "\u0e01\u0e34\u0e19"
+  ],
   "\uff26\uff55\uff4c\uff4c": [
    "\uff46\uff55\uff4c\uff4c"
   ],
   "\u0939\u093f\u0928\u094d\u0926\u0940": [
-   "\u0926",
-   "\u0928",
-   "\u0939"
+   "\u0939\u093f\u0928\u094d\u0926\u0940"
   ],
   "n x y Z 3 a_b c-d": [
    "3",
@@ -3213,9 +3650,9 @@
    "\u00e5\u00e5"
   ],
   "\u0149 \u01f0 \u0390": [
-   "j",
+   "j\u030c",
    "\u02bcn",
-   "\u03b9"
+   "\u03b9\u0308\u0301"
   ]
  },
  "fold": {
@@ -3227,6 +3664,7 @@
   "\ufb03 \ufb01 \ufb00": "ffi fi ff",
   "Caf\u00e9 Cafe\u0301": "caf\u00e9 caf\u00e9",
   "\u4e16\u754c \u6771\u4eac\u30bf\u30ef\u30fc": "\u4e16\u754c \u6771\u4eac\u30bf\u30ef\u30fc",
+  "\u0930\u0940\u092e\u093e \u0915\u0939\u093e\u0901 \u0930\u0939\u0924\u0940 \u0939\u0948? \u0e01\u0e34\u0e19_\u0e01\u0e31\u0e19 \u2764\ufe0f": "\u0930\u0940\u092e\u093e \u0915\u0939\u093e\u0901 \u0930\u0939\u0924\u0940 \u0939\u0948? \u0e01\u0e34\u0e19_\u0e01\u0e31\u0e19 \u2764\ufe0f",
   "\uff26\uff55\uff4c\uff4c": "\uff46\uff55\uff4c\uff4c",
   "\u0939\u093f\u0928\u094d\u0926\u0940": "\u0939\u093f\u0928\u094d\u0926\u0940",
   "n x y Z 3 a_b c-d": "n x y z 3 a_b c-d",
@@ -6500,6 +6938,16 @@
     0.8666666666666667
    ],
    [
+    "\u0930\u093e\u092e",
+    "\u0930\u0940\u092e\u093e",
+    0.75
+   ],
+   [
+    "\u0930\u093e\u092e \u0915\u0941\u092e\u093e\u0930",
+    "\u0930\u093e\u092e  \u0915\u0941\u092e\u093e\u0930",
+    0.98
+   ],
+   [
     "Cafe\u0301 Ole\u0301",
     "caf\u00e9 ol\u00e9",
     0.6333333333333333
@@ -6587,6 +7035,16 @@
     0.0
    ],
    [
+    "\u0930\u093e\u092e",
+    "\u0930\u0940\u092e\u093e",
+    0.0
+   ],
+   [
+    "\u0930\u093e\u092e \u0915\u0941\u092e\u093e\u0930",
+    "\u0930\u093e\u092e  \u0915\u0941\u092e\u093e\u0930",
+    1.0
+   ],
+   [
     "Cafe\u0301 Ole\u0301",
     "caf\u00e9 ol\u00e9",
     1.0
@@ -6672,6 +7130,16 @@
     "Zo\u00eb \u00c5ngstr\u00f6m",
     "Zoe Angstrom",
     0.8666666666666667
+   ],
+   [
+    "\u0930\u093e\u092e",
+    "\u0930\u0940\u092e\u093e",
+    0.75
+   ],
+   [
+    "\u0930\u093e\u092e \u0915\u0941\u092e\u093e\u0930",
+    "\u0930\u093e\u092e  \u0915\u0941\u092e\u093e\u0930",
+    1.0
    ],
    [
     "Cafe\u0301 Ole\u0301",

@@ -151,7 +151,7 @@ def _validate_entity_identity(eid: str, type: str, name: str) -> None:
         raise ValidationError(f"entity type {type!r} cannot contain ':', which separates an entity id's type and name")
     if _has_control(name) or _has_control(type):
         raise ValidationError("entity type and name cannot contain control or surrogate characters")
-    if not all(ch.isalnum() or ch in " _-." for ch in type):
+    if not all(ch.isalnum() or ch in " _-." or _ids._is_mark(ch) for ch in type):
         raise ValidationError(f"entity type {type!r} can only contain letters, digits, spaces, '_', '-', and '.'")
     if _has_control(eid):
         raise ValidationError("entity id cannot contain control or surrogate characters")

@@ -146,7 +146,6 @@ export function nameSimilarity(a: string, b: string): number {
 }
 
 const DIGITS = /\p{Nd}+/gu;
-const WORD = /[\p{L}\p{N}]+/gu;
 
 /**
  * Collect the tokens that tell apart otherwise similar names: digit runs, single-letter words, and generations.
@@ -168,7 +167,7 @@ function distinguishers(tokens: string[]): [string[], string[], string[]] {
  * @return (string[]): the folded letter and digit runs, in order.
  */
 function words(name: string): string[] {
-  return [...folded(name).matchAll(WORD)].map((m) => m[0]);
+  return ids.wordRuns(folded(name));
 }
 
 /**

@@ -57,3 +57,24 @@ def test_relation_types_split_camel_case():
     assert ids.normalize_rel_type("WORKS_AT") == "WORKS_AT"
     assert ids.normalize_rel_type("works at") == "WORKS_AT"
     assert ids.relation_id("a:b", "worksAt", "c:d") == ids.relation_id("a:b", "WORKS_AT", "c:d")
+
+
+def test_combining_marks_stay_in_derived_ids():
+    names = ["राम", "रीमा", "रोम", "กิน", "กัน", "কাল", "কুল", "கவி", "கவு", "דָּוִד", "דּוֹד"]
+    derived = [ids.entity_id("Person", name) for name in names]
+    assert derived == [f"person:{name}" for name in names]
+    assert ids.entity_id("City", "दिल्ली, भारत") == "city:दिल्ली-भारत"
+    assert ids.entity_id("Company", "टाटा लिमिटेड Ltd") == "company:टाटा-लिमिटेड"
+    assert ids.normalize_rel_type("पिता") == "पिता" != ids.normalize_rel_type("पोता")
+    assert ids.normalize_rel_type("काम करता है!") == "काम_करता_है"
+    assert ids.relation_id("a:b", "पिता", "c:d") != ids.relation_id("a:b", "पोता", "c:d")
+
+
+def test_names_without_combining_marks_keep_their_ids():
+    assert ids.entity_id("Person", "Zoe\u0308 A\u030angstro\u0308m") == ids.entity_id("Person", "Zoë Ångström")
+    assert ids.entity_id("Person", "Bob \U0001f600") == "person:bob"
+    assert ids.entity_id("Person", "Bob \u2764\ufe0f") == "person:bob"
+    assert ids.entity_id("Thing", "1\ufe0f\u20e3 first") == "thing:1-first"
+    assert ids.entity_id("Language", "C++") == "language:c"
+    assert ids.entity_id("Company", "Acme, Inc.") == "company:acme"
+    assert ids.normalize_rel_type("Works-At!!") == "WORKS_AT"

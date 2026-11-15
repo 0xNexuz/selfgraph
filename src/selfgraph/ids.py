@@ -149,6 +149,9 @@ _WS = re.compile(r"\s+")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PUNCT = re.compile(r"[^\w\s]+")
 _NON_IDENT = re.compile(r"[^\w]+")
+_RUN_BREAK = re.compile(r"[\s_]+")
+_WORD_RUN = re.compile(r"[^\W_]+")
+_HIGH_PUNCT = re.compile(r"[^\w\s\x00-\x7f]")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _ENTITY_SUFFIXES = frozenset(
     {
@@ -214,6 +217,50 @@ def _hash(*parts: str | None) -> str:
     return h.hexdigest()
 
 
+def _is_mark(ch: str) -> bool:
+    """Report whether a character is a combining mark that is part of the word it follows.
+
+    Vowel signs, viramas, nuktas, and tone marks are general category Mn or Mc and have no composed form for NFC
+    to fold them into. The variation selectors are left out, so an emoji presentation selector still drops with
+    its emoji.
+
+    @param ch (str): one character.
+    @return (bool): True for a nonspacing or spacing mark other than a variation selector.
+    """
+    if "\ufe00" <= ch <= "\ufe0f" or "\U000e0100" <= ch <= "\U000e01ef":
+        return False
+    return unicodedata.category(ch) in ("Mn", "Mc")
+
+
+def _keep_marks(run: str, fill: str) -> str:
+    """Rewrite a run of non-word characters, keeping its combining marks and filling each gap between them once.
+
+    @param run (str): a run of characters that are not letters, digits, or underscore.
+    @param fill (str): what replaces each stretch of the run that holds no mark.
+    @return (str): the marks of the run in order, with fill where other characters stood.
+    """
+    out: list[str] = []
+    for ch in run:
+        if _is_mark(ch):
+            out.append(ch)
+        elif not out or out[-1] != fill:
+            out.append(fill)
+    return "".join(out)
+
+
+def _word_runs(text: str) -> list[str]:
+    """Split text into its runs of letters and digits, each with the combining marks written on them.
+
+    Text that holds no combining mark is split in one pass.
+
+    @param text (str): the text to split.
+    @return (list[str]): the runs, in order; underscore, whitespace, punctuation, and symbols separate them.
+    """
+    if text.isascii() or not any(map(_is_mark, _HIGH_PUNCT.findall(text))):
+        return _WORD_RUN.findall(text)
+    return [run for run in _RUN_BREAK.split(_PUNCT.sub(lambda m: _keep_marks(m.group(), " "), text)) if run]
+
+
 def normalize_text(value: str) -> str:
     """NFC-normalize text so an id, its stored field, and a filter argument share one byte form.
 
@@ -235,7 +282,8 @@ def slug(text: str) -> str:
 def _canonical_name(type: str, name: str) -> str:
     """Canonicalise an entity name so cross-document surface variants collapse.
 
-    Drops punctuation for every type; for organisation-like types it also drops a
+    Drops punctuation for every type and keeps combining marks, so a name written with
+    vowel signs keeps them; for organisation-like types it also drops a
     leading article and trailing corporate suffixes, so "Acme", "Acme, Inc." and
     "The Acme Corporation" resolve to one id while a Work "The Trial" stays distinct
     from "Trial".
@@ -245,7 +293,7 @@ def _canonical_name(type: str, name: str) -> str:
     @return (str): the canonical hyphenated form.
     """
     name = normalize_text(name)
-    words = _PUNCT.sub(" ", name.strip().lower()).split()
+    words = _PUNCT.sub(lambda m: _keep_marks(m.group(), " "), name.strip().lower()).split()
     if slug(type) in _ORG_TYPES:
         if words and words[0] == "the":
             words = words[1:]
@@ -315,7 +363,8 @@ def normalize_rel_type(type: str) -> str:
     @return (str): the canonical relation type.
     """
     _require_str("relation type", type)
-    normalized = _NON_IDENT.sub("_", _CAMEL.sub("_", normalize_text(type).strip()).lower()).strip("_").upper()
+    split = _CAMEL.sub("_", normalize_text(type).strip()).lower()
+    normalized = _NON_IDENT.sub(lambda m: _keep_marks(m.group(), "_"), split).strip("_").upper()
     if not normalized:
         raise ValidationError("relation type cannot be empty; use a verb phrase, e.g. 'works at' or 'WORKS_AT'")
     return normalized
