@@ -366,6 +366,11 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   }
   return toJsonable({
     answerable,
+    filters: {
+      aliases_equals: await store.matchNodes(ns, "Entity", { equals: { aliases: ["JD", "J. Doe"] } }),
+      aliases_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [["JD", "J. Doe"]] } }),
+      empty_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [] } }),
+    },
     retrieval_seeded: seeded,
     tiers: termed.tiers,
     entities,

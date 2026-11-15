@@ -326,6 +326,11 @@ async def dump(graph, ns):
     sources = await store.match_nodes(ns, "Source")
     decisions = [d async for d in graph.decisions.iterate()]
     raw_entities = {e.id: await store.get_node(ns, "Entity", e.id) for e in entities}
+    filters = {
+        "aliases_equals": await store.match_nodes(ns, "Entity", equals={"aliases": ["JD", "J. Doe"]}),
+        "aliases_any_of": await store.match_nodes(ns, "Entity", any_of={"aliases": [["JD", "J. Doe"]]}),
+        "empty_any_of": await store.match_nodes(ns, "Entity", any_of={"aliases": []}),
+    }
     evidence = {e.id: await all_evidence(graph.entities.evidence, e.id) for e in entities}
     evidence.update({rid: await all_evidence(graph.relations.evidence, rid) for rid in relations})
     raw_evidence = await store.match_nodes(ns, "Evidence")
@@ -359,6 +364,7 @@ async def dump(graph, ns):
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
             "raw_entities": raw_entities,
+            "filters": filters,
             "evidence": evidence,
             "raw_evidence": sorted(raw_evidence, key=lambda r: r["id"]),
             "source_versions": sorted(source_versions, key=lambda s: s["id"]),

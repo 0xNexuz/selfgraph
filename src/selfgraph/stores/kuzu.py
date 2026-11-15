@@ -114,7 +114,7 @@ def _where_doc_equals(alias: str, equals: dict | None, where: list[str], params:
     @return (None): nothing.
     """
     for i, (key, value) in enumerate(sorted((equals or {}).items())):
-        where.append(f"json_extract({alias}.doc, $k{i}) = $v{i}")
+        where.append(f"json_extract({alias}.doc, $k{i}) = json($v{i})")
         params[f"k{i}"] = key
         params[f"v{i}"] = _jv(value)
 
@@ -129,11 +129,13 @@ def _where_doc_any_of(ns: str, any_of: dict | None, where: list[str], params: di
     @return (None): nothing.
     """
     for i, (key, values) in enumerate(sorted((any_of or {}).items())):
-        if key == "id":
+        if not values:
+            where.append("false")
+        elif key == "id":
             where.append(f"n.pk IN $in{i}")
             params[f"in{i}"] = [_pk(ns, v) for v in values]
         else:
-            where.append(f"CAST(json_extract(n.doc, $ik{i}) AS STRING) IN $in{i}")
+            where.append(f"CAST(json_extract(n.doc, $ik{i}) AS STRING) IN list_transform($in{i}, x -> json(x))")
             params[f"ik{i}"] = key
             params[f"in{i}"] = [_jv(v) for v in values]
 
