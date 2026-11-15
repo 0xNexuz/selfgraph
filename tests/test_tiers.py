@@ -250,6 +250,12 @@ def test_from_tables_drafts_types_properties_relations_and_mappings():
         Schema.from_tables([{}])
 
 
+def test_from_tables_maps_only_integer_sql_types_to_integer():
+    types = ["int", "INT UNSIGNED", "bigint(20)", "int8", "UInt32", "serial", "point", "interval", "geometry(Point)"]
+    schema = Schema.from_tables([{"name": "t", "columns": [{"name": f"c{i}", "type": t} for i, t in enumerate(types)]}])
+    assert [p.type for p in schema.entities[0].properties] == [*["integer"] * 6, *["string"] * 3]
+
+
 def test_cli_mcp_and_settings_carry_the_level(capsys):
     g = fresh_graph("tier")
     run(g.insert.facts({"entities": [{"type": "Company", "name": "Acme"}]}))

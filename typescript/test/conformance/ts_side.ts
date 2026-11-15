@@ -39,6 +39,8 @@ const TABLES = [
       { name: "is_void", type: "BOOLEAN" },
       { name: "payload", type: "jsonb" },
       { name: "qty", type: "smallint" },
+      { name: "pickup", type: "point" },
+      { name: "lead_time", type: "interval" },
       { name: "untyped" },
     ],
   },
