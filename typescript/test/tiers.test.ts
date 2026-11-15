@@ -309,6 +309,9 @@ function suite(spec: StoreSpec): void {
       buses: "bus",
       movies: "movie",
       cookies: "cookie",
+      quizzes: "quiz",
+      buzzes: "buzz",
+      waltzes: "waltz",
       companies: "company",
       customers: "customer",
       invoices: "invoice",
@@ -334,6 +337,7 @@ function suite(spec: StoreSpec): void {
       "analysis",
       "movies",
       "cookies",
+      "quizzes",
       "businesses",
     ];
     expect(fromTables(tables.map((name) => ({ name }))).entities.map((e) => e.name)).toEqual([
@@ -344,6 +348,7 @@ function suite(spec: StoreSpec): void {
       "Analysis",
       "Movie",
       "Cookie",
+      "Quiz",
       "Business",
     ]);
     const g = open({ schema: { entities: [{ name: "Address" }, { name: "Status" }] } });

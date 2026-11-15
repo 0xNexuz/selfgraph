@@ -10,30 +10,52 @@ __all__ = ["expand_tokens", "grounded_terms", "schema_forms", "stem"]
 
 Tokenize = Callable[[str], set[str]]
 
-_ES_PLURALS = ("sses", "shes", "xes")
+_SINGULARS = {
+    "calories": "calorie",
+    "cookies": "cookie",
+    "hoodies": "hoodie",
+    "movies": "movie",
+    "rookies": "rookie",
+    "selfies": "selfie",
+    "zombies": "zombie",
+    "quizzes": "quiz",
+    "news": "news",
+    "series": "series",
+    "species": "species",
+}
+_ES_AFTER = ("ss", "sh", "x", "zz", "tz")
+_ES_AFTER_CONSONANT = ("ch", "us")
 _S_SINGULARS = ("ss", "us", "is")
 _VOWELS = "aeiou"
-_IE_PLURALS = frozenset({"calories", "cookies", "hoodies", "movies", "rookies", "selfies", "zombies"})
-_UNCHANGED = frozenset({"news", "series", "species"})
+
+
+def _takes_es(base: str) -> bool:
+    """Report whether a singular forms its plural with "es", so the plural loses both letters.
+
+    @param base (str): a plural without its final "es".
+    @return (bool): True after ss, sh, x, zz, or tz, and after a consonant followed by ch or us.
+    """
+    if base.endswith(_ES_AFTER):
+        return True
+    return base.endswith(_ES_AFTER_CONSONANT) and len(base) > 2 and base[-3] not in _VOWELS
 
 
 def stem(token: str) -> str:
     """Strip a plural ending so "customers" and "customer", or "addresses" and "address", compare equal.
 
-    A plural in -es after ss, x, sh, or a consonant and ch or us loses the "es"; a singular in -us, -is, or -ss is kept
-    whole. The few -ie nouns in _IE_PLURALS lose only their s, and the words in _UNCHANGED are the same in both
-    numbers.
+    The suffix rules run in order: -ies becomes -y, -es is dropped where _takes_es says the singular takes it, and
+    any other final s is dropped unless the word is a singular in -ss, -us, or -is. _SINGULARS holds the common words
+    those rules get wrong: -ie nouns that would read as -y plurals, quizzes with its doubled z, and nouns that are
+    the same in both numbers.
 
     @param token (str): a casefolded token.
     @return (str): the token in its singular form.
     """
-    if token in _UNCHANGED:
-        return token
+    if token in _SINGULARS:
+        return _SINGULARS[token]
     if token.endswith("ies") and len(token) > 4:
-        return token[:-1] if token in _IE_PLURALS else token[:-3] + "y"
-    if len(token) > 4 and (
-        token.endswith(_ES_PLURALS) or (token.endswith(("ches", "uses")) and token[-5] not in _VOWELS)
-    ):
+        return token[:-3] + "y"
+    if token.endswith("es") and len(token) > 4 and _takes_es(token[:-2]):
         return token[:-2]
     if token.endswith("s") and not token.endswith(_S_SINGULARS) and len(token) > 3:
         return token[:-1]
