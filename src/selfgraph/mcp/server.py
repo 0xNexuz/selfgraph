@@ -819,6 +819,14 @@ async def maintenance_dedupe_relations(dry_run: StrictBool = True) -> dict[str, 
     return to_jsonable(await g.maintenance.dedupe_relations(dry_run=dry_run))
 
 
+async def graph_diff(since: str, until: str | None = None) -> dict[str, Any]:
+    """List stored relation additions, revisions, retirements, and entity creations in (since, until].
+    Times are ISO 8601 known times, not event times; until defaults to now. Retirements include
+    invalidated_by. Deleted records and overwritten retirements are not an audit log."""
+    g = await _graph_handle()
+    return to_jsonable(await g.diff(since, until))
+
+
 TOOLS = [
     check_readiness,
     check_answerable,
@@ -855,6 +863,7 @@ TOOLS = [
     list_decisions,
     run_cypher,
     retrieve,
+    graph_diff,
     maintenance_decay,
     maintenance_prune,
     maintenance_dedupe_relations,
@@ -863,6 +872,7 @@ TOOLS = [
 
 _READ_ONLY = frozenset(
     {
+        "graph_diff",
         "get_schema",
         "retrieve",
         "run_cypher",

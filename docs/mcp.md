@@ -208,3 +208,11 @@ A failing tool returns an MCP error result with the error flag set.
 - An unknown tool name fails as a tool error.
 - Hints and the `maintenance_prune` note name the server's flags, as in the CLI
   ([errors](errors.md#messages)).
+
+## Changes between known times (Python only)
+
+`graph_diff(since, until=None)` is a read-only tool. Pass ISO 8601 timestamps for
+the `(since, until]` known-time window. It returns `relations_added`,
+`relations_revised`, `relations_retired` (including `invalidated_by`), and
+`entities_created`. `until` defaults to now. It scans stored records, not a full
+audit log. See [diff semantics and limits](retrieval.md#changes-between-known-times-python).
