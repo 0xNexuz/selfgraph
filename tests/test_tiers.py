@@ -229,6 +229,7 @@ def test_stem_singularizes_es_plurals_and_keeps_us_and_is_singulars():
         "statuses": "status",
         "buses": "bus",
         "movies": "movie",
+        "cookies": "cookie",
         "companies": "company",
         "customers": "customer",
         "invoices": "invoice",
@@ -244,7 +245,7 @@ def test_stem_singularizes_es_plurals_and_keeps_us_and_is_singulars():
     }
     assert {word: stem(word) for word in singular} == singular
     assert all(stem(word) == word for word in singular.values())
-    tables = ["addresses", "order_status", "tax_classes", "batches", "analysis", "movies", "businesses"]
+    tables = ["addresses", "order_status", "tax_classes", "batches", "analysis", "movies", "cookies", "businesses"]
     assert [e.name for e in Schema.from_tables([{"name": t} for t in tables]).entities] == [
         "Address",
         "OrderStatus",
@@ -252,6 +253,7 @@ def test_stem_singularizes_es_plurals_and_keeps_us_and_is_singulars():
         "Batch",
         "Analysis",
         "Movie",
+        "Cookie",
         "Business",
     ]
     g = fresh_graph("tier", schema={"entities": [{"name": "Address"}, {"name": "Status"}]})

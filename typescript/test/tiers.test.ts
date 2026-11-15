@@ -308,6 +308,7 @@ function suite(spec: StoreSpec): void {
       statuses: "status",
       buses: "bus",
       movies: "movie",
+      cookies: "cookie",
       companies: "company",
       customers: "customer",
       invoices: "invoice",
@@ -325,7 +326,16 @@ function suite(spec: StoreSpec): void {
       expect([word, stem(word)]).toEqual([word, expected]);
       expect(stem(expected)).toBe(expected);
     }
-    const tables = ["addresses", "order_status", "tax_classes", "batches", "analysis", "movies", "businesses"];
+    const tables = [
+      "addresses",
+      "order_status",
+      "tax_classes",
+      "batches",
+      "analysis",
+      "movies",
+      "cookies",
+      "businesses",
+    ];
     expect(fromTables(tables.map((name) => ({ name }))).entities.map((e) => e.name)).toEqual([
       "Address",
       "OrderStatus",
@@ -333,6 +343,7 @@ function suite(spec: StoreSpec): void {
       "Batch",
       "Analysis",
       "Movie",
+      "Cookie",
       "Business",
     ]);
     const g = open({ schema: { entities: [{ name: "Address" }, { name: "Status" }] } });
