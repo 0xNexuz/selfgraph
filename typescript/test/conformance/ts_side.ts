@@ -1,10 +1,12 @@
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
 import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable } from "../../src/index.js";
 import { comparePy } from "../../src/internal/py.js";
+import { toIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
+import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
 
 const TERMS_SPEC = {
@@ -160,6 +162,7 @@ export function schemaWarnings(): {
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  datetime_boundaries: Array<string | null>;
 } {
   const terms = Schema.parse(TERMS_SPEC);
   const schema = Schema.parse(SCHEMA_SPEC);
@@ -176,6 +179,12 @@ export function schemaWarnings(): {
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
+    datetime_boundaries: [
+      "0001-01-01T00:00:00.000001Z",
+      "9999-12-31T23:59:59.999999Z",
+      "0001-01-01T01:00:00.000001+01:00",
+      "9999-12-31T22:59:59.999999-01:00",
+    ].map((text) => toIso(parseTime(text, "event_time"))),
   };
 }
 

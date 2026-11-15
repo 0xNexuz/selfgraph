@@ -5,6 +5,8 @@ import sys
 from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, ids
+from selfgraph._ops import parse_time
+from selfgraph._serde import to_iso
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -167,6 +169,15 @@ def schema_warnings():
             sorted(expand_tokens(_tokens(q), terms, _tokens))
             for terms in [Schema.model_validate(TERMS_SPEC)]
             for q in TERM_QUESTIONS
+        ],
+        "datetime_boundaries": [
+            to_iso(parse_time(text, "event_time"))
+            for text in [
+                "0001-01-01T00:00:00.000001Z",
+                "9999-12-31T23:59:59.999999Z",
+                "0001-01-01T01:00:00.000001+01:00",
+                "9999-12-31T22:59:59.999999-01:00",
+            ]
         ],
     }
 
