@@ -43,6 +43,7 @@ __all__ = ["configure", "close", "build_server", "run_stdio", "TOOLS"]
 _settings: GraphSettings | None = None
 _graph: SelfGraph | None = None
 _opening: asyncio.Future[SelfGraph] | None = None
+_closing: set[asyncio.Task[None]] = set()
 
 _WRITE_CLAUSE = re.compile(
     r"\b(CREATE|INSERT|MERGE|DELETE|DETACH|SET|REMOVE|DROP|ALTER|RENAME|TRUNCATE|FOREACH|COPY|LOAD|IMPORT|"
@@ -136,7 +137,9 @@ def configure(settings: GraphSettings | None = None) -> None:
     global _settings, _graph, _opening
     _settings = settings or settings_from_env()
     _graph = None
-    _opening = None
+    opening, _opening = _opening, None
+    if opening is not None:
+        _discard_opening(opening)
 
 
 async def close() -> None:
@@ -144,10 +147,45 @@ async def close() -> None:
 
     @return (None): nothing.
     """
-    global _graph
+    global _graph, _opening
     graph, _graph = _graph, None
+    opening, _opening = _opening, None
+    if opening is not None:
+        if not opening.done():
+            opening.cancel()
+        await asyncio.wait([opening])
+        if _opened(opening):
+            await opening.result().close()
     if graph is not None:
         await graph.close()
+
+
+def _opened(opening: asyncio.Future[SelfGraph]) -> bool:
+    """Report whether a pending open finished with a graph.
+
+    @param opening (asyncio.Future[SelfGraph]): the pending open.
+    @return (bool): True when it finished and produced a graph.
+    """
+    return opening.done() and not opening.cancelled() and opening.exception() is None
+
+
+def _discard_opening(opening: asyncio.Future[SelfGraph]) -> None:
+    """Drop a pending open: cancel it, or close the graph it already produced.
+
+    @param opening (asyncio.Future[SelfGraph]): the pending open.
+    """
+    if not opening.done():
+        opening.cancel()
+        return
+    if not _opened(opening):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(opening.result().close())
+    _closing.add(task)
+    task.add_done_callback(_closing.discard)
 
 
 async def _open_graph() -> SelfGraph:
@@ -182,7 +220,7 @@ async def _graph_handle() -> SelfGraph:
     try:
         graph = await asyncio.shield(opening)
     except BaseException:
-        if _opening is opening and opening.done():
+        if _opening is opening and opening.done() and not _opened(opening):
             _opening = None
         raise
     if _opening is opening:
