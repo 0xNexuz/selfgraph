@@ -1701,6 +1701,7 @@ function compareRanked(a: readonly [Rank, string], b: readonly [Rank, string]): 
 export class Contradictions {
   private readonly groups = new Map<string, Map<string, Rank>>();
   private readonly past = new Map<string, Map<string, Rank>>();
+  private readonly ended = new Map<string, [string, Date]>();
   private readonly where = new Map<string, Set<string>>();
   private readonly times = new Map<string, Date>();
   private readonly order = new Map<string, number>();
@@ -1723,6 +1724,9 @@ export class Contradictions {
   ) {
     for (const rel of history) {
       this.times.set(rel.id, effectiveTime(rel));
+      if (rel.invalidated_by !== null && rel.invalidated_at !== null) {
+        this.ended.set(rel.id, [rel.invalidated_by, rel.invalidated_at]);
+      }
       for (const [slot] of this.slots(rel.type, rel.from_entity, rel.to_entity)) {
         const key = JSON.stringify(slot);
         this.past.set(key, (this.past.get(key) ?? new Map<string, Rank>()).set(rel.id, rankOf(rel)));
@@ -1836,7 +1840,9 @@ export class Contradictions {
    * current with a "certified_kept" warning. A retired relation is invalidated by the fact that displaced it in time
    * order, the max_count-th newer fact at the endpoint with retired history counted, at
    * that fact's effective time. Each retired relation gets one warning: "contradiction_out_of_order" when it was
-   * written by this write after that fact was current, else "relation_superseded".
+   * written by this write after that fact was current, else "relation_superseded". A relation retired by an
+   * earlier write whose invalidating fact is no longer the max_count-th newer one, because this write added a fact
+   * in between, is returned with its corrected invalidation and no warning.
    *
    * @return ([Map<string, [string, Date]>, InsertWarning[]]): each retired relation id with the id that invalidated it and when, and the warnings.
    */
@@ -1886,6 +1892,23 @@ export class Contradictions {
           );
         }
       }
+      const facts = new Map([...(this.past.get(key) ?? []), ...group]);
+      for (const rid of this.past.get(key)?.keys() ?? []) {
+        const was = this.ended.get(rid);
+        if (retired.has(rid) || was === undefined || !facts.has(was[0])) continue;
+        const mine: [Rank, string] = [facts.get(rid)!, rid];
+        const newer = [...facts]
+          .map(([o, r]) => [r, o] as [Rank, string])
+          .filter((pair) => compareRanked(pair, mine) > 0)
+          .sort(compareRanked);
+        if (newer.length < limit) continue;
+        const by = newer[limit - 1]![1];
+        const at = this.times.get(by)!;
+        if (by !== was[0] || at.getTime() !== was[1].getTime()) {
+          retired.set(rid, [by, at]);
+          this.ended.set(rid, [by, at]);
+        }
+      }
     }
     this.dirty.clear();
     return [retired, warnings];
@@ -1899,14 +1922,14 @@ export class Contradictions {
  * @param ns (string): the namespace.
  * @param caps (ReadonlyMap<string, RelationCap>): the max_count limits by normalized relation type and alias.
  * @param ends (Iterable<readonly [string, string, string]>): (normalized type, source id, destination id) of each write.
- * @return ([Map<string, EdgeRow>, Relation[]]): each current relation's edge row by id, in read order, and the newest version of each relation a contradiction retired there.
+ * @return ([Map<string, EdgeRow>, Map<string, EdgeRow>]): each current relation's edge row by id, in read order, and the newest version of each relation a contradiction retired there by id.
  */
 async function constrainedCurrent(
   runner: Runner,
   ns: string,
   caps: ReadonlyMap<string, RelationCap>,
   ends: Iterable<readonly [string, string, string]>,
-): Promise<[Map<string, EdgeRow>, Relation[]]> {
+): Promise<[Map<string, EdgeRow>, Map<string, EdgeRow>]> {
   const found = new Map<string, EdgeRow>();
   const seen = new Set<string>();
   for (const [rtype, fromEntity, toEntity] of ends) {
@@ -1926,7 +1949,7 @@ async function constrainedCurrent(
   const rows = [...found.values()];
   return [
     new Map(rows.filter((e) => e.props.is_current).map((e) => [idOf(e.props), e])),
-    rows.filter((e) => !e.props.is_current && e.props.invalidated_at).map(relationOf),
+    new Map(rows.filter((e) => !e.props.is_current && e.props.invalidated_at).map((e) => [idOf(e.props), e])),
   ];
 }
 
@@ -2008,7 +2031,13 @@ async function contradictionCheck(
   const { contradiction = "off", caps } = options;
   if (contradiction === "off" || !caps?.size) return [null, new Map()];
   const [existing, history] = await constrainedCurrent(runner, ns, caps, ends);
-  return [new Contradictions(caps, contradiction, [...existing.values()].map(relationOf), history), existing];
+  const tracker = new Contradictions(
+    caps,
+    contradiction,
+    [...existing.values()].map(relationOf),
+    [...history.values()].map(relationOf),
+  );
+  return [tracker, new Map([...history, ...existing])];
 }
 
 /**

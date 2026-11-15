@@ -598,6 +598,28 @@ function suite(spec: StoreSpec): void {
     }
   });
 
+  it("a late middle fact corrects the retired history it lands in", async () => {
+    const [acme, globex, initech] = [annAt("acme", 2020), annAt("globex", 2022), annAt("initech", 2024)];
+    const initechId = ids.relationId("person:ann", "WORKS_AT", "company:initech");
+    for (const order of [
+      [acme, globex, initech],
+      [acme, initech, globex],
+      [initech, acme, globex],
+    ]) {
+      const g = await graph("supersede");
+      for (const rel of order) await insert(g, [rel!]);
+      const [first] = await g.relations.versions(ACME);
+      const [mid] = await g.relations.versions(GLOBEX);
+      expect([first!.invalidated_by, first!.invalidated_at]).toEqual([GLOBEX, at(2022)]);
+      expect([mid!.invalidated_by, mid!.invalidated_at]).toEqual([initechId, at(2024)]);
+      const valid = async (when: Date) =>
+        new Set((await g.retrieve("Ann", { as_of: when })).subgraph.relations.map((r) => r.id));
+      expect(await valid(new Date(Date.UTC(2021, 5, 1)))).toEqual(new Set([ACME]));
+      expect(await valid(at(2023))).toEqual(new Set([GLOBEX]));
+      expect(await valid(at(2025))).toEqual(new Set([initechId]));
+    }
+  });
+
   it("rejects an invalid as_of and a closed graph", async () => {
     const g = await graph();
     await expect(g.retrieve("Ann", { as_of: 5 as never })).rejects.toThrow("as_of must be a datetime, got number");

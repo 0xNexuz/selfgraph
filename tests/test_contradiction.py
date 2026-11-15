@@ -404,3 +404,22 @@ def test_a_retired_fact_is_invalidated_by_the_next_newer_one():
             return {r.id for r in run(g.retrieve("Ann", as_of=utc(year, month))).subgraph.relations}
 
         assert (valid(2019, 6), valid(2020, 6), valid(2023)) == ({ACME}, {initech}, {GLOBEX})
+
+
+def test_a_late_middle_fact_corrects_the_retired_history_it_lands_in():
+    rels = [works_at("acme", 2020), works_at("globex", 2022), works_at("initech", 2024)]
+    globex = ids.relation_id("person:ann", "WORKS_AT", "company:globex")
+    initech = ids.relation_id("person:ann", "WORKS_AT", "company:initech")
+    orders = [(rels[0], rels[1], rels[2]), (rels[0], rels[2], rels[1]), (rels[2], rels[0], rels[1])]
+    for order in orders:
+        g = graph(contradiction="supersede")
+        for rel in order:
+            insert(g, rel)
+        acme, mid = (run(g.relations.versions(rid))[0] for rid in (ACME, globex))
+        assert (acme.invalidated_by, acme.invalidated_at) == (globex, utc(2022))
+        assert (mid.invalidated_by, mid.invalidated_at) == (initech, utc(2024))
+
+        def valid(year, g=g):
+            return {r.id for r in run(g.retrieve("Ann", as_of=utc(year, 6))).subgraph.relations}
+
+        assert (valid(2021), valid(2023), valid(2025)) == ({ACME}, {globex}, {initech})

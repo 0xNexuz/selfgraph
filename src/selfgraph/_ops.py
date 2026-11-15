@@ -1718,11 +1718,14 @@ class Contradictions:
         self._mode = mode
         self._groups: dict[tuple[str, str, str], dict[str, tuple]] = {}
         self._past: dict[tuple[str, str, str], dict[str, tuple]] = {}
+        self._ended: dict[str, tuple[str, datetime]] = {}
         self._where: dict[str, dict[tuple[str, str, str], None]] = {}
         self._order: dict[str, int] = {}
         self._dirty: dict[tuple[str, str, str], int] = {}
         self._certified = {rel.id for rel in current if rel.certified_at is not None}
         for rel in history:
+            if rel.invalidated_by is not None and rel.invalidated_at is not None:
+                self._ended[rel.id] = (rel.invalidated_by, rel.invalidated_at)
             for key, _ in self._slots(rel.type, rel.from_entity, rel.to_entity):
                 self._past.setdefault(key, {})[rel.id] = _rank(rel)
         for rel in current:
@@ -1811,7 +1814,9 @@ class Contradictions:
         displaced it in time order, the max_count-th newer fact at the endpoint with retired history counted, at
         that fact's effective time. Each retired relation gets one warning:
         "contradiction_out_of_order" when it was written by this write after that fact was current, else
-        "relation_superseded".
+        "relation_superseded". A relation retired by an earlier write whose invalidating fact is no longer the
+        max_count-th newer one, because this write added a fact in between, is returned with its corrected
+        invalidation and no warning.
 
         @return (tuple[dict[str, tuple[str, datetime]], list[InsertWarning]]): each retired relation id with the
             id that invalidated it and when, and the warnings.
@@ -1855,6 +1860,18 @@ class Contradictions:
                             f"at {side} entity {endpoint} (max_count {limit})",
                         )
                     )
+            facts = {**self._past.get(key, {}), **group}
+            for rid in self._past.get(key, {}):
+                if rid in retired or rid not in self._ended or self._ended[rid][0] not in facts:
+                    continue
+                mine = (facts[rid], rid)
+                newer = sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
+                if len(newer) < limit:
+                    continue
+                (at, _, _), by = newer[limit - 1]
+                if (by, at) != self._ended[rid]:
+                    retired[rid] = (by, at)
+                    self._ended[rid] = (by, at)
         self._dirty.clear()
         return retired, warnings
 
@@ -1917,8 +1934,8 @@ async def _contradiction_check(
     @param contradiction (str): "off", "warn", "supersede", or "strict".
     @param caps (Mapping[str, RelationCap] | None): the max_count limits, or None without a schema.
     @param ends (Iterable[tuple[str, str, str]]): (normalized type, source id, destination id) of each write.
-    @return (tuple[Contradictions | None, dict[str, dict]]): the tracker, or None when off, and each current
-        relation's edge row at the constrained endpoints by id, in read order.
+    @return (tuple[Contradictions | None, dict[str, dict]]): the tracker, or None when off, and each relation's
+        newest edge row at the constrained endpoints by id, current or retired, in read order.
     """
     if contradiction == "off" or not caps:
         return None, {}
@@ -1936,11 +1953,11 @@ async def _contradiction_check(
                 fetch = partial(runner.match_edges, ns, from_label=L_ENTITY, to_label=L_ENTITY, type=stored)
                 for edge in await _paged(partial(fetch, **anchor), page=_BATCH):
                     _keep_newest(found, edge)
-    existing = {rid: e for rid, e in found.items() if e["props"]["is_current"]}
+    current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
     history = [
         _relation_of(e) for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")
     ]
-    return Contradictions(caps, contradiction, [_relation_of(e) for e in existing.values()], history), existing
+    return Contradictions(caps, contradiction, current, history), found
 
 
 async def rival_relations(
