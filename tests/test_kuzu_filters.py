@@ -4,6 +4,8 @@ import pytest
 
 from selfgraph import KuzuStore, SelfGraph
 
+pytest.importorskip("kuzu")
+
 
 def test_kuzu_list_property_filters(tmp_path):
     async def check():
