@@ -1,6 +1,5 @@
 import { DECAY_HINT, ValidationError } from "../errors.js";
 import { normalizeRelType } from "../ids.js";
-import { casefold } from "../internal/casefold.js";
 import { log } from "../internal/log.js";
 import { comparePy } from "../internal/py.js";
 import { jsonIso, toIso } from "../internal/time.js";
@@ -149,7 +148,7 @@ export class Maintenance extends Resource {
     }
     const narrowed = types !== null || relTypes !== null;
     const schema = this.graph.schema;
-    const typeKey = (etype: string): string => casefold(canonicalEntityType(ops.cleanText(etype), schema));
+    const typeKey = (etype: string): string => ops.entityTypeKey(etype, (type) => canonicalEntityType(type, schema));
     const entityTypes = narrowed ? new Set((types ?? []).map(typeKey)) : null;
     const relationTypes = narrowed ? new Set((relTypes ?? []).map(normalizeRelType)) : null;
     const matches = (

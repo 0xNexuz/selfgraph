@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 
 from .. import _maintenance as _m
 from .. import _ops
@@ -143,11 +144,7 @@ class Maintenance(Resource):
         if min_relevance is None and older_than is None:
             raise ValidationError("prune needs min_relevance or older_than; types and relation_types only narrow them")
         narrowed = types is not None or relation_types is not None
-        schema = self._c.schema
-
-        def type_key(etype: str) -> str:
-            return canonical_entity_type(_ops._clean_text(etype), schema).casefold()
-
+        type_key = partial(_ops.entity_type_key, canonical=partial(canonical_entity_type, schema=self._c.schema))
         entity_types = {type_key(t) for t in types or ()} if narrowed else None
         rel_types = {normalize_rel_type(t) for t in relation_types or ()} if narrowed else None
 
