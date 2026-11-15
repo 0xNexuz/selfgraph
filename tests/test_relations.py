@@ -40,6 +40,7 @@ def test_relation_versions_distinguish_json_booleans_from_numbers():
     seed(g)
     r = run(g.relations.create("person:soham", "WORKS_AT", "company:hydradb", properties={"flags": [1]}))
 
+    run(g.relations.update(r.id, set_properties={"flags": [1.0]}))
     run(g.relations.update(r.id, set_properties={"flags": [True]}))
     run(g.relations.update(r.id, set_properties={"flags": [True]}))
     latest, first = run(g.relations.versions(r.id))
