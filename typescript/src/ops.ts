@@ -205,7 +205,7 @@ export function validateEntityIdentity(eid: unknown, type: unknown, name: unknow
   if (hasControl(name) || hasControl(type)) {
     throw new ValidationError("entity type and name cannot contain control or surrogate characters");
   }
-  if (!/^[\p{L}\p{N} _.-]*$/u.test(type)) {
+  if (![...type].every((ch) => /[\p{L}\p{N} _.-]/u.test(ch) || ids.isMark(ch))) {
     throw new ValidationError(
       `entity type ${pyRepr(type)} can only contain letters, digits, spaces, '_', '-', and '.'`,
     );

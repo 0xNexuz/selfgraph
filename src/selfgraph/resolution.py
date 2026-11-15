@@ -164,7 +164,7 @@ def _words(name: str) -> list[str]:
     @param name (str): the entity name.
     @return (list[str]): the folded letter and digit runs, in order.
     """
-    return re.findall(r"[^\W_]+", _fold(name.strip()))
+    return _ids._word_runs(_fold(name.strip()))
 
 
 def _distinguishers(words: list[str]) -> tuple[list[str], list[str], list[str]]:

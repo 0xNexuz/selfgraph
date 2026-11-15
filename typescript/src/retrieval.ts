@@ -1,7 +1,7 @@
 import { type GraphAccess, seedTier } from "./access.js";
 import { loadTokenizer } from "./chunking.js";
 import { ValidationError } from "./errors.js";
-import { normalizeText, profileId } from "./ids.js";
+import { normalizeText, profileId, wordRuns } from "./ids.js";
 import { casefold } from "./internal/casefold.js";
 import { loads } from "./internal/json.js";
 import { comparePy, cpLen, NON_ASCII, pyFloatRepr, pyRepr, pyStr, pyStrip } from "./internal/py.js";
@@ -75,8 +75,6 @@ export const STRATEGIES = ["bfs", "dfs", "ppr"] as const;
 
 export const RETRIEVE_DEFAULTS = { strategy: "bfs", depth: 3, k: 20, max_nodes: 200, budget_tokens: 3000 } as const;
 
-const TOKEN = /[\p{L}\p{N}]+/gu;
-
 /**
  * NFC-normalize and casefold text, so query and stored text compare in one form.
  *
@@ -94,7 +92,7 @@ export function fold(text: string): string {
  * @return (string[]): the content tokens, repeats kept.
  */
 export function tokenList(text: string): string[] {
-  return [...fold(text).matchAll(TOKEN)].map((m) => m[0]).filter((t) => !STOPWORDS.has(t));
+  return wordRuns(fold(text)).filter((t) => !STOPWORDS.has(t));
 }
 
 /**
@@ -115,7 +113,7 @@ export function tokens(text: string): Set<string> {
  */
 function shortTokens(text: string): Set<string> {
   const out = new Set<string>();
-  for (const m of fold(text).matchAll(TOKEN)) if ([...m[0]].length === 1) out.add(m[0]);
+  for (const t of wordRuns(fold(text))) if (cpLen(t) === 1) out.add(t);
   return out;
 }
 

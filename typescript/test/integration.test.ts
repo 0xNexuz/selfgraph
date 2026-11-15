@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -691,6 +691,25 @@ describe("store setup errors", () => {
     expect(uniqueLabels(neo4jRows.slice(1))).toEqual(new Set(LABELS.slice(1)));
   });
 
+  it("opens relative Kuzu paths in each store's working directory", async () => {
+    const cwd = process.cwd();
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-cwd-"));
+    const other = join(dir, "other");
+    mkdirSync(other);
+    try {
+      process.chdir(dir);
+      await using first = new SelfGraph(new KuzuStore("graph.kuzu"));
+      const entity = await first.entities.create("Jane", "Person");
+      process.chdir(other);
+      await using second = new SelfGraph(new KuzuStore("graph.kuzu"));
+      expect(await second.entities.get(entity.id)).toBeNull();
+      expect(await first.entities.get(entity.id)).toEqual(entity);
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
     for (const size of [-1, 0, 1.5]) {
       expect(() => new KuzuStore("x.kuzu", { max_db_size: size })).toThrow(
@@ -774,6 +793,39 @@ describe("property values", () => {
     expect((await g.entities.update(jane.id, { name: "JD" })).aliases).toEqual(["Annié", "Janie"]);
   });
 
+  it("keeps names that differ only in vowel signs as separate entities", async () => {
+    const g = open();
+    const [ram, reema] = [ids.entityId("Person", "राम"), ids.entityId("Person", "रीमा")];
+    expect([ram, reema]).toEqual(["person:राम", "person:रीमा"]);
+    const result = await g.insert.facts({
+      entities: [
+        { type: "Person", name: "राम" },
+        { type: "Person", name: "रीमा" },
+        { type: "शहर", name: "दिल्ली" },
+        { type: "City", name: "Mumbai" },
+      ],
+      relations: [
+        { from_entity: ram, type: "रहता है", to_entity: ids.entityId("शहर", "दिल्ली") },
+        { from_entity: reema, type: "रहती है", to_entity: "city:mumbai" },
+      ],
+    });
+    expect(result.warnings).toEqual([]);
+    const people = (await g.entities.list({ type: "Person" })).items;
+    expect(people.map((e) => [e.id, e.name, e.aliases])).toEqual([
+      [ram, "राम", []],
+      [reema, "रीमा", []],
+    ]);
+    const relations = (await g.relations.list()).items.map((r) => [r.from_entity, r.type, r.to_entity]);
+    expect(relations.sort()).toEqual([
+      [ram, "रहता_है", "शहर:दिल्ली"],
+      [reema, "रहती_है", "city:mumbai"],
+    ]);
+    const found = await g.retrieve("रीमा कहाँ रहती है?");
+    expect(found.seeds.map((s) => s.id)).toEqual([reema]);
+    expect(found.context).toContain("Mumbai");
+    expect(found.context).not.toContain("राम");
+  });
+
   it("checks entity types and ids, and keeps the stored type on a case-only update", async () => {
     const g = open();
     await expect(g.entities.create("X", "Person", { id: "company:x" })).rejects.toThrow(
@@ -787,6 +839,8 @@ describe("property values", () => {
     await expect(g.insert.facts({ entities: [{ type: "Per:son", name: "A" }] })).rejects.toThrow("cannot contain ':'");
     await expect(g.entities.create("X", "bad type!")).rejects.toThrow(/can only contain letters, digits, spaces/);
     expect((await g.entities.create("Zoë", "Café Owner_v2.1-b")).type).toBe("Café Owner_v2.1-b");
+    expect((await g.entities.create("सीता", "व्यक्ति")).id).toBe("व्यक्ति:सीता");
+    await expect(g.entities.create("X", "bad\ufe0ftype")).rejects.toThrow(/can only contain letters, digits, spaces/);
     const calls = [
       (eid: string) => g.entities.get(eid),
       (eid: string) => g.entities.delete(eid),
