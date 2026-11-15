@@ -2833,7 +2833,7 @@
   "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.": "a8e4af8e260111cef200e124",
   "Jane Doe met\nBob Smith at Acme.": "63b309d13b6549122a3aa3d8",
   "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing": "5926862df84c66dca48c94df",
-  "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n": "9c50063883995db8f620e66d"
+  "Acme Report\u2028Ann works at Acme\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u001dHooli\u001eSoylent\rUmbrella\u000bStark\n": "337e62b5897ce948dcacc368"
  },
  "quote_label": {
   "Entity": "Entity",
@@ -3190,7 +3190,7 @@
    "lee",
    "smith"
   ],
-  "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n": [
+  "Acme Report\u2028Ann works at Acme\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u001dHooli\u001eSoylent\rUmbrella\u000bStark\n": [
    "acme",
    "ann",
    "bob",
@@ -3200,6 +3200,9 @@
    "initech",
    "lee",
    "report",
+   "soylent",
+   "stark",
+   "umbrella",
    "works"
   ],
   "Stra\u00dfe STRASSE": [
@@ -4524,7 +4527,7 @@
    26,
    10,
    13,
-   29
+   40
   ]
  },
  "extract": [
@@ -5146,7 +5149,7 @@
    }
   },
   {
-   "text": "Acme Report\u2028Ann works at Acme.\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u000bHooli\n",
+   "text": "Acme Report\u2028Ann works at Acme\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u001dHooli\u001eSoylent\rUmbrella\u000bStark\n",
    "facts": {
     "entities": [
      {
@@ -5204,6 +5207,30 @@
       "aliases": [],
       "external_ids": {},
       "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Soylent",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Umbrella",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Stark",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
      }
     ],
     "relations": [
@@ -5221,6 +5248,15 @@
       "from_entity": "thing:ann",
       "type": "RELATED_TO",
       "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:acme",
+      "type": "RELATED_TO",
+      "to_entity": "thing:bob-lee",
       "properties": {},
       "event_time": null,
       "evidence": []
@@ -5248,6 +5284,33 @@
       "from_entity": "thing:globex",
       "type": "RELATED_TO",
       "to_entity": "thing:hooli",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:hooli",
+      "type": "RELATED_TO",
+      "to_entity": "thing:soylent",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:soylent",
+      "type": "RELATED_TO",
+      "to_entity": "thing:umbrella",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:umbrella",
+      "type": "RELATED_TO",
+      "to_entity": "thing:stark",
       "properties": {},
       "event_time": null,
       "evidence": []

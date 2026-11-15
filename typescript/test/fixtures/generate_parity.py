@@ -149,7 +149,7 @@ TEXTS = [
     "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.",
     "Jane Doe met\nBob Smith at Acme.",
     "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing",
-    "Acme Report\u2028Ann works at Acme.\x85Bob Lee\u2029Initech Inc\x1cGlobex\vHooli\n",
+    "Acme Report\u2028Ann works at Acme\x85Bob Lee\u2029Initech Inc\x1cGlobex\x1dHooli\x1eSoylent\rUmbrella\vStark\n",
 ]
 
 PROPS = [

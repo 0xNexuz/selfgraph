@@ -107,13 +107,13 @@ def test_insert_text_without_llm_uses_ner_extractor(caplog):
     ids=["heading", "title-line", "list", "crlf", "tab", "form-feed", "line-separator"],
 )
 def test_regex_extraction_stops_names_at_line_breaks(text, names):
-    res = run(new_graph().insert.text(text, source_id="lines"))
+    res = run(fresh_graph("lines", extraction="regex").insert.text(text))
     assert sorted(e.name for e in res.entities) == sorted(names)
     assert [w.code for w in res.warnings] == ["basic_extraction"]
 
 
 def test_regex_extraction_still_relates_names_in_a_sentence_wrapped_across_lines():
-    res = run(new_graph().insert.text("Jane Doe met\nBob Smith at Acme.", source_id="wrapped"))
+    res = run(fresh_graph("wrapped", extraction="regex").insert.text("Jane Doe met\nBob Smith at Acme."))
     assert {(r.from_entity, r.to_entity) for r in res.relations} == {
         ("thing:jane-doe", "thing:bob-smith"),
         ("thing:bob-smith", "thing:acme"),
