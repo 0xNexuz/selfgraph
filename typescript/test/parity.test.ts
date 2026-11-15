@@ -148,6 +148,10 @@ describe("extraction, chunking, and retrieval helpers match Python", () => {
   it("token chunking and counting with cl100k_base", async () => {
     const { chunkText, countTokens } = await loadTokenizer();
     expect(chunkText(fx.chunks.text, { max_tokens: 64, overlap_tokens: 8 })).toEqual(fx.chunks.by_tokens);
+    const split = chunkText(fx.chunks.split_text, { max_tokens: 7, overlap_tokens: 2 });
+    expect(split).toEqual(fx.chunks.split_by_tokens);
+    const cps = Array.from(fx.chunks.split_text as string);
+    for (const chunk of split) expect(cps.slice(chunk.start_offset, chunk.end_offset).join("")).toBe(chunk.text);
     expect(chunkText(fx.chunks.text, { max_tokens: 16 })).toEqual(
       chunkText(fx.chunks.text, { max_tokens: 16, overlap_tokens: 4 }),
     );

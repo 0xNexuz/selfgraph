@@ -90,6 +90,9 @@ function requireCount(field: string, value: unknown, minimum: number): asserts v
 /**
  * Split text into overlapping chunks sized by tokens, falling back to characters cut on whitespace, with code-point offsets.
  *
+ * Each chunk is the text between its offsets. A token edge inside a character moves to that character's start, so a
+ * character the token budget splits goes whole into the later chunk.
+ *
  * @param text (string): the text to split.
  * @param options ({ max_tokens?: number; overlap_tokens?: number }): the maximum tokens per chunk (at least 1) and the token overlap (0 to max_tokens - 1, default min(64, max_tokens / 4) rounded down).
  * @return (Chunk[]): the chunks, in order.
@@ -107,20 +110,53 @@ export function chunkText(text: string, options: { max_tokens?: number; overlap_
   if (!encoder) return chunkByChars(text, maxTokens * CHARS_PER_TOKEN, overlapTokens * CHARS_PER_TOKEN);
 
   const tokens = encode(encoder, text);
+  const cps = Array.from(text);
+  const bounds = charBounds(encoder, tokens, cps.length);
   const step = maxTokens - overlapTokens;
   const chunks: Chunk[] = [];
   let index = 0;
   const n = tokens.length;
   for (let i = 0; i < n; i += step) {
-    const piece = encoder.decode(tokens.slice(i, i + maxTokens));
-    const start = cpLen(encoder.decode(tokens.slice(0, i)));
+    const start = bounds[i] as number;
+    const end = bounds[Math.min(i + maxTokens, n)] as number;
+    const piece = cps.slice(start, end).join("");
     if (pyStrip(piece)) {
-      chunks.push({ index, text: piece, start_offset: start, end_offset: start + cpLen(piece) });
+      chunks.push({ index, text: piece, start_offset: start, end_offset: end });
       index++;
     }
     if (i + maxTokens >= n) break;
   }
   return chunks;
+}
+
+/**
+ * Map each token boundary to a code-point offset in the text, moving a boundary inside a character to its start.
+ *
+ * A byte-level token can end partway through a character's UTF-8 bytes. Tokens are decoded in runs that start on a
+ * character boundary; a run is complete once its text no longer ends with U+FFFD, and a boundary inside it decodes
+ * to its text plus one U+FFFD for the character it cuts.
+ *
+ * @param enc (Encoder): the tokenizer.
+ * @param tokens (number[]): the tokens of the text.
+ * @param length (number): the text's length in code points.
+ * @return (number[]): tokens.length + 1 code-point offsets, the first 0 and the last length.
+ */
+function charBounds(enc: Encoder, tokens: number[], length: number): number[] {
+  const bounds = [0];
+  let run = 0;
+  let offset = 0;
+  for (let end = 1; end <= tokens.length; end++) {
+    const piece = enc.decode(tokens.slice(run, end));
+    if (piece.endsWith("�") && end < tokens.length) continue;
+    for (let cut = run + 1; cut < end; cut++) {
+      bounds.push(offset + Math.max(0, cpLen(enc.decode(tokens.slice(run, cut))) - 1));
+    }
+    offset += cpLen(piece);
+    bounds.push(offset);
+    run = end;
+  }
+  bounds[bounds.length - 1] = length;
+  return bounds;
 }
 
 /**
