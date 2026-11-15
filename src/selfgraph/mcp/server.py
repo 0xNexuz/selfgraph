@@ -43,7 +43,6 @@ __all__ = ["configure", "close", "build_server", "run_stdio", "TOOLS"]
 _settings: GraphSettings | None = None
 _graph: SelfGraph | None = None
 _opening: asyncio.Future[SelfGraph] | None = None
-_closing: set[asyncio.Task[None]] = set()
 
 _WRITE_CLAUSE = re.compile(
     r"\b(CREATE|INSERT|MERGE|DELETE|DETACH|SET|REMOVE|DROP|ALTER|RENAME|TRUNCATE|FOREACH|COPY|LOAD|IMPORT|"
@@ -129,21 +128,21 @@ class _Unset:
 _UNSET: Any = _Unset()
 
 
-def configure(settings: GraphSettings | None = None) -> None:
-    """Set the backend for the tools and drop any cached graph.
+async def configure(settings: GraphSettings | None = None) -> None:
+    """Set the backend for the tools, closing any cached or pending graph.
 
     @param settings (GraphSettings | None): the backend settings, or None to read the environment.
+    @return (None): nothing.
     """
-    global _settings, _graph, _opening
+    global _settings
     _settings = settings or settings_from_env()
-    _graph = None
-    opening, _opening = _opening, None
-    if opening is not None:
-        _discard_opening(opening)
+    await close()
 
 
 async def close() -> None:
     """Close the cached graph, if one is open; the next tool call reopens it.
+
+    A graph still opening is cancelled and awaited, and closed if it finished opening.
 
     @return (None): nothing.
     """
@@ -169,25 +168,6 @@ def _opened(opening: asyncio.Future[SelfGraph]) -> bool:
     return opening.done() and not opening.cancelled() and opening.exception() is None
 
 
-def _discard_opening(opening: asyncio.Future[SelfGraph]) -> None:
-    """Drop a pending open: cancel it, or close the graph it already produced.
-
-    @param opening (asyncio.Future[SelfGraph]): the pending open.
-    """
-    if not opening.done():
-        opening.cancel()
-        return
-    if not _opened(opening):
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    task = loop.create_task(opening.result().close())
-    _closing.add(task)
-    task.add_done_callback(_closing.discard)
-
-
 async def _open_graph() -> SelfGraph:
     """Build and initialise a graph from the current settings.
 
@@ -209,12 +189,12 @@ async def _graph_handle() -> SelfGraph:
 
     @return (SelfGraph): the shared, initialised graph.
     """
-    global _graph, _opening
+    global _graph, _opening, _settings
     if _graph is not None:
         return _graph
     if _opening is None:
         if _settings is None:
-            configure()
+            _settings = settings_from_env()
         _opening = asyncio.ensure_future(_open_graph())
     opening = _opening
     try:
@@ -1007,5 +987,5 @@ def run_stdio(settings: GraphSettings | None = None) -> None:
 
     @param settings (GraphSettings | None): the backend settings, or None to read the environment.
     """
-    configure(check_settings(settings or settings_from_env()))
+    asyncio.run(configure(check_settings(settings or settings_from_env())))
     build_server().run()
