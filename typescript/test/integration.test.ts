@@ -776,14 +776,18 @@ describe("store setup errors", () => {
     );
     const home = mkdtempSync(join(tmpdir(), "selfgraph-home-"));
     const saved = process.env.HOME;
+    const savedProfile = process.env.USERPROFILE;
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     try {
-      const store = new KuzuStore("~/sub/x.kuzu");
+      const store = new KuzuStore(process.platform === "win32" ? "~\\sub\\x.kuzu" : "~/sub/x.kuzu");
       await store.initialize();
       await store.close();
       expect(existsSync(join(home, "sub", "x.kuzu"))).toBe(true);
     } finally {
       process.env.HOME = saved;
+      if (savedProfile !== undefined) process.env.USERPROFILE = savedProfile;
+      else delete process.env.USERPROFILE;
       rmSync(home, { recursive: true, force: true });
     }
     expect(kuzuError(new Error("IO exception: Could not set lock on file : /x"), "open").message).toMatch(
