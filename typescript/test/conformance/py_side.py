@@ -607,6 +607,13 @@ async def write(graph):
     out["resettle_versions"] = to_jsonable(
         {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
     )
+    require_identifier_cases = {}
+    for name in ["id", "external_ids", "a b", "1x", ""]:
+        try:
+            require_identifier_cases[name] = ids.require_identifier(name)
+        except ValidationError as exc:
+            require_identifier_cases[name] = str(exc)
+    out["require_identifier"] = require_identifier_cases
     return out
 
 
