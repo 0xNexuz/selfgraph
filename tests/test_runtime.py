@@ -1,5 +1,6 @@
 import json
 import sys
+import weakref
 from types import SimpleNamespace
 
 import pytest
@@ -265,7 +266,7 @@ def test_kuzu_reopens_its_connection_without_changing_results(tmp_path):
     store = KuzuStore(str(tmp_path / "r.kuzu"))
     g = SelfGraph(store, namespace="reconnect")
     run(g.initialize())
-    first = store._conn
+    first = weakref.ref(store._conn)
     people = [{"id": f"person:p{i}", "type": "Person", "name": f"Person {i}"} for i in range(30)]
     knows = [{"from_entity": f"person:p{i}", "type": "KNOWS", "to_entity": f"person:p{i - 1}"} for i in range(1, 30)]
     run(g.insert.facts({"entities": people, "relations": knows}))
@@ -276,7 +277,7 @@ def test_kuzu_reopens_its_connection_without_changing_results(tmp_path):
     assert run(reads()) == [[{"i": i}] for i in range(600)]
     run(g.insert.facts({"relations": [{**r, "properties": {"since": 2020}} for r in knows]}))
     rels = run(g.relations.list(type="KNOWS", limit=100)).items
-    assert store._conn is not first
+    assert first() is None
     assert len(run(g.entities.list(limit=100)).items) == 30
     assert sorted((r.revision, r.is_current, r.properties["since"]) for r in rels) == [(2, True, 2020)] * 29
     assert "person:p7" in {e.id for e in run(g.retrieve("Person 7")).subgraph.entities}

@@ -183,7 +183,6 @@ class KuzuStore(AutoCommitStore):
             self._require_open()
             self._statements += 1
             if self._statements > _RECONNECT_EVERY:
-                self._conn.close()
                 self._conn = self._connect()
                 self._statements = 1
             try:
