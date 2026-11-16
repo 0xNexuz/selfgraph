@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -124,31 +123,9 @@ def from_iso(value: Any) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
-_MAX_SAFE_INT = 2**53 - 1
-
-
-def _whole_floats_as_ints(value: Any) -> Any:
-    """Turn every float that TypeScript reads as a safe integer into an int, so both SDKs store and render it alike.
-
-    TypeScript has one number type, so it reads 2.0 as 2 and writes it without a fraction. A finite whole float
-    within +/-(2**53 - 1), other than -0.0, is that case; every other float is kept.
-
-    @param value (Any): a JSON-like value; mappings, lists, and tuples are rebuilt, everything else is kept.
-    @return (Any): the value with those floats as ints.
-    """
-    if isinstance(value, float):
-        whole = value.is_integer() and abs(value) <= _MAX_SAFE_INT and not (value == 0 and math.copysign(1, value) < 0)
-        return int(value) if whole else value
-    if isinstance(value, dict):
-        return {k: _whole_floats_as_ints(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [_whole_floats_as_ints(v) for v in value]
-    return value
-
-
 def _dumps(value: Any) -> str:
     try:
-        return json.dumps(_whole_floats_as_ints(value), sort_keys=True, allow_nan=False)
+        return json.dumps(value, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError, RecursionError) as exc:
         raise ValidationError(f"value is not JSON-serializable: {exc}") from exc
 
@@ -157,9 +134,9 @@ def _loads(value: Any, fallback: Any) -> Any:
     if value is None:
         return fallback
     if isinstance(value, dict | list):
-        return _whole_floats_as_ints(value)
+        return value
     try:
-        return _whole_floats_as_ints(json.loads(value))
+        return json.loads(value)
     except (TypeError, ValueError):
         return fallback
 

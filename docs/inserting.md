@@ -239,8 +239,7 @@ Properties and metadata hold JSON values.
   agree on every exponent-written value.
 - A whole-number float within that range, such as `2.0`, is stored and read
   back as the integer `2`, since TypeScript cannot tell the two apart. `-0.0`
-  and every other float stay floats. Values a graph already holds read back
-  the same way, so no migration is needed.
+  and every other float stay floats.
 - A `datetime` (`Date` in TypeScript) is rejected. Store ISO 8601 text.
 - A `None` (`null`) value removes that key from a stored entity, relation, or
   preference. It is never stored on a new one.
