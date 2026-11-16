@@ -899,6 +899,27 @@ describe("store setup errors", () => {
     }
   });
 
+  it.each(["", ":memory:", "file"])("keeps Kuzu database identity and close semantics for %j", async (path) => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-identity-"));
+    const shared = path === "file";
+    if (shared) path = join(dir, "shared.kuzu");
+    try {
+      await using first = new SelfGraph(new KuzuStore(path));
+      const entity = await first.entities.create("Jane", "Person");
+      {
+        await using second = new SelfGraph(new KuzuStore(path));
+        expect((await second.entities.get(entity.id)) !== null).toBe(shared);
+        if (!shared) await second.entities.create("Jane", "Person");
+        await second.entities.delete(entity.id);
+        expect((await first.entities.get(entity.id)) === null).toBe(shared);
+      }
+      expect((await first.entities.get(entity.id)) === null).toBe(shared);
+      await first.entities.create("Ann", "Person");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
     for (const size of [-1, 0, 1.5]) {
       expect(() => new KuzuStore("x.kuzu", { max_db_size: size })).toThrow(
