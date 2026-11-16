@@ -5,6 +5,7 @@ import pytest
 from helpers import cli, create_entities, employment_graph, fresh_graph, mcp_session, run, utc, works_at
 
 from selfgraph import EntityInput, Extraction, StoreError, ValidationError
+from selfgraph._ops import _retired
 from selfgraph.runtime import to_jsonable
 
 
@@ -370,6 +371,27 @@ def test_known_at_keeps_the_retirement_a_late_middle_fact_corrected():
     [new, old] = run(g.relations.versions(acme.id))
     assert (old.invalidated_by, old.invalidated_at) == (initech.id, utc(2024))
     assert (new.invalidated_by, new.invalidated_at, new.revision) == (globex.id, utc(2022), old.revision + 1)
+
+
+def test_a_retirement_revision_tolerates_a_stored_row_without_event_time():
+    edge = {
+        "type": "WORKS_AT",
+        "from_id": "person:ann",
+        "to_id": "company:acme",
+        "props": {
+            "id": "relation:a",
+            "revision": 1,
+            "is_current": False,
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "invalidated_at": "2021-01-01T00:00:00+00:00",
+            "invalidated_by": "relation:b",
+            "invalidated_known_at": "2022-01-01T00:00:00+00:00",
+        },
+    }
+    revised = _retired(edge, "relation:c", utc(2023), utc(2024))
+    assert revised["props"]["event_time"] == edge["props"]["created_at"]
+    assert revised["props"]["created_at"] == "2024-01-01T00:00:00+00:00"
+    assert revised["props"]["revision"] == 2
 
 
 def test_correcting_an_undated_relation_keeps_its_effective_time():
