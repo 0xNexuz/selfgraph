@@ -543,6 +543,27 @@ function suite(spec: StoreSpec): void {
     expect(await counts({ known_at: learned })).toEqual([1]);
   });
 
+  it("known_at uses historical entity source counts for scoring and results", async () => {
+    const g = open();
+    const east = { type: "Project", name: "Orchid East" };
+    const west = { type: "Project", name: "Orchid West" };
+    await g.insert.facts({ entities: [east, west] }, { source_id: "initial" });
+    await g.relations.create("project:orchid-east", "NEIGHBOR", "project:orchid-west");
+    const cutoff = await instant();
+    const before = await g.retrieve("Orchid", { known_at: cutoff, k: 1 });
+    expect(before.seeds.map((seed) => seed.id)).toEqual(["project:orchid-east"]);
+    await g.insert.facts({ entities: [east, west] }, { source_id: "second" });
+    await g.insert.facts({ entities: [east] }, { source_id: "third" });
+
+    expect((await g.retrieve("Orchid", { k: 1 })).seeds[0]!.id).toBe("project:orchid-west");
+    const replay = await g.retrieve("Orchid", { known_at: cutoff, k: 1 });
+    expect(replay.seeds).toEqual(before.seeds);
+    expect(Object.fromEntries(replay.subgraph.entities.map((e) => [e.id, e.source_count]))).toEqual({
+      "project:orchid-east": 1,
+      "project:orchid-west": 1,
+    });
+  });
+
   it("reinserting the same text keeps the version as first stored", async () => {
     const g = open();
     await g.insert.facts({ entities: PEOPLE });

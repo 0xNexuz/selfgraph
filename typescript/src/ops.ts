@@ -2916,21 +2916,39 @@ export async function relationsAsOf(
     (e) => isRelationType(e.type),
   );
   const picked = pickAsOf(edges, relationOf, asOf);
-  if (asOf.known === null || !countSources || !picked.length) return picked;
+  return countSources ? withKnownSources(runner, ns, picked, asOf.known) : picked;
+}
+
+/**
+ * Count distinct sources whose evidence was recorded by the knowledge cutoff.
+ *
+ * @param runner (Runner): graph reader.
+ * @param ns (string): namespace.
+ * @param records (T[]): entities or relations to recount.
+ * @param known (Date | null): knowledge cutoff, or null to keep the stored counts.
+ * @return (Promise<T[]>): records with the source counts visible at the cutoff.
+ */
+export async function withKnownSources<T extends Entity | Relation>(
+  runner: Runner,
+  ns: string,
+  records: T[],
+  known: Date | null,
+): Promise<T[]> {
+  if (known === null || !records.length) return records;
   const sources = new Map<string, Set<string>>();
   for (const row of await nodesWhere(
     runner,
     ns,
     L_EVIDENCE,
     "target_id",
-    picked.map((r) => r.id),
+    records.map((r) => r.id),
   )) {
-    if (!knownBy(fromIso(row.created_at), asOf.known)) continue;
+    if (!knownBy(fromIso(row.created_at), known)) continue;
     const target = row.target_id as string;
     if (!sources.has(target)) sources.set(target, new Set());
     sources.get(target)!.add(row.source_id as string);
   }
-  return picked.map((r) => ({ ...r, source_count: sources.get(r.id)?.size ?? 0 }));
+  return records.map((r) => ({ ...r, source_count: sources.get(r.id)?.size ?? 0 }));
 }
 
 /**

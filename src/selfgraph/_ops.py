@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
 from datetime import datetime
 from functools import partial
-from typing import Any, NamedTuple, get_args
+from typing import Any, NamedTuple, TypeVar, get_args
 
 from . import ids as _ids
 from ._serde import (
@@ -2752,13 +2752,28 @@ async def relations_as_of(
     )
     edges = [e for e in await _paged(fetch) if _is_relation_type(e["type"])]
     picked = _pick_as_of(edges, _relation_of, as_of)
-    if as_of.known is None or not count_sources or not picked:
-        return picked
+    return await with_known_sources(runner, ns, picked, as_of.known) if count_sources else picked
+
+
+_Sourced = TypeVar("_Sourced", Entity, Relation)
+
+
+async def with_known_sources(runner: Any, ns: str, records: list[_Sourced], known: datetime | None) -> list[_Sourced]:
+    """Count distinct sources whose evidence was recorded by the knowledge cutoff.
+
+    @param runner (Any): graph reader.
+    @param ns (str): namespace.
+    @param records (list): entities or relations to recount.
+    @param known (datetime | None): knowledge cutoff, or None to keep the stored counts.
+    @return (list): records with the source counts visible at the cutoff.
+    """
+    if known is None or not records:
+        return records
     sources: dict[str, set[str]] = {}
-    for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", [r.id for r in picked]):
-        if _known_by(from_iso(row.get("created_at")), as_of.known):
+    for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", [r.id for r in records]):
+        if _known_by(from_iso(row.get("created_at")), known):
             sources.setdefault(row["target_id"], set()).add(row["source_id"])
-    return [r.model_copy(update={"source_count": len(sources.get(r.id, ()))}) for r in picked]
+    return [r.model_copy(update={"source_count": len(sources.get(r.id, ()))}) for r in records]
 
 
 async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preference]:

@@ -589,6 +589,10 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    await graph.insert.facts(
+        {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
+        source_id="follow-up",
+    )
     out["retrieval_overflow"] = await overflow(graph)
     capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
     await capped.insert.facts(
@@ -737,6 +741,8 @@ async def dump(graph, ns):
         sv["id"]: await store.child_nodes(ns, "SourceVersion", sv["id"], "HAS_CHUNK", "Chunk", order_by="index")
         for sv in source_versions
     }
+    cutoff = next(s["created_at"] for s in source_versions if s["source_id"] == "spec")
+    historical = await graph.retrieve("database", known_at=cutoff, k=1, depth=1)
     retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", depth=2)
     ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", strategy="ppr", depth=3, max_nodes=4)
     dfs = await graph.retrieve("Zoë ÅNGSTRÖM acme", strategy="dfs", depth=2)
@@ -756,6 +762,10 @@ async def dump(graph, ns):
         {
             "answerable": answerable,
             "prune_types": pruned,
+            "known_at_sources": {
+                "seeds": [s.id for s in historical.seeds],
+                "counts": {e.id: e.source_count for e in historical.subgraph.entities},
+            },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),

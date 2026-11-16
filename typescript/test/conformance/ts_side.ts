@@ -573,6 +573,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  await graph.insert.facts(
+    {
+      entities: [
+        { type: "Database", name: "HydraDB" },
+        { type: "Company", name: "Acme, Inc." },
+      ],
+    },
+    { source_id: "follow-up" },
+  );
   out.retrieval_overflow = await overflow(graph);
   const capped = new SelfGraph(graph.store, {
     namespace: graph.namespace,
@@ -665,6 +674,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const rows = await store.childNodes(ns, "SourceVersion", sv.id as string, "HAS_CHUNK", "Chunk");
     chunks[sv.id as string] = rows.sort((a, b) => Number(a.index) - Number(b.index));
   }
+  const cutoff = sourceVersions.find((s) => s.source_id === "spec")!.created_at as string;
+  const historical = await graph.retrieve("database", { known_at: cutoff, k: 1, depth: 1 });
   const retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", { depth: 2 });
   const ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", {
     strategy: "ppr",
@@ -690,6 +701,10 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   return toJsonable({
     answerable,
     prune_types: pruned,
+    known_at_sources: {
+      seeds: historical.seeds.map((s) => s.id),
+      counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
+    },
     retrieval_seeded: seeded,
     tiers: termed.tiers,
     entities,
