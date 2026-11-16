@@ -342,6 +342,7 @@ async def write(graph):
         out["unsafe_integer"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    out["retrieval_overflow"] = await overflow(graph)
     return out
 
 
@@ -385,6 +386,22 @@ async def supersede(graph):
             for v in await graph.relations.versions(rid)
         ]
     return out
+
+
+async def overflow(graph):
+    """Retrieve under a budget where a near line fits, the next overflows under any counter, and short lines remain.
+
+    @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+    @return (dict): the context at the tight budget and at the default one.
+    """
+    g = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_budget")
+    for name in ("Ann", "Bob", "Cid"):
+        await g.entities.create(name, "Person", id=f"person:{name.lower()}")
+    await g.relations.create("person:ann", "KNOWS", "person:bob")
+    await g.relations.create("person:bob", "KNOWS", "person:cid", properties={"note": "met at the old harbour " * 20})
+    tight = await g.retrieve("Ann", k=1, depth=2, budget_tokens=12)
+    full = await g.retrieve("Ann", k=1, depth=2)
+    return {"tight": tight.context, "full": full.context}
 
 
 async def all_evidence(list_fn, oid):
