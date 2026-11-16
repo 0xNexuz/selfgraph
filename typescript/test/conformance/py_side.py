@@ -505,6 +505,11 @@ async def write(graph):
     out["dedupe_conflicts"] = (await graph.maintenance.dedupe_relations()).groups[0].conflicts
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
     try:
+        await graph.insert.facts(None)
+        out["facts_none"] = "accepted"
+    except ValidationError as exc:
+        out["facts_none"] = str(exc)
+    try:
         await graph.entities.create("Unsafe", "Thing", properties={"n": 2**53})
         out["unsafe_integer"] = "accepted"
     except ValidationError as exc:
