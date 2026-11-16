@@ -9802,6 +9802,19 @@
     "updated_at": "2024-01-01T00:00:00Z",
     "relevance": null,
     "relevance_at": null
+   },
+   {
+    "id": "thing:ann-s-bakery",
+    "type": "Thing",
+    "name": "Ann's Bakery",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
    }
   ],
   "relations": [
@@ -10882,7 +10895,9 @@
      "aliases": [
       "started"
      ],
-     "synonyms": [],
+     "synonyms": [
+      "Lee's backer"
+     ],
      "certified": false,
      "from": {
       "types": []
@@ -11366,8 +11381,14 @@
     3,
     {
      "question": "why can't Ann Lee work at Acme Corp",
-     "verdict": "answerable",
+     "verdict": "partial",
      "terms": [
+      {
+       "term": "can't",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
       {
        "term": "ann lee",
        "status": "entity",
@@ -11393,7 +11414,9 @@
        "certified": false
       }
      ],
-     "missing": [],
+     "missing": [
+      "can't"
+     ],
      "connected": true,
      "hub_only": [],
      "note": null
@@ -11407,6 +11430,12 @@
      "question": "Won't Globex grow, and isn't Acme Corp's revenue what we'll see",
      "verdict": "partial",
      "terms": [
+      {
+       "term": "won't",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
       {
        "term": "globex",
        "status": "entity",
@@ -11445,6 +11474,7 @@
       }
      ],
      "missing": [
+      "won't",
       "grow",
       "see"
      ],
@@ -11500,6 +11530,102 @@
      "missing": [
       "o",
       "brien"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "what is Ann's Bakery",
+    null,
+    3,
+    {
+     "question": "what is Ann's Bakery",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "ann bakery",
+       "status": "entity",
+       "matches": [
+        "thing:ann-s-bakery"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "what is Ann\u2019s Bakery",
+    null,
+    3,
+    {
+     "question": "what is Ann\u2019s Bakery",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "ann bakery",
+       "status": "entity",
+       "matches": [
+        "thing:ann-s-bakery"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "who is Lee's backer",
+    null,
+    3,
+    {
+     "question": "who is Lee's backer",
+     "verdict": "not_answerable",
+     "terms": [
+      {
+       "term": "lee backer",
+       "status": "schema_only",
+       "matches": [
+        "FOUNDED"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "lee backer"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "who is Lee\u2019s backer",
+    null,
+    3,
+    {
+     "question": "who is Lee\u2019s backer",
+     "verdict": "not_answerable",
+     "terms": [
+      {
+       "term": "lee backer",
+       "status": "schema_only",
+       "matches": [
+        "FOUNDED"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "lee backer"
      ],
      "connected": true,
      "hub_only": [],

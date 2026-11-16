@@ -126,10 +126,8 @@ _FILLER = frozenset(
         "your",
     }
 )
-_CLITIC = re.compile(
-    r"(?<!\w)(?:won|can)['’ʼ]t(?!\w)|(?<=\w)n['’ʼ]t(?!\w)|(?<=\w)['’ʼ](?:s|ll|re|ve|d|m)(?!\w)",
-    re.IGNORECASE,
-)
+_IRREGULAR = re.compile(r"(?<!\w)(?:won|can)['’ʼ]t(?!\w)", re.IGNORECASE)
+_CLITIC = re.compile(r"(?<=\w)n['’ʼ]t(?!\w)|(?<=\w)['’ʼ](?:s|ll|re|ve|d|m)(?!\w)", re.IGNORECASE)
 _PAGE = 500
 _MAX_POOL = 5000
 _SEED_PAGE = 5000
@@ -1055,21 +1053,39 @@ async def retrieve(
     )
 
 
+def _term_words(text: str) -> list[str]:
+    """Split text into content tokens like _token_list, with possessive and contraction endings dropped.
+
+    "Ann's" is "ann" and "Doesn't" is "does", so a name, a synonym, and a question spell the same words. "won't"
+    and "can't" are irregular and stay whole.
+
+    @param text (str): the question, name, or synonym.
+    @return (list[str]): the content tokens, repeats kept.
+    """
+    words: list[str] = []
+    last = 0
+    for m in _IRREGULAR.finditer(text):
+        words += _token_list(_CLITIC.sub("", text[last : m.start()]))
+        words.append(m.group().casefold().replace("’", "'").replace("ʼ", "'"))
+        last = m.end()
+    return words + _token_list(_CLITIC.sub("", text[last:]))
+
+
 def _question_terms(question: str, names: Iterable[str]) -> list[str]:
     """Split a question into terms: each longest run of its content tokens that spells a multi-word name or alias,
     and every other content token on its own, except filler words such as "where", "tell", and "me".
 
-    A possessive or contraction ending is dropped first, so "Ann's" is "Ann" and "Doesn't" is "Does", and "won't"
-    and "can't" are dropped whole, since they carry no term.
+    A possessive or contraction ending is dropped from the question and from the names, so "Ann's Bakery" is one
+    term whichever way it is written; "won't" and "can't" stay whole.
 
     @param question (str): the question.
     @param names (Iterable[str]): the entity names, aliases, and schema term forms a run may spell, ignoring a plain
         plural ending.
     @return (list[str]): the distinct terms, in question order.
     """
-    words = [w for w in _token_list(_CLITIC.sub("", question)) if w not in _FILLER]
+    words = [w for w in _term_words(question) if w not in _FILLER]
     stems = [stem(w) for w in words]
-    spelled = {phrase for phrase in (tuple(map(stem, _token_list(n))) for n in names) if len(phrase) > 1}
+    spelled = {phrase for phrase in (tuple(map(stem, _term_words(n))) for n in names) if len(phrase) > 1}
     longest = max(map(len, spelled), default=1)
     terms: list[str] = []
     i = 0
