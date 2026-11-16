@@ -11,17 +11,19 @@ from typing import Any
 from . import _ops, tiers
 from ._export import obsidian_vault
 from ._maintenance import inspect, scan_entities, scan_relations
-from ._serde import aware, now
+from ._serde import L_TRACE, aware, now
 from .contradiction import judge_contradictions
 from .errors import CLOSED_MESSAGE, LLM_HINT, StoreError, TransientError, ValidationError
 from .extraction.extractor import LLMExtractor
 from .extraction.prompts import check_prompts
-from .ids import _require_namespace
+from .ids import _require_namespace, decision_id
 from .insert import Insert
 from .llm.base import resolve_llm
 from .models import (
     AnswerabilityReport,
     CypherResult,
+    DecisionTrace,
+    DecisionTraceInput,
     Extraction,
     ExtractionInstructions,
     ExtractionPrompts,
@@ -45,6 +47,7 @@ from .resolution import (
     plan_resolution,
     require_resolver,
     save_merges,
+    trim_resolution,
 )
 from .resources import Decisions, Entities, Maintenance, Preferences, Relations
 from .retrieval import check_answerable as _check_answerable
@@ -72,6 +75,34 @@ _TX_RETRY_MAX_DELAY = 1.0
 _LEXICAL_NOTE = "the check is lexical; embedding seeds may still find what the missing terms ask about"
 
 _log = logging.getLogger("selfgraph")
+
+
+def _restated(
+    dec: DecisionTraceInput, stored: DecisionTrace | None, default_event_time: datetime | None
+) -> DecisionTraceInput:
+    """Merge an inserted decision over the stored one, so a restatement keeps every field it leaves out.
+
+    A None field or an empty list keeps the stored value and a given one replaces it; decisions.update clears.
+
+    @param dec (DecisionTraceInput): the decision as inserted.
+    @param stored (DecisionTrace | None): the stored trace with the same id, or None when it is new.
+    @param default_event_time (datetime | None): the insert's event_time, for a decision that names none.
+    @return (DecisionTraceInput): the decision to write; a new one without a status is completed.
+    """
+    dec = dec.model_copy(update={"event_time": dec.event_time or default_event_time})
+    if stored is None:
+        return dec if dec.status is not None else dec.model_copy(update={"status": "completed"})
+    kept = {
+        "steps": [s.relation_id for s in stored.steps],
+        "actor_entity": stored.actor_entity,
+        "summary": stored.summary,
+        "rationale": stored.rationale,
+        "outcome_entity": stored.outcome_entity,
+        "alternative_entities": stored.alternative_entities,
+        "status": stored.status,
+        "event_time": stored.event_time,
+    }
+    return dec.model_copy(update={k: v for k, v in kept.items() if getattr(dec, k) in (None, [])})
 
 
 class SelfGraph:
@@ -571,16 +602,18 @@ class SelfGraph:
         async def _apply(tx: Any) -> InsertResult:
             _ops._require_datetime("event_time", default_event_time)
             canonical = await _ops.validate_facts(tx, ns, facts, rewrite=lambda o: canonicalize_types(o, active_schema))
-            dropped: list[InsertWarning] = []
-            if extracted and mode == "strict":
-                canonical, dropped = await drop_off_schema(tx, ns, canonical, active_schema)
-            max_count = mode == "strict" and conflicts != "off"
-            checked = await enforce_schema(tx, ns, canonical, active_schema, mode, max_count=max_count)
-            found: list[InsertWarning] = []
             resolution = None
             if active_resolver is not None:
                 resolution = await plan_resolution(tx, ns, canonical, active_resolver, active_schema, created_at)
             resolved = resolution.facts if resolution is not None else canonical
+            dropped: list[InsertWarning] = []
+            if extracted and mode == "strict":
+                resolved, dropped = await drop_off_schema(tx, ns, resolved, active_schema)
+                if resolution is not None and dropped:
+                    resolution = trim_resolution(resolution, resolved)
+            max_count = mode == "strict" and conflicts != "off"
+            checked = await enforce_schema(tx, ns, resolved, active_schema, mode, max_count=max_count, upsert=True)
+            found: list[InsertWarning] = []
             if mode == "strict" and conflicts == "warn":
                 await _ops.require_max_count(tx, ns, caps, resolved.relations)
             source_version: str | None = None
@@ -600,7 +633,12 @@ class SelfGraph:
                 )
 
             entities = await _ops.upsert_entities(
-                tx, ns, list(resolved.entities), evidence=list(base_evidence), created_at=created_at
+                tx,
+                ns,
+                list(resolved.entities),
+                evidence=list(base_evidence),
+                created_at=created_at,
+                schema_types=frozenset(t.name for t in active_schema.entities) if active_schema is not None else (),
             )
             relations = await _ops.upsert_relations(
                 tx,
@@ -641,11 +679,14 @@ class SelfGraph:
 
             decisions = []
             for dec in resolved.decisions:
+                tid = dec.id or decision_id(dec.actor_entity, dec.title)
+                await tx.lock_node(ns, L_TRACE, tid)
+                dec = _restated(dec, await _ops.get_trace(tx, ns, tid), default_event_time)
                 decisions.append(
                     await _ops.upsert_trace(
                         tx,
                         ns,
-                        tid=dec.id,
+                        tid=tid,
                         title=dec.title,
                         step_rel_ids=list(dec.steps),
                         actor_entity=dec.actor_entity,
@@ -654,7 +695,7 @@ class SelfGraph:
                         outcome_entity=dec.outcome_entity,
                         alternative_entities=list(dec.alternative_entities),
                         status=dec.status,
-                        event_time=dec.event_time or default_event_time,
+                        event_time=dec.event_time,
                         created_at=created_at,
                     )
                 )
