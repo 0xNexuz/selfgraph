@@ -195,6 +195,26 @@ def schema_warnings():
             for terms in [Schema.model_validate(TERMS_SPEC)]
             for q in TERM_QUESTIONS
         ],
+        "terms_subtypes": [
+            sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
+            for sub_schema in [
+                Schema.model_validate(
+                    {
+                        "entities": [
+                            {
+                                "name": "Employee",
+                                "aliases": ["Worker"],
+                                "synonyms": ["staff"],
+                                "definitions": [{"name": "Active Staff", "expression": "a", "synonyms": ["personnel"]}],
+                            },
+                            {"name": "Engineer", "parent": "Employee"},
+                            {"name": "PrincipalEngineer", "parent": "Engineer"},
+                        ]
+                    }
+                )
+            ]
+            for q in ("Employees", "staff", "personnel")
+        ],
     }
 
 

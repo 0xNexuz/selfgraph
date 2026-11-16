@@ -283,6 +283,33 @@ def test_synonym_seeding_finds_entities_by_a_type_synonym():
     assert run(fresh_graph("tier").retrieve("which employers")).tiers["seeds"] == "bm25"
 
 
+def test_synonym_seeding_expands_parent_types_and_definitions_to_subtypes():
+    hierarchy = {
+        "entities": [
+            {
+                "name": "Employee",
+                "aliases": ["Worker"],
+                "synonyms": ["staff"],
+                "definitions": [{"name": "Active Staff", "expression": "active = true", "synonyms": ["personnel"]}],
+            },
+            {"name": "Engineer", "parent": "Employee"},
+            {"name": "PrincipalEngineer", "parent": "Engineer"},
+        ]
+    }
+    g = fresh_graph("tier", schema=hierarchy)
+    run(g.entities.create("Ann", "PrincipalEngineer"))
+    for question in (
+        "Who are the Employees?",
+        "Who are the Workers?",
+        "Who are the staff?",
+        "Who are the personnel?",
+    ):
+        assert run(g.check_answerable(question)).verdict == "answerable", question
+        found = run(g.retrieve(question, seeds="synonyms"))
+        assert [s.id for s in found.seeds] == ["principalengineer:ann"], question
+        assert run(g.retrieve(question, seeds="bm25")).seeds == [], question
+
+
 def test_embedding_seeding_fuses_with_bm25_and_embeds_each_entity_once():
     embedder = Embedder()
     g = fresh_graph("tier", embedder=embedder, seeds="embeddings")
