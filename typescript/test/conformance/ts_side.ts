@@ -634,6 +634,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   );
   const pref = ids.preferenceId("person:jane-doe", "preference", "database", "database:hydradb");
   out.pref_update = toJsonable(await graph.preferences.update(pref, { strength: 0.25 }));
+  await graph.store.updateCurrentEdge(graph.namespace, pref, { event_time: "2024-02-29T23:59:59Z" });
+  out.stored_z = toJsonable((await graph.preferences.versions(pref))[0]!.event_time);
   const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
   out.dec_update = toJsonable(await graph.decisions.update(dec, { status: "active", rationale: null }));
   const restated = { title: "Pick HydraDB", actor_entity: "person:jane-doe" };
