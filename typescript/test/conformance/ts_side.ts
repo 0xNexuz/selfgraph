@@ -19,6 +19,7 @@ import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
+import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
 
 const TERMS_SPEC = {
@@ -173,6 +174,24 @@ const GRAPH_TYPES = new Map([
   ["org:o", "org"],
 ]);
 
+const OWN_KEY_SPEC = {
+  entities: [
+    {
+      name: "Car",
+      properties: [
+        { name: "constructor", type: "string" },
+        { name: "toString", type: "string", required: true },
+      ],
+    },
+  ],
+};
+const OWN_KEY_CASES = [
+  { entities: [{ type: "Car", name: "SF-24", properties: { toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: "Ferrari", toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: 5, toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: {} }] },
+];
+
 const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["facts", { entites: [] }],
   ["facts", { entities: [{ type: "P", nmae: "x" }] }],
@@ -253,10 +272,12 @@ export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
   alias_errors: string[];
+  own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  datetime_errors: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -300,6 +321,12 @@ export function schemaWarnings(): {
         ],
       },
     ].map((spec) => unknownKeyError("schema", spec)),
+    own_keys: OWN_KEY_CASES.map((c) =>
+      validateAgainstSchema(Extraction.parse(c), Schema.parse(OWN_KEY_SPEC)).map((w) => ({
+        code: w.code,
+        message: w.message,
+      })),
+    ),
     parents: [
       { entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] },
       {
@@ -344,6 +371,15 @@ export function schemaWarnings(): {
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
+    datetime_errors: ["0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"].map((text) => {
+      try {
+        parseTime(text, "event_time");
+        return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
     terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
       [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
     ),
@@ -520,7 +556,25 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     properties: { active: true, flags: [0], count: 1 },
   });
   out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-a",
+    properties: { year: 2024 },
+  });
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-b",
+    properties: { constructor: "Ferrari", toString: "x" },
+  });
+  out.dedupe_own_keys = toJsonable(
+    (await graph.maintenance.dedupeRelations()).groups.filter((g) => g.survivor === "relation:built-a"),
+  );
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
+  try {
+    await graph.insert.facts(null as never);
+    out.facts_none = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.facts_none = exc.message;
+  }
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
     out.unsafe_integer = "accepted";

@@ -530,7 +530,7 @@ function checkProperties(
     }
   }
   for (const spec of specs) {
-    if (spec.name in properties && !typeOk(properties[spec.name], spec.type)) {
+    if (Object.hasOwn(properties, spec.name) && !typeOk(properties[spec.name], spec.type)) {
       warnings.push(
         insertWarning("property_type_mismatch", `${kind} ${ref} property ${pyRepr(spec.name)} should be ${spec.type}`),
       );

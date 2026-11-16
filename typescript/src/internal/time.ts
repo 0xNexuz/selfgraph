@@ -31,6 +31,9 @@ export function epochMicros(d: Date): number {
 
 function assertValid(d: Date): void {
   if (Number.isNaN(d.getTime())) throw new RangeError("invalid date");
+  if (d.getUTCFullYear() < 1 || d.getUTCFullYear() > 9999) {
+    throw new RangeError("date is outside the representable datetime range");
+  }
 }
 
 function datePart(d: Date): string {
@@ -94,7 +97,7 @@ export function parseIso(text: string): Date {
   const minute = mis ? Number(mis) : 0;
   const second = ss ? Number(ss) : 0;
   const micro = frac ? Number(frac.slice(0, 6).padEnd(6, "0")) : 0;
-  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) {
+  if (year < 1 || month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) {
     throw new RangeError(`Invalid ISO 8601 string: ${JSON.stringify(text)}`);
   }
   const d = new Date(0);

@@ -194,7 +194,7 @@ export function foldProperties(
   const conflicts: Record<string, string[]> = {};
   for (const rel of duplicates) {
     for (const [key, value] of Object.entries(rel.properties)) {
-      if (!(key in merged)) merged[key] = value;
+      if (!Object.hasOwn(merged, key)) merged[key] = value;
       else if (!deepEqual(merged[key], value)) conflicts[rel.id] = [...(conflicts[rel.id] ?? []), key];
     }
   }
@@ -246,7 +246,9 @@ export async function mergeRelations(
   const [merged] = foldProperties(current, found);
   const first = earliest([current.event_time, ...found.map((rel) => rel.event_time)]);
   await ops.updateRelation(runner, ns, survivor, {
-    set_properties: Object.fromEntries(Object.entries(merged).filter(([key]) => !(key in current.properties))),
+    set_properties: Object.fromEntries(
+      Object.entries(merged).filter(([key]) => !Object.hasOwn(current.properties, key)),
+    ),
     remove_properties: [],
     event_time: toIso(first) === toIso(current.event_time) ? null : first,
     evidence,

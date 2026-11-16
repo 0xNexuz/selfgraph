@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
+from selfgraph._ops import parse_time
 from selfgraph.cli import _kv
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
@@ -136,6 +137,24 @@ SCHEMA_CASES = [
 
 GRAPH_TYPES = {"company:stored": "Company", "org:o": "org"}
 
+OWN_KEY_SPEC = {
+    "entities": [
+        {
+            "name": "Car",
+            "properties": [
+                {"name": "constructor", "type": "string"},
+                {"name": "toString", "type": "string", "required": True},
+            ],
+        }
+    ]
+}
+OWN_KEY_CASES = [
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"constructor": "Ferrari", "toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"constructor": 5, "toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {}}]},
+]
+
 UNKNOWN_KEY_CASES = [
     ["facts", {"entites": []}],
     ["facts", {"entities": [{"type": "P", "nmae": "x"}]}],
@@ -262,6 +281,11 @@ def schema_warnings():
             for facts in cases
         ],
         "alias_errors": alias_errors,
+        "own_keys": [
+            [{"code": w.code, "message": w.message} for w in validate_against_schema(facts, own_key_schema)]
+            for own_key_schema in [Schema.model_validate(OWN_KEY_SPEC)]
+            for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
+        ],
         "parents": [parent_outcome(spec) for spec in parent_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
@@ -273,6 +297,7 @@ def schema_warnings():
             for terms in [Schema.model_validate(TERMS_SPEC)]
             for q in TERM_QUESTIONS
         ],
+        "datetime_errors": datetime_errors(),
         "terms_subtypes": [
             sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
             for sub_schema in [
@@ -294,6 +319,21 @@ def schema_warnings():
             for q in ("Employees", "staff", "personnel")
         ],
     }
+
+
+def datetime_errors():
+    """Return validation errors for offsets that shift dates beyond Python's datetime range.
+
+    @return (list[str]): the errors for the lower and upper boundary.
+    """
+    errors = []
+    for text in ("0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"):
+        try:
+            parse_time(text, "event_time")
+            errors.append("accepted")
+        except ValidationError as exc:
+            errors.append(str(exc))
+    return errors
 
 
 STORES = {
@@ -521,7 +561,25 @@ async def write(graph):
         properties={"active": True, "flags": [0], "count": 1.0},
     )
     out["dedupe_conflicts"] = (await graph.maintenance.dedupe_relations()).groups[0].conflicts
+    await graph.relations.create(
+        "thing:temp-thing", "BUILT_BY", "company:acme", id="relation:built-a", properties={"year": 2024}
+    )
+    await graph.relations.create(
+        "thing:temp-thing",
+        "BUILT_BY",
+        "company:acme",
+        id="relation:built-b",
+        properties={"constructor": "Ferrari", "toString": "x"},
+    )
+    out["dedupe_own_keys"] = to_jsonable(
+        [g for g in (await graph.maintenance.dedupe_relations()).groups if g.survivor == "relation:built-a"]
+    )
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
+    try:
+        await graph.insert.facts(None)
+        out["facts_none"] = "accepted"
+    except ValidationError as exc:
+        out["facts_none"] = str(exc)
     try:
         await graph.entities.create("Unsafe", "Thing", properties={"n": 2**53})
         out["unsafe_integer"] = "accepted"
