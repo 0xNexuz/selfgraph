@@ -118,8 +118,6 @@ def json_iso(dt: datetime | None) -> str | None:
 def _iso_text(value: Any) -> Any:
     """Rewrite a trailing Z/z in an ISO 8601 string to +00:00 so fromisoformat accepts it.
 
-    Shared by from_iso and parse_time.
-
     @param value (Any): the value, typically a string.
     @return (Any): the value with Z/z replaced by +00:00, or the value unchanged.
     """
