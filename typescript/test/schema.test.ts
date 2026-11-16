@@ -530,11 +530,14 @@ describe("schema through the client", () => {
       relations: [{ type: "WORKS_AT", from: { types: ["Person"] }, to: { types: ["Company"] } }],
     };
     const agedGraph = open({ llm, schema: agedSchema, schema_mode: "strict" });
-    await agedGraph.insert.facts({ entities: [{ type: "Person", name: "Soham", properties: { age: 28 } }] });
+    await agedGraph.insert.facts({
+      entities: [{ type: "Person", name: "Soham Gupta", aliases: ["Soham"], properties: { age: 28 } }],
+    });
     const agedRes = await agedGraph.insert.text("Soham works at HydraDB. The team selected it.");
-    expect(agedRes.entities.map((e) => e.id).sort()).toEqual(["company:hydradb", "person:soham"]);
-    expect(agedRes.relations.map((r) => r.type)).toEqual(["WORKS_AT"]);
-    expect((await agedGraph.entities.get("person:soham"))?.properties).toEqual({ age: 28 });
+    expect(agedRes.entities.map((e) => e.id).sort()).toEqual(["company:hydradb", "person:soham-gupta"]);
+    expect(agedRes.relations.map((r) => [r.from_entity, r.type])).toEqual([["person:soham-gupta", "WORKS_AT"]]);
+    expect(agedRes.merges.map((m) => m.survivor_id)).toEqual(["person:soham-gupta"]);
+    expect((await agedGraph.entities.get("person:soham-gupta"))?.properties).toEqual({ age: 28 });
   });
 
   it("checks merged properties on insert and treats null as missing for required specs", async () => {
@@ -548,6 +551,12 @@ describe("schema through the client", () => {
           type: "WORKS_AT",
           from: { types: ["Person"] },
           to: { types: ["Company"] },
+          properties: [{ name: "since", type: "integer", required: true }],
+        },
+        {
+          type: "KNOWS",
+          from: { types: ["Person"] },
+          to: { types: ["Person"] },
           properties: [{ name: "since", type: "integer", required: true }],
         },
       ],
@@ -632,6 +641,40 @@ describe("schema through the client", () => {
     ).rejects.toThrow("missing required property 'since'");
     expect((await strict.entities.get("person:jane"))?.properties).toEqual({ age: 30, city: "SF" });
     expect((await strict.relations.get(rel!.id))?.properties).toEqual({ since: 2020, role: "CTO" });
+
+    const foldedRel = await strict.insert.facts({
+      entities: [{ type: "Person", name: "Jane Doe", aliases: ["Janie"], properties: { age: 35 } }],
+      relations: [
+        {
+          from_entity: "person:jane",
+          type: "KNOWS",
+          to_entity: "person:jane-doe",
+          properties: { role: "mentor" },
+        },
+        {
+          from_entity: "person:jane",
+          type: "KNOWS",
+          to_entity: "person:jane-doe",
+          properties: { since: 2021 },
+        },
+      ],
+    });
+    expect(foldedRel.warnings).toEqual([]);
+    expect(foldedRel.relations[0]?.properties).toEqual({ role: "mentor", since: 2021 });
+
+    const resolvedRes = await strict.insert.facts({
+      entities: [{ type: "Person", name: "Janie" }],
+      relations: [
+        {
+          from_entity: "person:janie",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          properties: { since: 2022 },
+        },
+      ],
+    });
+    expect(resolvedRes.merges.map((m) => m.survivor_id)).toEqual(["person:jane-doe"]);
+    expect(resolvedRes.relations.map((r) => r.from_entity)).toEqual(["person:jane-doe"]);
   });
 });
 

@@ -649,11 +649,10 @@ async function mergedFacts<T extends SchemaSubject>(
   for (const [rid, edge] of await currentRelations(runner, ns, relKeys)) {
     relProps.set(rid, relationOf(edge).properties);
   }
-  const relations = relKeys.map(([rid, rel]) => {
-    const properties = mergeProps(relProps.get(rid) ?? null, rel.properties);
-    relProps.set(rid, properties);
-    return { ...rel, properties };
-  });
+  for (const [rid, rel] of relKeys) {
+    relProps.set(rid, mergeProps(relProps.get(rid) ?? null, rel.properties));
+  }
+  const relations = relKeys.map(([rid, rel]) => ({ ...rel, properties: relProps.get(rid)! }));
 
   return { ...facts, entities, relations };
 }
@@ -741,7 +740,7 @@ export async function dropOffSchema(
   const warnings: InsertWarning[] = [];
   const dropped = new Set<string>();
   const keep = (kind: string, id: string, reasons: string[]): boolean => {
-    if (reasons.length) {
+    if (reasons.length && !dropped.has(id)) {
       dropped.add(id);
       warnings.push(insertWarning("dropped_off_schema", `dropped extracted ${kind} ${id}: ${reasons.join("; ")}`));
     }

@@ -684,11 +684,9 @@ async def _merged_facts(runner: Any, ns: str, facts: Extraction, schema: Schema)
     rel_props: dict[str, dict[str, Any]] = {
         rid: _ops._relation_of(edge).properties for rid, edge in stored_relations.items()
     }
-    relations = []
     for rid, rel in rel_keys:
-        merged_props = _ops._merge_props(rel_props.get(rid), rel.properties)
-        rel_props[rid] = merged_props
-        relations.append(rel.model_copy(update={"properties": merged_props}))
+        rel_props[rid] = _ops._merge_props(rel_props.get(rid), rel.properties)
+    relations = [rel.model_copy(update={"properties": rel_props[rid]}) for rid, rel in rel_keys]
 
     return facts.model_copy(update={"entities": entities, "relations": relations})
 
@@ -784,7 +782,7 @@ async def drop_off_schema(
     dropped: set[str] = set()
 
     def keep(kind: str, oid: str, reasons: list[str]) -> bool:
-        if reasons:
+        if reasons and oid not in dropped:
             dropped.add(oid)
             message = f"dropped extracted {kind} {oid}: {'; '.join(reasons)}"
             warnings.append(InsertWarning(code="dropped_off_schema", message=message))

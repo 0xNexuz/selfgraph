@@ -458,7 +458,13 @@ def test_insert_checks_merged_properties_and_treats_none_as_missing_for_required
                 "from": {"types": ["Person"]},
                 "to": {"types": ["Company"]},
                 "properties": [{"name": "since", "type": "integer", "required": True}],
-            }
+            },
+            {
+                "type": "KNOWS",
+                "from": {"types": ["Person"]},
+                "to": {"types": ["Person"]},
+                "properties": [{"name": "since", "type": "integer", "required": True}],
+            },
         ],
     }
     assert [
@@ -544,6 +550,48 @@ def test_insert_checks_merged_properties_and_treats_none_as_missing_for_required
         )
     assert run(strict.entities.get("person:jane")).properties == {"age": 30, "city": "SF"}
     assert run(strict.relations.get(rel.id)).properties == {"since": 2020, "role": "CTO"}
+
+    folded_rel = run(
+        strict.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Jane Doe", "aliases": ["Janie"], "properties": {"age": 35}}],
+                "relations": [
+                    {
+                        "from_entity": "person:jane",
+                        "type": "KNOWS",
+                        "to_entity": "person:jane-doe",
+                        "properties": {"role": "mentor"},
+                    },
+                    {
+                        "from_entity": "person:jane",
+                        "type": "KNOWS",
+                        "to_entity": "person:jane-doe",
+                        "properties": {"since": 2021},
+                    },
+                ],
+            }
+        )
+    )
+    assert folded_rel.warnings == []
+    assert folded_rel.relations[0].properties == {"role": "mentor", "since": 2021}
+
+    resolved_res = run(
+        strict.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Janie"}],
+                "relations": [
+                    {
+                        "from_entity": "person:janie",
+                        "type": "WORKS_AT",
+                        "to_entity": "company:acme",
+                        "properties": {"since": 2022},
+                    }
+                ],
+            }
+        )
+    )
+    assert [m.survivor_id for m in resolved_res.merges] == ["person:jane-doe"]
+    assert [r.from_entity for r in resolved_res.relations] == ["person:jane-doe"]
 
 
 def test_strict_mode_needs_a_schema(tmp_path, capsys):

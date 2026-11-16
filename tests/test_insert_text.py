@@ -306,11 +306,16 @@ def test_strict_text_insert_drops_off_schema_extractions_but_facts_insert_raises
         "relations": [{"type": "WORKS_AT", "from": {"types": ["Person"]}, "to": {"types": ["Company"]}}],
     }
     g_aged = fresh_graph("strict-text-merged", llm=FakeLLM(_full_responses()), schema=aged_schema, schema_mode="strict")
-    run(g_aged.insert.facts({"entities": [{"type": "Person", "name": "Soham", "properties": {"age": 28}}]}))
+    run(
+        g_aged.insert.facts(
+            {"entities": [{"type": "Person", "name": "Soham Gupta", "aliases": ["Soham"], "properties": {"age": 28}}]}
+        )
+    )
     res_aged = run(g_aged.insert.text("Soham works at HydraDB. The team selected it.", source_id="m-aged"))
-    assert {e.id for e in res_aged.entities} == {"person:soham", "company:hydradb"}
-    assert [r.type for r in res_aged.relations] == ["WORKS_AT"]
-    assert run(g_aged.entities.get("person:soham")).properties == {"age": 28}
+    assert {e.id for e in res_aged.entities} == {"person:soham-gupta", "company:hydradb"}
+    assert [(r.from_entity, r.type) for r in res_aged.relations] == [("person:soham-gupta", "WORKS_AT")]
+    assert [m.survivor_id for m in res_aged.merges] == ["person:soham-gupta"]
+    assert run(g_aged.entities.get("person:soham-gupta")).properties == {"age": 28}
 
 
 def test_llm_relations_cite_their_chunk_and_progress_is_logged(caplog):
