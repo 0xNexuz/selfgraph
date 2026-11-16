@@ -6,6 +6,7 @@ import {
   ids,
   KuzuStore,
   SelfGraph,
+  SelfGraphError,
   toJsonable,
   toNeo4jOntology,
   ValidationError,
@@ -478,6 +479,56 @@ const USES_SPEC = {
   relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
 };
 
+class Opaque {}
+
+/**
+ * Run a call that should fail and return its error class and message.
+ *
+ * @param call (() => Promise<unknown>): the call.
+ * @return (Promise<string[]>): the error class name and message, or ["accepted"] when the call succeeds.
+ */
+async function errorOf(call: () => Promise<unknown>): Promise<string[]> {
+  try {
+    await call();
+  } catch (exc) {
+    if (!(exc instanceof SelfGraphError)) throw exc;
+    return [exc.name, exc.message];
+  }
+  return ["accepted"];
+}
+
+/**
+ * Pass a bad stance, status, or evidence shape to each resource method that takes one.
+ *
+ * An Opaque instance stands in for bad evidence because both SDKs name a class instance by its class.
+ *
+ * @param graph (SelfGraph): the conformance graph.
+ * @return (Promise<Record<string, string[]>>): each case's error class and message.
+ */
+async function choiceErrors(graph: SelfGraph): Promise<Record<string, string[]>> {
+  const worksAt = ids.relationId("person:jane-doe", "WORKS_AT", "company:acme");
+  const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
+  const bad = new Opaque() as never;
+  return {
+    pref_create_stance: await errorOf(() =>
+      graph.preferences.create("person:jane-doe", "database", "database:hydradb", { stance: "meh" as never }),
+    ),
+    pref_list_stance: await errorOf(() => graph.preferences.list({ stance: "meh" as never })),
+    dec_create_status: await errorOf(() => graph.decisions.create("Bad status", { status: "weird" as never })),
+    dec_list_status: await errorOf(() => graph.decisions.list({ status: "weird" as never })),
+    dec_update_status: await errorOf(() => graph.decisions.update(dec, { status: "weird" as never })),
+    dec_update_missing: await errorOf(() => graph.decisions.update("decision:nope", { status: "weird" as never })),
+    rel_create_evidence: await errorOf(() =>
+      graph.relations.create("person:jane-doe", "KNOWS", "company:acme", { evidence: bad }),
+    ),
+    rel_create_evidence_item: await errorOf(() =>
+      graph.relations.create("person:jane-doe", "KNOWS", "company:acme", { evidence: [bad] }),
+    ),
+    rel_update_evidence: await errorOf(() => graph.relations.update(worksAt, { evidence: bad })),
+    rel_update_evidence_item: await errorOf(() => graph.relations.update(worksAt, { evidence: [bad] })),
+  };
+}
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -611,6 +662,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.schema_null_required = exc.message;
   }
+  out.choice_errors = await choiceErrors(graph);
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
   const pruneGraph = new SelfGraph(graph.store, {
