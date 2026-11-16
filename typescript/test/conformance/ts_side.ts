@@ -1,5 +1,5 @@
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
-import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable } from "../../src/index.js";
+import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable, ValidationError } from "../../src/index.js";
 import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
@@ -299,6 +299,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   await graph.entities.create("Temp Thing", "Thing", { properties: { k: "v" } });
   await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme");
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
+  try {
+    await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
+    out.unsafe_integer = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.unsafe_integer = exc.message;
+  }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
   return out;

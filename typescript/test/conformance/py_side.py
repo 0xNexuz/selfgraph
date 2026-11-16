@@ -308,6 +308,11 @@ async def write(graph):
     await graph.entities.create("Temp Thing", "Thing", properties={"k": "v"})
     await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme")
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
+    try:
+        await graph.entities.create("Unsafe", "Thing", properties={"n": 2**53})
+        out["unsafe_integer"] = "accepted"
+    except ValidationError as exc:
+        out["unsafe_integer"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
     return out
