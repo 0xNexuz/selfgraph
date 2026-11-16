@@ -340,6 +340,22 @@ def test_unsafe_counts_also_report_the_first_consistency_problem(spec, lines):
     assert str(direct.value) == expected
 
 
+def test_a_count_beyond_float_range_renders_in_full_and_stays_a_validation_error():
+    huge = 10**400
+    spec = {"relations": [{"type": "R", "from": {"min_count": huge, "max_count": 5}}]}
+    expected = (
+        "invalid schema:"
+        "\n  relations[0].from.min_count: must be <= 9007199254740991"
+        f"\n  relations[0].from.min_count: min_count {huge} is greater than max_count 5"
+    )
+    with pytest.raises(ValidationError) as err:
+        as_schema(spec)
+    assert str(err.value) == expected
+    with pytest.raises(ValidationError) as direct:
+        Schema(**spec)
+    assert str(direct.value) == expected
+
+
 def test_an_alias_may_repeat_its_own_type_name():
     schema = as_schema(
         {

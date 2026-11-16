@@ -97,7 +97,11 @@ def _js_count(value: int) -> str:
     if abs(value) <= MAX_SAFE_INTEGER:
         return str(value)
     sign = "-" if value < 0 else ""
-    mantissa, _, exponent = repr(float(abs(value))).partition("e")
+    try:
+        text = repr(float(abs(value)))
+    except OverflowError:
+        return str(value)
+    mantissa, _, exponent = text.partition("e")
     whole, _, fraction = mantissa.partition(".")
     digits = (whole + fraction).rstrip("0")
     point = len(whole) + (int(exponent) if exponent else 0)
