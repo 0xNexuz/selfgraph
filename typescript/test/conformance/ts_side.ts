@@ -382,6 +382,41 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  const repeatedMerges: Record<string, unknown> = {};
+  const first = {
+    type: "Person",
+    name: "Bob",
+    aliases: ["Bobby"],
+    external_ids: { crm: "C1" },
+    properties: { one: 1 },
+  };
+  const later = {
+    type: "Person",
+    name: "Bob",
+    aliases: ["Robbie"],
+    external_ids: { crm: "C2" },
+    properties: { two: 2 },
+  };
+  for (const [mode, batches] of [
+    ["one_insert", [[first, later]]],
+    ["across_inserts", [[first], [later]]],
+  ] as const) {
+    const resolved = new SelfGraph(graph.store, { namespace: `${graph.namespace}_${mode}`, resolver: "default" });
+    await resolved.insert.facts({
+      entities: [{ type: "Person", name: "Robert", aliases: ["Bob"], properties: { one: 0 } }],
+    });
+    for (const batch of [...batches, batches.at(-1)!]) await resolved.insert.facts({ entities: [...batch] });
+    const record = (await resolved.entities.merges("person:robert")).items[0]!;
+    const merged = await resolved.entities.get("person:robert");
+    const restored = await resolved.entities.unmerge(record.id);
+    repeatedMerges[mode] = toJsonable({
+      absorbed: record.absorbed,
+      merged,
+      restored: restored.entity,
+      survivor: restored.survivor,
+    });
+  }
+  out.repeated_merges = repeatedMerges;
   out.retrieval_overflow = await overflow(graph);
   return out;
 }
