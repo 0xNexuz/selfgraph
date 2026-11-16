@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { STORE_CLOSED_MESSAGE, StoreError, ValidationError } from "../errors.js";
-import { comparePy, pyStrip } from "../internal/py.js";
+import { comparePy, pyRepr, pyStrip } from "../internal/py.js";
 import type { CypherResult, CypherRow, JsonValue } from "../models.js";
 import {
   DEFAULT_MATCH_LIMIT,
@@ -58,6 +58,20 @@ export function quoteLabel(name: string): string {
 }
 
 /**
+ * Validate that a key or column is a plain identifier before it is interpolated into a query.
+ *
+ * @param name (string): the property key or order_by column to check.
+ * @param what (string): the field label used in the error message.
+ * @return (string): the validated name, unchanged.
+ */
+export function requireIdentifier(name: string, what = "property name"): string {
+  if (!IDENT.test(name)) {
+    throw new ValidationError(`${what} ${pyRepr(name)} must be a plain identifier of letters, digits, and underscores`);
+  }
+  return name;
+}
+
+/**
  * Sorted (key, value) pairs of an equality filter, sorted by key code point.
  *
  * @param equals (Props | null | undefined): the property filter.
@@ -107,7 +121,7 @@ export function toCount(rows: CypherResult["rows"]): number {
  */
 function whereEquals(alias: string, equals: Props | null | undefined, where: string[], params: Props): void {
   sortedEntries(equals).forEach(([key, value], i) => {
-    where.push(`${alias}.${key} = $eq${i}`);
+    where.push(`${alias}.${requireIdentifier(key)} = $eq${i}`);
     params[`eq${i}`] = value;
   });
 }
@@ -127,7 +141,7 @@ function whereAnyOf(
   params: Props,
 ): void {
   sortedEntries(anyOf).forEach(([key, values], i) => {
-    where.push(`${alias}.${key} IN $in${i}`);
+    where.push(`${alias}.${requireIdentifier(key)} IN $in${i}`);
     params[`in${i}`] = [...(values as unknown[])];
   });
 }
@@ -262,6 +276,7 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     const extra = options.extra_label != null ? `, n:${quoteLabel(options.extra_label)}` : "";
+    for (const key of Object.keys(props)) requireIdentifier(key);
     await this._run(`MERGE (n:${label} {id:$id, ns:$ns}) SET n += $props${extra}`, { id, ns, props });
   }
 
@@ -280,6 +295,7 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     const extra = options.extra_label != null ? `, n:${quoteLabel(options.extra_label)}` : "";
+    for (const [, props] of rows) for (const key of Object.keys(props)) requireIdentifier(key);
     for (const [, batch] of writeBatches(rows.map(([id, props]) => [null, { id, props }] as const))) {
       await this._run(`UNWIND $rows AS row MERGE (n:${label} {id: row.id, ns: $ns}) SET n += row.props${extra}`, {
         rows: batch,
@@ -302,6 +318,7 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
     toLabel: string,
     rows: readonly EdgeWrite[],
   ): Promise<void> {
+    for (const [, , , props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const keyed = rows.map(([type, fromId, toId, props]) => {
       const row = { f: fromId, t: toId, rid: props.id ?? null, rev: props.revision ?? null, props };
       return [[type, "id" in props && "revision" in props], row] as const;
@@ -360,6 +377,7 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
     toId: string,
     props: Props,
   ): Promise<boolean> {
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const match = `MATCH (a:${fromLabel} {id:$from, ns:$ns}), (b:${toLabel} {id:$to, ns:$ns}) `;
     const params: Record<string, unknown> = { from: fromId, to: toId, ns, props };
     let write: string;
@@ -395,6 +413,7 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
   }
 
   async updateCurrentEdge(ns: string, id: string, props: Props): Promise<void> {
+    for (const k of Object.keys(props)) requireIdentifier(k);
     await this._run("MATCH ()-[r {id:$id, ns:$ns}]->() WHERE r.is_current = true SET r += $props", { id, ns, props });
   }
 

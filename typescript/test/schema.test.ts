@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildGraph } from "../src/client.js";
+import { toOssie } from "../src/export.js";
 import { FalkorDBStore, KuzuStore, type LLMClient, SelfGraph, ValidationError } from "../src/index.js";
 import { runStdio } from "../src/mcp.js";
 import { EntityInput, Extraction, parseOrThrow } from "../src/models.js";
@@ -116,7 +117,7 @@ describe("Schema.parse and asSchema", () => {
         { name: "Manager", parent: "human" },
       ],
     });
-    expect(aliased?.entities[1]?.parent).toBe("human");
+    expect(aliased?.entities[1]?.parent).toBe("Person");
   });
 
   it.each([
@@ -207,6 +208,62 @@ describe("Schema.parse and asSchema", () => {
     expect(schema?.entities.map((e) => e.aliases)).toEqual([["person", "Human", "human"], ["org"]]);
     const relation = asSchema({ relations: [{ type: "WORKS_AT", aliases: ["works at", "works-at"] }] });
     expect(relation?.relations[0]?.aliases).toEqual(["works at", "works-at"]);
+  });
+
+  it("stores a parent as the schema type name", () => {
+    const parents = (spec: Schema) => asSchema(spec)?.entities.map((entity) => entity.parent);
+    const stored = [null, "Person"];
+    expect(parents({ entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] })).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "human" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "HUMAN" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(parents({ entities: [{ name: "Person" }, { name: "Manager", parent: "Person" }] })).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "Human" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(() => asSchema({ entities: [{ name: "Person" }, { name: "Manager", parent: "X" }] })).toThrow(
+      "entities[1].parent: unknown type 'X'",
+    );
+    expect(() =>
+      asSchema({
+        entities: [
+          { name: "A", parent: "b" },
+          { name: "B", parent: "a" },
+        ],
+      }),
+    ).toThrow("entities[0].parent: parent cycle 'A' -> 'B' -> 'A'");
+    expect(() => asSchema({ entities: [{ name: "A", parent: "a" }] })).toThrow(
+      "entities[0].parent: parent cycle 'A' -> 'A'",
+    );
+    const spec = {
+      entities: [
+        { name: "Person", properties: [{ name: "age", type: "integer" as const, required: true }] },
+        { name: "Manager", parent: "person" },
+      ],
+    };
+    const schema = asSchema(spec);
+    expect((toOssie(schema!).ontology as { extends?: string[] }[])[1]).toMatchObject({ extends: ["Person"] });
+    expect(check(spec, { entities: [{ type: "Manager", name: "M" }] }).map((w) => w.message)).toEqual([
+      "entity manager:m is missing required property 'age'",
+    ]);
   });
 });
 
@@ -352,6 +409,25 @@ describe("validateAgainstSchema", () => {
     expect(["2024-01-02", "2024-01-02T03:04:05Z", "2024-01-02T03:04:05+05:30"].map(codes)).toEqual([[], [], []]);
     expect(["yesterday", "", "2024-13-01", 5].map(codes)).toEqual(Array(4).fill(["property_type_mismatch"]));
   });
+
+  it("checks only own properties, so names like constructor are not always present", () => {
+    const spec = {
+      entities: [
+        {
+          name: "Car",
+          properties: [
+            { name: "constructor", type: "string" },
+            { name: "toString", type: "string", required: true },
+          ],
+        },
+      ],
+    };
+    const codes = (properties: Record<string, unknown>) =>
+      check(spec, { entities: [{ type: "Car", name: "C", properties }] }).map((w) => w.code);
+    expect(codes({ toString: "x" })).toEqual([]);
+    expect(codes({ constructor: "Ferrari", toString: "x" })).toEqual([]);
+    expect(codes({})).toEqual(["missing_required_property"]);
+  });
 });
 
 describe("distinct relation cardinality", () => {
@@ -406,6 +482,14 @@ describe("schema through the client", () => {
     expect((await graph.insert.facts(facts)).warnings.map((w) => w.code)).toEqual(["missing_required_property"]);
     expect((await graph.insert.facts(facts, { schema_mode: "off" })).warnings).toEqual([]);
     await expect(open({ schema, schema_mode: "strict" }).insert.facts(facts)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("stores an entity without an optional constructor property in strict mode", async () => {
+    const cars = { entities: [{ name: "Car", properties: [{ name: "constructor", type: "string" as const }] }] };
+    const graph = open({ schema: cars, schema_mode: "strict" });
+    const result = await graph.insert.facts({ entities: [{ type: "Car", name: "SF-24", properties: { year: 2024 } }] });
+    expect(result.warnings).toEqual([]);
+    expect((await graph.entities.get("car:sf-24"))?.properties).toEqual({ year: 2024 });
   });
 
   it("injects the schema catalog into the extraction prompt", async () => {

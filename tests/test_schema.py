@@ -318,6 +318,46 @@ def test_an_alias_may_repeat_its_own_type_name():
     assert relation.relations[0].aliases == ["works at", "works-at"]
 
 
+def test_a_parent_is_stored_as_the_schema_type_name():
+    def parents(spec):
+        return [entity.parent for entity in as_schema(spec).entities]
+
+    person = {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "person"}]}
+    human = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "human"}]}
+    shouted = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "HUMAN"}]}
+    exact = {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "Person"}]}
+    exact_alias = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "Human"}]}
+    assert (
+        parents(person)
+        == parents(human)
+        == parents(shouted)
+        == parents(exact)
+        == parents(exact_alias)
+        == [
+            None,
+            "Person",
+        ]
+    )
+    with pytest.raises(ValidationError, match="entities\\[1\\].parent: unknown type 'X'"):
+        as_schema({"entities": [{"name": "Person"}, {"name": "Manager", "parent": "X"}]})
+    with pytest.raises(ValidationError, match="entities\\[0\\].parent: parent cycle 'A' -> 'B' -> 'A'"):
+        as_schema({"entities": [{"name": "A", "parent": "b"}, {"name": "B", "parent": "a"}]})
+    with pytest.raises(ValidationError, match="entities\\[0\\].parent: parent cycle 'A' -> 'A'"):
+        as_schema({"entities": [{"name": "A", "parent": "a"}]})
+    spec = {
+        "entities": [
+            {"name": "Person", "properties": [{"name": "age", "type": "integer", "required": True}]},
+            {"name": "Manager", "parent": "person"},
+        ]
+    }
+    schema = as_schema(spec)
+    assert schema.to_ossie()["ontology"][1]["extends"] == ["Person"]
+    facts = Extraction.model_validate({"entities": [{"type": "Manager", "name": "M"}]})
+    assert [w.message for w in validate_against_schema(facts, schema)] == [
+        "entity manager:m is missing required property 'age'"
+    ]
+
+
 def test_models_built_directly_raise_the_sdk_validation_error():
     with pytest.raises(ValidationError) as err:
         Extraction(entities=[{"type": "Person"}])

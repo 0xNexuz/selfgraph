@@ -11,6 +11,7 @@ const ID_PREFIXES = [
   "relation",
   "preference",
   "decision",
+  "decisionstep",
   "profile",
   "source",
   "sv",
@@ -359,7 +360,7 @@ export function mergeEntryId(mergeId: string, kind: string, seq: number): string
  * @return (string): the step node id.
  */
 export function stepId(traceId: string, order: number): string {
-  return `${traceId}:step:${order}`;
+  return tagged("decisionstep", `${traceId}:step:${order}`);
 }
 
 /**
@@ -369,6 +370,7 @@ export function stepId(traceId: string, order: number): string {
  * @return (string): the trace id.
  */
 export function traceOfStep(id: string): string {
-  const i = id.lastIndexOf(":step:");
-  return i >= 0 ? id.slice(0, i) : id;
+  const trace = id.slice(tagged("decisionstep", "").length);
+  const end = trace.lastIndexOf(":step:");
+  return trace.slice(0, end < 0 ? trace.length : end);
 }

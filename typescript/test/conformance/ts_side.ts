@@ -17,6 +17,7 @@ import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
+import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
 
@@ -172,6 +173,24 @@ const GRAPH_TYPES = new Map([
   ["org:o", "org"],
 ]);
 
+const OWN_KEY_SPEC = {
+  entities: [
+    {
+      name: "Car",
+      properties: [
+        { name: "constructor", type: "string" },
+        { name: "toString", type: "string", required: true },
+      ],
+    },
+  ],
+};
+const OWN_KEY_CASES = [
+  { entities: [{ type: "Car", name: "SF-24", properties: { toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: "Ferrari", toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: 5, toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: {} }] },
+];
+
 const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["facts", { entites: [] }],
   ["facts", { entities: [{ type: "P", nmae: "x" }] }],
@@ -258,6 +277,8 @@ export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
   alias_errors: string[];
+  own_keys: Array<Array<{ code: string; message: string }>>;
+  parents: unknown[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
@@ -304,6 +325,48 @@ export function schemaWarnings(): {
         ],
       },
     ].map((spec) => unknownKeyError("schema", spec)),
+    own_keys: OWN_KEY_CASES.map((c) =>
+      validateAgainstSchema(Extraction.parse(c), Schema.parse(OWN_KEY_SPEC)).map((w) => ({
+        code: w.code,
+        message: w.message,
+      })),
+    ),
+    parents: [
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "human" },
+        ],
+      },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "HUMAN" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "Person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "Human" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "X" }] },
+      {
+        entities: [
+          { name: "A", parent: "b" },
+          { name: "B", parent: "a" },
+        ],
+      },
+      { entities: [{ name: "A", parent: "a" }] },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").entities.map((entity) => entity.parent);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     neo4j_dropped: neo4jExportWarnings(),
@@ -488,7 +551,25 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     properties: { active: true, flags: [0], count: 1 },
   });
   out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-a",
+    properties: { year: 2024 },
+  });
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-b",
+    properties: { constructor: "Ferrari", toString: "x" },
+  });
+  out.dedupe_own_keys = toJsonable(
+    (await graph.maintenance.dedupeRelations()).groups.filter((g) => g.survivor === "relation:built-a"),
+  );
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
+  try {
+    await graph.insert.facts(null as never);
+    out.facts_none = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.facts_none = exc.message;
+  }
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
     out.unsafe_integer = "accepted";
@@ -610,6 +691,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const requireIdentifierCases: Record<string, string> = {};
+  for (const name of ["id", "external_ids", "a b", "1x", ""]) {
+    try {
+      requireIdentifierCases[name] = requireIdentifier(name);
+    } catch (exc) {
+      requireIdentifierCases[name] = (exc as Error).message;
+    }
+  }
+  out.require_identifier = requireIdentifierCases;
   return out;
 }
 
@@ -719,6 +809,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,
     raw_evidence: rawEvidence,

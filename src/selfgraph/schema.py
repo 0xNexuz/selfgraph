@@ -164,8 +164,14 @@ class Schema(TopInputModel):
         for i, entity in enumerate(self.entities):
             if entity.parent is None:
                 continue
-            if entity.parent not in index:
-                raise ValueError(f"entities[{i}].parent: unknown type {entity.parent!r}")
+            given = entity.parent
+            resolved = canonical_entity_type(given, self)
+            if resolved not in index:
+                raise ValueError(f"entities[{i}].parent: unknown type {given!r}")
+            entity.parent = resolved
+        for i, entity in enumerate(self.entities):
+            if entity.parent is None:
+                continue
             chain, seen = [entity.name], {entity.name}
             current: EntityType | None = index[entity.parent]
             while current is not None:

@@ -96,7 +96,7 @@ are reserved in any case and raise `ValidationError`:
 
 - entity types `Entity`, `Profile`, `DecisionTrace`, `DecisionStep`, `Source`,
   `SourceVersion`, `Chunk`, `Evidence`, `EntityMerge`, and `EntityMergeEntry`;
-- entity id prefixes `relation:`, `preference:`, `decision:`, `profile:`,
+- entity id prefixes `relation:`, `preference:`, `decision:`, `decisionstep:`, `profile:`,
   `source:`, `sv:`, `evidence:`, and `entitymerge:`.
 
 ### Updating and deleting
