@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 import { LLM_HINT, NotFoundError, ValidationError } from "./errors.js";
 import { FALLBACK_TYPE } from "./extraction/extractor.js";

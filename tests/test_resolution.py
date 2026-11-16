@@ -338,11 +338,10 @@ def test_merge_rewrites_every_reference_and_unmerge_restores_them():
 
 
 def _merge_with_references(g, **facts):
-    hammer = entity_id("Tool", "Hammer")
     _seed(g, ROBERT, {"type": "Person", "name": "Ada"})
     res = run(g.insert.facts({"entities": [BOB, {"type": "Tool", "name": "Hammer"}], **facts}, source_id="doc-1"))
     [merge] = res.merges
-    return merge, hammer
+    return merge
 
 
 def test_unmerge_skips_preferences_and_decisions_removed_with_a_deleted_entity():
@@ -352,7 +351,7 @@ def test_unmerge_skips_preferences_and_decisions_removed_with_a_deleted_entity()
         "preferences": [{"subject_entity": BOB_ID, "key": "tool", "value_entity": hammer}],
         "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "outcome_entity": hammer}],
     }
-    merge, _ = _merge_with_references(g, **facts)
+    merge = _merge_with_references(g, **facts)
     run(g.entities.delete(hammer))
 
     out = run(g.entities.unmerge(merge.id))
@@ -368,7 +367,7 @@ def test_unmerge_does_not_report_a_relation_to_a_deleted_entity_as_restored():
     g = fresh_graph("res", resolver="default")
     hammer = entity_id("Tool", "Hammer")
     uses = {"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}
-    merge, _ = _merge_with_references(g, relations=[uses])
+    merge = _merge_with_references(g, relations=[uses])
     run(g.entities.delete(hammer))
 
     out = run(g.entities.unmerge(merge.id))
@@ -386,7 +385,7 @@ def test_unmerge_skips_a_decision_whose_step_relation_was_deleted():
         "relations": [{"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}],
         "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "steps": [uses]}],
     }
-    merge, _ = _merge_with_references(g, **facts)
+    merge = _merge_with_references(g, **facts)
     run(g.entities.delete(hammer))
 
     out = run(g.entities.unmerge(merge.id))
@@ -400,7 +399,7 @@ def test_unmerge_skips_a_preference_whose_subject_was_deleted():
     g = fresh_graph("res", resolver="default")
     ada = entity_id("Person", "Ada")
     facts = {"preferences": [{"subject_entity": ada, "key": "friend", "value_entity": BOB_ID, "about_entity": BOB_ID}]}
-    merge, _ = _merge_with_references(g, **facts)
+    merge = _merge_with_references(g, **facts)
     run(g.entities.delete(ada))
 
     out = run(g.entities.unmerge(merge.id))
@@ -417,7 +416,7 @@ def test_unmerge_restores_a_kept_decision_and_preference_without_the_deleted_ref
         "preferences": [{"subject_entity": BOB_ID, "key": "friend", "value_entity": ADA, "about_entity": hammer}],
         "decisions": [{"title": "Pick", "actor_entity": BOB_ID, "alternative_entities": [hammer, ADA]}],
     }
-    merge, _ = _merge_with_references(g, **facts)
+    merge = _merge_with_references(g, **facts)
     run(g.entities.delete(hammer))
 
     out = run(g.entities.unmerge(merge.id))
