@@ -765,6 +765,27 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
     mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
   ];
+  const replacedSrc = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_replace_src`,
+    extraction: "regex",
+  });
+  const rv1 = await replacedSrc.insert.text("Alice works at Acme. Alice knows Bob.", { source_id: "hr" });
+  await replacedSrc.relations.certify(rv1.relations[1]!.id, { by: "hr" });
+  const rv2 = await replacedSrc.insert.text("Bob works at Globex.", { source_id: "hr", replace_source: true });
+  await replacedSrc.insert.facts({ entities: [{ type: "Thing", name: "Initech" }] });
+  await replacedSrc.relations.create("thing:bob", "RELATED_TO", "thing:initech", {
+    evidence: [{ source_id: "hr", quote: "hand" }],
+  });
+  const rv3 = await replacedSrc.insert.text("Alice works at Acme. Bob works at Globex. Bob works at Initech.", {
+    source_id: "hr",
+    replace_source: true,
+  });
+  out.replace_source_steps = toJsonable({
+    v2_diff: rv2.source_diff,
+    v2_warnings: rv2.warnings.map((w) => w.code),
+    v3_diff: rv3.source_diff,
+    v3_warnings: rv3.warnings.map((w) => w.code),
+  });
   await graph.insert.facts(
     {
       entities: [

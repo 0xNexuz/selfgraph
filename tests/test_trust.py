@@ -222,6 +222,26 @@ def test_replace_source_retires_what_only_older_versions_stated():
     assert "ann -[WORKS_AT]-> acme" in then.context and "ann WORKS_AT acme" in then.context
     again = run(g.insert.text("ann KNOWS bob\nann READS news", source_id="hr", replace_source=True))
     assert again.source_diff.retired == [] and again.source_diff.kept == sorted([knows, reads])
+    readded = run(
+        g.insert.text("ann WORKS_AT acme\nann KNOWS bob", source_id="hr", event_time=utc(2026), replace_source=True)
+    )
+    assert readded.source_diff.model_dump() == {"kept": [knows], "added": [works], "retired": [reads]}
+    manual = run(
+        g.relations.create("thing:ann", "READS", "thing:news", evidence=[{"source_id": "hr", "quote": "hand"}])
+    )
+    with_manual = run(
+        g.insert.text(
+            "ann WORKS_AT acme\nann KNOWS bob\nann READS news",
+            source_id="hr",
+            event_time=utc(2027),
+            replace_source=True,
+        )
+    )
+    assert with_manual.source_diff.model_dump() == {
+        "kept": sorted([knows, manual.id, works]),
+        "added": [],
+        "retired": [],
+    }
 
 
 def test_replace_source_keeps_certified_facts_and_needs_a_source_id():
@@ -231,6 +251,8 @@ def test_replace_source_keeps_certified_facts_and_needs_a_source_id():
     result = run(g.insert.text("ann KNOWS bob", source_id="hr", replace_source=True))
     assert result.source_diff.retired == [] and [w.code for w in result.warnings] == ["certified_kept"]
     assert run(g.relations.get(rel.id)).is_current
+    later = run(g.insert.text("ann KNOWS bob\nann READS news", source_id="hr", replace_source=True))
+    assert [w.code for w in later.warnings] == []
     assert run(g.insert.text("ann KNOWS bob", source_id="hr")).source_diff is None
     with pytest.raises(ValidationError, match="replace_source needs a source_id"):
         run(g.insert.text("ann KNOWS bob", replace_source=True))

@@ -2906,15 +2906,17 @@ async def certify_relation(runner: Any, ns: str, rid: str, by: str | None, at: d
 
 
 async def source_targets(runner: Any, ns: str, source_id: str) -> set[str]:
-    """List the entities and relations that have evidence from any version of a source.
+    """List the entities and relations that have evidence from any unreplaced version of a source.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param source_id (str): the source id.
     @return (set[str]): the evidence target ids.
     """
+    versions = await runner.child_nodes(ns, L_SOURCE, _ids.source_node_id(source_id), R_HAS_VERSION, L_SOURCE_VERSION)
+    replaced = {row["id"] for row in versions if row.get("replaced_by") is not None}
     fetch = partial(runner.match_nodes, ns, L_EVIDENCE, equals={"source_id": source_id}, order_by="id")
-    return {row["target_id"] for row in await _paged(fetch, page=_BATCH)}
+    return {row["target_id"] for row in await _paged(fetch, page=_BATCH) if row.get("source_version") not in replaced}
 
 
 async def replace_source(

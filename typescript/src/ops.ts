@@ -3048,7 +3048,7 @@ export async function certifyRelation(
 }
 
 /**
- * List the entities and relations that have evidence from any version of a source.
+ * List the entities and relations that have evidence from any unreplaced version of a source.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
@@ -3056,8 +3056,12 @@ export async function certifyRelation(
  * @return (Set<string>): the evidence target ids.
  */
 export async function sourceTargets(runner: Runner, ns: string, sourceId: string): Promise<Set<string>> {
+  const versions = await runner.childNodes(ns, L_SOURCE, ids.sourceNodeId(sourceId), R_HAS_VERSION, L_SOURCE_VERSION);
+  const replaced = new Set(versions.filter((row) => (row.replaced_by ?? null) !== null).map((row) => row.id as string));
   const rows = await scan(nodeListing(runner, ns, L_EVIDENCE, { equals: { source_id: sourceId } }), Infinity, BATCH);
-  return new Set(rows.map((row) => row.target_id as string));
+  return new Set(
+    rows.filter((row) => !replaced.has(row.source_version as string)).map((row) => row.target_id as string),
+  );
 }
 
 /**
