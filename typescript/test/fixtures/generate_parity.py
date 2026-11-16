@@ -964,10 +964,13 @@ def chunk_cases():
     )
     by_chars = [c.__dict__ for c in chunking._chunk_by_chars(long_text, size=200, overlap=40)]
     by_tokens = [c.__dict__ for c in chunking.chunk_text(long_text, max_tokens=64, overlap_tokens=8)]
+    split_text = "भारत एक विशाल देश है। 東京は日本の首都です。 👩‍💻 <|endoftext|> �� café. " * 6 + " �" * 8
     return {
         "text": long_text,
         "by_chars": by_chars,
         "by_tokens": by_tokens,
+        "split_text": split_text,
+        "split_by_tokens": [c.__dict__ for c in chunking.chunk_text(split_text, max_tokens=7, overlap_tokens=2)],
         "count_tokens": [chunking.count_tokens(t) for t in TEXTS],
     }
 
