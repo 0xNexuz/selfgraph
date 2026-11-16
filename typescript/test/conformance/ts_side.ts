@@ -484,6 +484,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   out.text = toJsonable(
     await graph.insert.text(TEXT, { source_id: "notes", metadata: { author: "conformance", n: 1, f: 0.5 } }),
   );
+  out.unicode_text = toJsonable(await graph.insert.text("Émile Zola met Łukasz Nowak.", { source_id: "unicode" }));
   const worksAt = ids.relationId("person:jane-doe", "WORKS_AT", "company:acme");
   out.rel_update = toJsonable(
     await graph.relations.update(worksAt, {

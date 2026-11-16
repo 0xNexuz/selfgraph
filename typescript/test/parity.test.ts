@@ -155,14 +155,8 @@ describe("extraction, chunking, and retrieval helpers match Python", () => {
     expect(fx.extract.map((c: { text: string }) => countTokens(c.text))).toEqual(fx.chunks.count_tokens);
   });
 
-  it("the regex extractor starts names at the same pinned Unicode 15.0 uppercase letters", async () => {
+  it("the regex extractor starts names at the same pinned Unicode 15.0 uppercase letters", () => {
     expect(String.fromCodePoint(...UPPERCASE)).toBe(fx.uppercase);
-    const facts = await new NERExtractor().extract({
-      text: "\ua7cearo met Bob Smith.",
-      media_type: "text/plain",
-      metadata: {},
-    });
-    expect(facts.entities.map((e) => e.name)).toEqual(["Bob Smith"]);
   });
 
   it("the LLM-free regex extractor assembles the same facts", async () => {

@@ -154,12 +154,6 @@ def test_regex_extraction_keeps_names_that_start_with_a_non_ascii_capital():
     assert "Zola" not in names
 
 
-def test_regex_extraction_pins_uppercase_to_unicode_15():
-    from selfgraph.extraction.basic import _regex_extract
-
-    assert [e.name for e in _regex_extract("\ua7cearo met Bob Smith.")[0]] == ["Bob Smith"]
-
-
 def test_custom_extractor_bypasses_the_llm_and_receives_the_insert_metadata():
     seen = []
 

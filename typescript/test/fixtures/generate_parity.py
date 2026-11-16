@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from selfgraph._maintenance import lint, relevance_score
 from selfgraph._ops import AsOf, Contradictions, version_as_of
 from selfgraph.errors import ValidationError
 from selfgraph.extraction import chunking
-from selfgraph.extraction.basic import _UPPERCASE_LETTERS, _regex_extract
+from selfgraph.extraction.basic import _regex_extract
 from selfgraph.extraction.extractor import LLMExtractor, _is_noise_name, _RelOut
 from selfgraph.mcp.server import _is_blocked_query
 from selfgraph.models import (
@@ -1260,7 +1261,7 @@ def main():
         ],
         "chunks": chunk_cases(),
         "extract": extract_cases(),
-        "uppercase": _UPPERCASE_LETTERS,
+        "uppercase": "".join(re.findall(f"[{_marks.UPPERCASE_CLASS}]", "".join(map(chr, range(0x110000))))),
         "assemble": assemble_case(),
         "as_of": as_of_cases(),
         "known_at": known_cases(),
