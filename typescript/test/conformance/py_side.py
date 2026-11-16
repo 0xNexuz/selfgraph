@@ -1464,6 +1464,29 @@ async def dump(graph, ns):
             "relations": sorted(r.id for r in result.subgraph.relations),
             "decisions": [d.title for d in result.subgraph.decisions],
         }
+    temporal = SelfGraph(store=store, namespace=f"{ns}_step_visibility")
+    await temporal.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": n} for n in ("Ada", "Bob", "Cy", "Dee")],
+            "relations": [
+                {
+                    "id": f"relation:{label}",
+                    "from_entity": f"person:{source}",
+                    "type": "KNOWS",
+                    "to_entity": f"person:{target}",
+                    "event_time": f"{year}-01-01",
+                }
+                for label, source, target, year in (("old", "ada", "bob", 2020), ("future", "cy", "dee", 2030))
+            ],
+            "decisions": [
+                {"title": "Choose supplier", "steps": ["relation:old", "relation:future"], "event_time": "2020-01-01"}
+            ],
+        }
+    )
+    hidden_steps = await temporal.retrieve("Ada", k=1, as_of="2025-01-01")
+    assert hidden_steps.subgraph.decisions == []
+    visible_steps = await temporal.retrieve("Ada", k=1)
+    assert [d.title for d in visible_steps.subgraph.decisions] == ["Choose supplier"]
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1477,6 +1500,9 @@ async def dump(graph, ns):
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
             "retrieval_boundary": boundary_results,
+            "decision_step_visibility": [
+                [d.title for d in r.subgraph.decisions] for r in (hidden_steps, visible_steps)
+            ],
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),

@@ -1135,7 +1135,12 @@ async function run(
   let preferences = await collectPreferences(store, ns, dist.keys(), valid);
   if (asOf !== null && valid !== null && decisions.length) {
     const refsOf = (d: DecisionTrace): string[] =>
-      [d.actor_entity, d.outcome_entity, ...d.alternative_entities].filter((r): r is string => Boolean(r));
+      [
+        d.actor_entity,
+        d.outcome_entity,
+        ...d.alternative_entities,
+        ...d.steps.flatMap((step) => [step.from_entity, step.to_entity]),
+      ].filter((r): r is string => Boolean(r));
     const refs = [...new Set(decisions.flatMap(refsOf))].sort(comparePy);
     await load(store, ns, known, refs);
     const visible = await visibleAt(
