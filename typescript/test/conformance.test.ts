@@ -123,6 +123,9 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
+        expect(pyReadsPy).toMatchObject({
+          known_at_sources: { seeds: ["database:hydradb"], counts: { "database:hydradb": 1, "company:acme": 1 } },
+        });
 
         const tsReadsTs = await ts(store, nsTs, (g) => dump(g, nsTs));
         const pyReadsTs = py("dump", store, nsTs);
