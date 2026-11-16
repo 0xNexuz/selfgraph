@@ -183,6 +183,13 @@ def test_token_chunks_are_exact_slices_when_a_token_splits_a_character():
             assert not text[a.end_offset : b.start_offset].strip()
 
 
+def test_token_chunks_end_on_the_token_edge_after_a_literal_replacement_character():
+    pytest.importorskip("tiktoken")
+    chunks = chunk_text(" \ufffd" * 50, max_tokens=4, overlap_tokens=1)
+    assert [c.start_offset for c in chunks] == list(range(0, 97, 6))
+    assert [c.text for c in chunks] == [" \ufffd" * 4] * 16 + [" \ufffd" * 2]
+
+
 def test_token_chunking_and_counting_read_special_tokens_as_text():
     text = "Models end a sample with <|endoftext|> and fill code with <|fim_prefix|>."
     assert count_tokens(text) > 0

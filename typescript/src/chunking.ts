@@ -17,6 +17,7 @@ export interface Encoder {
 
 const CHARS_PER_TOKEN = 4;
 const WS_CHAR = new RegExp(`^[${PY_WS_CLASS}]$`, "u");
+const REPLACED = /^(?:\ufffd|[\ud800-\udfff])$/;
 
 let encoder: Encoder | null | undefined;
 let loading: Promise<void> | null = null;
@@ -90,9 +91,6 @@ function requireCount(field: string, value: unknown, minimum: number): asserts v
 /**
  * Split text into overlapping chunks sized by tokens, falling back to characters cut on whitespace, with code-point offsets.
  *
- * Each chunk is the text between its offsets. A token edge inside a character moves to that character's start, so a
- * character the token budget splits goes whole into the later chunk.
- *
  * @param text (string): the text to split.
  * @param options ({ max_tokens?: number; overlap_tokens?: number }): the maximum tokens per chunk (at least 1) and the token overlap (0 to max_tokens - 1, default min(64, max_tokens / 4) rounded down).
  * @return (Chunk[]): the chunks, in order.
@@ -111,7 +109,7 @@ export function chunkText(text: string, options: { max_tokens?: number; overlap_
 
   const tokens = encode(encoder, text);
   const cps = Array.from(text);
-  const bounds = charBounds(encoder, tokens, cps.length);
+  const bounds = charBounds(encoder, tokens, cps);
   const step = maxTokens - overlapTokens;
   const chunks: Chunk[] = [];
   let index = 0;
@@ -132,30 +130,32 @@ export function chunkText(text: string, options: { max_tokens?: number; overlap_
 /**
  * Map each token boundary to a code-point offset in the text, moving a boundary inside a character to its start.
  *
- * A byte-level token can end partway through a character's UTF-8 bytes. Tokens are decoded in runs that start on a
- * character boundary; a run is complete once its text no longer ends with U+FFFD, and a boundary inside it decodes
- * to its text plus one U+FFFD for the character it cuts.
- *
  * @param enc (Encoder): the tokenizer.
  * @param tokens (number[]): the tokens of the text.
- * @param length (number): the text's length in code points.
- * @return (number[]): tokens.length + 1 code-point offsets, the first 0 and the last length.
+ * @param cps (string[]): the text's code points.
+ * @return (number[]): tokens.length + 1 code-point offsets, the first 0 and the last cps.length.
  */
-function charBounds(enc: Encoder, tokens: number[], length: number): number[] {
+function charBounds(enc: Encoder, tokens: number[], cps: string[]): number[] {
   const bounds = [0];
   let run = 0;
   let offset = 0;
   for (let end = 1; end <= tokens.length; end++) {
     const piece = enc.decode(tokens.slice(run, end));
-    if (piece.endsWith("�") && end < tokens.length) continue;
+    const length = cpLen(piece);
+    if (end < tokens.length && piece.endsWith("\ufffd")) {
+      const source = cps[offset + length - 1] ?? "";
+      if (!REPLACED.test(source)) continue;
+      const next = tokens[end] as number;
+      if (enc.decode(tokens.slice(run, end + 1)) !== piece + enc.decode([next])) continue;
+    }
     for (let cut = run + 1; cut < end; cut++) {
       bounds.push(offset + Math.max(0, cpLen(enc.decode(tokens.slice(run, cut))) - 1));
     }
-    offset += cpLen(piece);
+    offset += length;
     bounds.push(offset);
     run = end;
   }
-  bounds[bounds.length - 1] = length;
+  bounds[bounds.length - 1] = cps.length;
   return bounds;
 }
 

@@ -65,27 +65,18 @@ def _encode(enc: Any, text: str) -> list[int]:
 def _char_bounds(enc: Any, tokens: list[int], text: str) -> list[int]:
     """Map each token boundary to a character offset in text, moving a boundary inside a character to its start.
 
-    A byte-level token can end partway through a character's UTF-8 bytes. Tokens are decoded in runs that start on
-    a character boundary; a run is complete once its text no longer ends with U+FFFD, and a boundary inside it
-    decodes to its text plus one U+FFFD for the character it cuts.
-
     @param enc (Any): the tiktoken encoder.
     @param tokens (list[int]): the tokens of text.
     @param text (str): the encoded text.
     @return (list[int]): len(tokens) + 1 character offsets, the first 0 and the last len(text).
     """
+    pieces = enc.decode_tokens_bytes(tokens)
     bounds = [0]
-    run, offset = 0, 0
-    for end in range(1, len(tokens) + 1):
-        piece = enc.decode(tokens[run:end])
-        if piece.endswith("�") and end < len(tokens):
-            continue
-        for cut in range(run + 1, end):
-            bounds.append(offset + max(0, len(enc.decode(tokens[run:cut])) - 1))
-        offset += len(piece)
-        bounds.append(offset)
-        run = end
-    bounds[-1] = len(text)
+    chars = 0
+    for piece, after in zip(pieces, pieces[1:], strict=False):
+        chars += sum(1 for byte in piece if byte & 0xC0 != 0x80)
+        bounds.append(chars - 1 if after and after[0] & 0xC0 == 0x80 else chars)
+    bounds.append(len(text))
     return bounds
 
 
@@ -112,9 +103,6 @@ def _require_count(field: str, value: object, *, minimum: int) -> None:
 
 def chunk_text(text: str, *, max_tokens: int = 512, overlap_tokens: int | None = None) -> list[Chunk]:
     """Split text into overlapping chunks sized by tokens, falling back to characters cut on whitespace.
-
-    Each chunk is the slice text[start_offset:end_offset]. A token edge inside a character moves to that
-    character's start, so a character the token budget splits goes whole into the later chunk.
 
     @param text (str): the text to split.
     @param max_tokens (int): the maximum tokens per chunk, at least 1.
