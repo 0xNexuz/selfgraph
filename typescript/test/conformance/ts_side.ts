@@ -252,6 +252,7 @@ export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
   alias_errors: string[];
+  parents: unknown[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
@@ -298,6 +299,42 @@ export function schemaWarnings(): {
         ],
       },
     ].map((spec) => unknownKeyError("schema", spec)),
+    parents: [
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "human" },
+        ],
+      },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "HUMAN" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "Person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "Human" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "X" }] },
+      {
+        entities: [
+          { name: "A", parent: "b" },
+          { name: "B", parent: "a" },
+        ],
+      },
+      { entities: [{ name: "A", parent: "a" }] },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").entities.map((entity) => entity.parent);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     neo4j_dropped: neo4jExportWarnings(),
