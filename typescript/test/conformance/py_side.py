@@ -944,6 +944,26 @@ async def write(graph):
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    try:
+        await graph.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": "Rejected"}],
+                "relations": [
+                    {
+                        "id": works_at,
+                        "type": "WORKS_AT",
+                        "from_entity": "person:jane-doe",
+                        "to_entity": "thing:rejected",
+                    }
+                ],
+            },
+            source_id="rejected",
+        )
+    except ValidationError as exc:
+        out["rejected_relation"] = str(exc)
+    else:
+        raise AssertionError("relation id was accepted with a different destination")
+    assert await graph.entities.get("thing:rejected") is None
     out["context_boundary"] = await context_boundary(graph)
     capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
     await capped.insert.facts(
