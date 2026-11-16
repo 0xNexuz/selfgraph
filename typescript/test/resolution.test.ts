@@ -246,6 +246,36 @@ function suite(spec: StoreSpec) {
     expect(await g.decisions.get(traceId)).toBeNull();
   });
 
+  it("preserves the batch survivor name and unmerges aliases in either input order", async () => {
+    for (const reverse of [true, false]) {
+      const g = open({ resolver: "default" });
+      const entities = [
+        { type: "Thing", name: "Bob", aliases: ["Robert"] },
+        { type: "Person", name: "Robert" },
+      ];
+      const res = await g.insert.facts({ entities: reverse ? entities.reverse() : entities });
+      expect(res.merges).toHaveLength(1);
+      const merge = res.merges[0]!;
+      expect([merge.absorbed_id, merge.survivor_id, merge.added_aliases]).toEqual([
+        "thing:bob",
+        "person:robert",
+        ["Bob"],
+      ]);
+      expect(res.entities.map((e) => [e.id, e.type, e.name, e.aliases])).toEqual([
+        ["person:robert", "Person", "Robert", ["Bob"]],
+      ]);
+      const stored = (await g.entities.get("person:robert"))!;
+      expect([stored.name, stored.aliases]).toEqual(["Robert", ["Bob"]]);
+      const restored = await g.entities.unmerge(merge.id);
+      expect([restored.survivor!.name, restored.survivor!.aliases]).toEqual(["Robert", []]);
+      expect([restored.entity.id, restored.entity.name, restored.entity.aliases]).toEqual([
+        "thing:bob",
+        "Bob",
+        ["Robert"],
+      ]);
+    }
+  });
+
   it("merges within one batch only when fuzzy", async () => {
     const batch: Extraction = {
       entities: [

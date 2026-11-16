@@ -111,6 +111,21 @@ def test_backdated_preferences_name_their_entities_and_decisions_need_visible_en
     assert [d.title for d in run(g.retrieve("Jane")).subgraph.decisions] == ["Pick Rust"]
 
 
+def test_decision_steps_need_visible_endpoints():
+    g = fresh_graph("asof")
+    create_entities(g, "Person:Ada", "Person:Bob", "Person:Cy", "Person:Dee")
+    old = run(g.relations.create("person:ada", "KNOWS", "person:bob", event_time=utc(2020)))
+    future = run(g.relations.create("person:cy", "KNOWS", "person:dee", event_time=utc(2030)))
+    decision = run(g.decisions.create("Choose supplier", steps=[old.id, future.id], event_time=utc(2020)))
+    result = run(g.retrieve("Ada", k=1, as_of=utc(2025)))
+    assert {e.id for e in result.subgraph.entities} == {"person:ada", "person:bob"}
+    assert [r.id for r in result.subgraph.relations] == [old.id]
+    assert result.subgraph.decisions == []
+    assert [d.id for d in run(g.retrieve("Ada", k=1)).subgraph.decisions] == [decision.id]
+    run(g.relations.update(future.id, event_time=utc(2022)))
+    assert [d.id for d in run(g.retrieve("Ada", k=1, as_of=utc(2025))).subgraph.decisions] == [decision.id]
+
+
 def test_preferences_and_decisions_are_read_as_of():
     g = graph()
     rel = run(g.relations.create("person:ann", "WORKS_AT", "company:acme"))

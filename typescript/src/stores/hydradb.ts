@@ -117,6 +117,18 @@ export function surrogateKey(ns: string, sid: string): bigint {
   return n >> 1n;
 }
 
+const LABEL_KEY = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * The label as HydraDB can store it, or null when the engine rejects it as a label key.
+ *
+ * @param label (string | null | undefined): the label to add or remove, such as an entity type.
+ * @return (string | null): the label, or null when it is missing or not a valid HydraDB label key.
+ */
+function engineLabel(label: string | null | undefined): string | null {
+  return label != null && LABEL_KEY.test(label) ? label : null;
+}
+
 /**
  * The string property holding a node's id for one label in one namespace, which id-ordered reads walk.
  *
@@ -618,6 +630,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     needs: readonly bigint[] = [],
     extraLabel?: string | null,
   ): Promise<void> {
+    extraLabel = engineLabel(extraLabel);
     const marks = extraLabel != null ? [labelKey(label), labelKey(extraLabel)] : [labelKey(label)];
     for (const batch of byColumns(rows)) {
       const ids = batch.map((r) => r.id as bigint);
@@ -707,7 +720,9 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
   }
 
   async removeNodeLabel(ns: string, label: string, id: string, dropLabel: string): Promise<void> {
-    await this._run(`MATCH (n:${label} {id: $iid}) REMOVE n:${quoteLabel(dropLabel)}`, { iid: surrogateKey(ns, id) });
+    const quoted = quoteLabel(dropLabel);
+    if (engineLabel(dropLabel) === null) return;
+    await this._run(`MATCH (n:${label} {id: $iid}) REMOVE n:${quoted}`, { iid: surrogateKey(ns, id) });
   }
 
   async matchNodes(ns: string, label: string, options: MatchNodesOptions = {}): Promise<Props[]> {

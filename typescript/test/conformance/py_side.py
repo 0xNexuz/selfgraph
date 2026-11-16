@@ -984,6 +984,17 @@ async def write(graph):
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
     ]
+    batch_names = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_batch_names", resolver="default")
+    merged_names = await batch_names.insert.facts(
+        {"entities": [{"type": "Thing", "name": "Bob", "aliases": ["Robert"]}, {"type": "Person", "name": "Robert"}]}
+    )
+    stored_name = await batch_names.entities.get("person:robert")
+    restored_names = await batch_names.entities.unmerge(merged_names.merges[0].id)
+    out["batch_survivor_name"] = [
+        [stored_name.id, stored_name.name, stored_name.aliases],
+        [restored_names.survivor.name, restored_names.survivor.aliases],
+        [restored_names.entity.id, restored_names.entity.name, restored_names.entity.aliases],
+    ]
     replaced_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_src", extraction="regex")
     rv1 = await replaced_src.insert.text("Alice works at Acme. Alice knows Bob.", source_id="hr")
     await replaced_src.relations.certify(rv1.relations[1].id, by="hr")
@@ -1485,6 +1496,29 @@ async def dump(graph, ns):
             "relations": sorted(r.id for r in result.subgraph.relations),
             "decisions": [d.title for d in result.subgraph.decisions],
         }
+    temporal = SelfGraph(store=store, namespace=f"{ns}_step_visibility")
+    await temporal.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": n} for n in ("Ada", "Bob", "Cy", "Dee")],
+            "relations": [
+                {
+                    "id": f"relation:{label}",
+                    "from_entity": f"person:{source}",
+                    "type": "KNOWS",
+                    "to_entity": f"person:{target}",
+                    "event_time": f"{year}-01-01",
+                }
+                for label, source, target, year in (("old", "ada", "bob", 2020), ("future", "cy", "dee", 2030))
+            ],
+            "decisions": [
+                {"title": "Choose supplier", "steps": ["relation:old", "relation:future"], "event_time": "2020-01-01"}
+            ],
+        }
+    )
+    hidden_steps = await temporal.retrieve("Ada", k=1, as_of="2025-01-01")
+    assert hidden_steps.subgraph.decisions == []
+    visible_steps = await temporal.retrieve("Ada", k=1)
+    assert [d.title for d in visible_steps.subgraph.decisions] == ["Choose supplier"]
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1498,6 +1532,9 @@ async def dump(graph, ns):
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
             "retrieval_boundary": boundary_results,
+            "decision_step_visibility": [
+                [d.title for d in r.subgraph.decisions] for r in (hidden_steps, visible_steps)
+            ],
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
@@ -1541,7 +1578,7 @@ async def dump(graph, ns):
 async def main():
     cmd = sys.argv[1]
     if cmd == "kuzu_isolation":
-        from selfgraph import KuzuStore
+        from selfgraph import KuzuStore, ValidationError
 
         result = []
         for path in ("", ":memory:"):
@@ -1551,6 +1588,16 @@ async def main():
                 await second.insert.facts({"entities": [{"name": "Jane", "type": "Person"}]})
                 await second.entities.delete(entity.id)
                 result.append(await first.entities.get(entity.id) == entity)
+        path = sys.argv[4]
+        first = KuzuStore(path)
+        for db_kwargs in ({"read_only": True}, {"read_only": True, "max_db_size": 1024}):
+            try:
+                KuzuStore(path, **db_kwargs)
+            except ValidationError as exc:
+                result.append(str(exc))
+            else:
+                result.append("no error")
+        await first.close()
         json.dump(result, sys.stdout)
         return
     if cmd == "schema":

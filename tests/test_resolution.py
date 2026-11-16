@@ -897,6 +897,25 @@ def test_a_thing_merges_into_a_typed_entity_by_name_but_never_the_reverse():
     assert _ids(g) == ["company:bob-j", "person:robert-johnson", "thing:bob-j"]
 
 
+def test_batch_merge_preserves_the_survivor_name_and_unmerges_aliases():
+    for reverse in (True, False):
+        g = fresh_graph("res", resolver="default")
+        entities = [
+            {"type": "Thing", "name": "Bob", "aliases": ["Robert"]},
+            {"type": "Person", "name": "Robert"},
+        ]
+        res = run(g.insert.facts({"entities": entities[::-1] if reverse else entities}))
+        [merge] = res.merges
+        assert (merge.absorbed_id, merge.survivor_id, merge.added_aliases) == ("thing:bob", "person:robert", ["Bob"])
+        [entity] = res.entities
+        assert (entity.id, entity.type, entity.name, entity.aliases) == ("person:robert", "Person", "Robert", ["Bob"])
+        stored = run(g.entities.get("person:robert"))
+        assert (stored.name, stored.aliases) == ("Robert", ["Bob"])
+        restored = run(g.entities.unmerge(merge.id))
+        assert (restored.survivor.name, restored.survivor.aliases) == ("Robert", [])
+        assert (restored.entity.id, restored.entity.name, restored.entity.aliases) == ("thing:bob", "Bob", ["Robert"])
+
+
 def test_cli_and_mcp_resolver_merges_and_unmerge(capsys, tmp_path):
     g = fresh_graph("res")
     _seed(g, ROBERT)

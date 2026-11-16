@@ -1,7 +1,7 @@
 import pytest
 from helpers import HYDRADB, make_store, run, unique_ns
 
-from selfgraph import StoreError
+from selfgraph import SelfGraph, StoreError
 
 pytestmark = pytest.mark.skipif(not HYDRADB, reason="the write queue is HydraDB's")
 
@@ -82,3 +82,21 @@ def test_upsert_nodes_applies_extra_label():
         return [f["id"] for f in found_primary if f], [f["id"] for f in found_extra if f]
 
     assert run(go()) == (["x:a", "x:b"], ["x:a", "x:b"])
+
+
+def test_entity_types_that_are_not_hydradb_labels_still_write():
+    ns = unique_ns("labels")
+    g = SelfGraph(make_store(), namespace=ns)
+
+    async def go():
+        await g.initialize()
+        for name, type in (("Acme", "Big Co"), ("Delhi", "शहर"), ("Ada", "Person"), ("Bot", "Big-Co.v2")):
+            await g.entities.create(name, type)
+        types = {e.id: e.type for e in (await g.entities.list()).items}
+        labelled = await g.store.get_node(ns, "Person", "person:ada") is not None
+        await g.close()
+        return types, labelled
+
+    types, labelled = run(go())
+    assert types == {"big-co:acme": "Big Co", "शहर:delhi": "शहर", "person:ada": "Person", "big-co.v2:bot": "Big-Co.v2"}
+    assert labelled
