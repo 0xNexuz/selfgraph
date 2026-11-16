@@ -145,6 +145,17 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const tsReadsTs = await ts(store, nsTs, (g) => dump(g, nsTs));
         const pyReadsTs = py("dump", store, nsTs);
+        if (store === "kuzu") {
+          for (const snapshot of [pyReadsPy, tsReadsPy, tsReadsTs, pyReadsTs]) {
+            expect(snapshot).toMatchObject({
+              filters: {
+                aliases_equals: [{ id: "person:jane-doe" }],
+                aliases_any_of: [{ id: "person:jane-doe" }],
+                empty_any_of: [],
+              },
+            });
+          }
+        }
 
         const evidence = mkdtempSync(join(tmpdir(), `selfgraph-conformance-${store}-`));
         const keep = { pyOps, tsOps, pyReadsPy, tsReadsPy, tsReadsTs, pyReadsTs };

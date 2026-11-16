@@ -170,7 +170,7 @@ function intLiteral(n: number): number {
  */
 function whereDocEquals(alias: string, equals: Props | null | undefined, where: string[], params: Props): void {
   sortedEntries(equals).forEach(([key, value], i) => {
-    where.push(`json_extract(${alias}.doc, $k${i}) = $v${i}`);
+    where.push(`json_extract(${alias}.doc, $k${i}) = json($v${i})`);
     params[`k${i}`] = requireIdentifier(key);
     params[`v${i}`] = jv(value);
   });
@@ -191,13 +191,16 @@ function whereDocAnyOf(
   params: Props,
 ): void {
   sortedEntries(anyOf).forEach(([key, values], i) => {
+    requireIdentifier(key);
     const list = values as unknown[];
-    if (key === "id") {
+    if (list.length === 0) {
+      where.push("false");
+    } else if (key === "id") {
       where.push(`n.pk IN $in${i}`);
       params[`in${i}`] = list.map((v) => pk(ns, v as string));
     } else {
-      where.push(`CAST(json_extract(n.doc, $ik${i}) AS STRING) IN $in${i}`);
-      params[`ik${i}`] = requireIdentifier(key);
+      where.push(`CAST(json_extract(n.doc, $ik${i}) AS STRING) IN list_transform($in${i}, x -> json(x))`);
+      params[`ik${i}`] = key;
       params[`in${i}`] = list.map(jv);
     }
   });
