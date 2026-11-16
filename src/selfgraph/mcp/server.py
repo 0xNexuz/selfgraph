@@ -820,9 +820,12 @@ async def maintenance_dedupe_relations(dry_run: StrictBool = True) -> dict[str, 
 
 
 async def graph_diff(since: str, until: str | None = None) -> dict[str, Any]:
-    """List stored relation additions, revisions, retirements, and entity creations in (since, until].
-    Times are ISO 8601 known times, not event times; until defaults to now. Retirements include
-    invalidated_by. Deleted records and overwritten retirements are not an audit log."""
+    """List stored changes in the known-time window (since, until].
+
+    @param since (str): exclusive lower bound as an ISO 8601 known time.
+    @param until (str | None): inclusive upper bound, or now.
+    @return (dict[str, Any]): relation changes, created entities, and limitations.
+    """
     g = await _graph_handle()
     return to_jsonable(await g.diff(since, until))
 

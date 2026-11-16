@@ -427,13 +427,6 @@ class SelfGraph:
     async def diff(self, since: datetime | str, until: datetime | str | None = None) -> GraphDiff:
         """List stored changes in the known-time window (since, until], defaulting until to now.
 
-        Uses created_at and invalidated_known_at, not event_time.
-        Returns revisions, retirements, and newly created entities.
-        Deletes, merges, overwritten retirements, and entity edits are not tracked.
-        Reassertions count as revisions; a relation can appear in several lists.
-        Scans the namespace without isolating concurrent writes.
-        Returned fields reflect stored records, not snapshots.
-
         @param since (datetime | str): exclusive lower bound, naive times read as UTC.
         @param until (datetime | str | None): inclusive upper bound, or now.
         @return (GraphDiff): additions, retirements, revisions, and entities created.

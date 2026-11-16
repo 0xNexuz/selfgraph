@@ -702,7 +702,8 @@ class CypherPrimitives(CypherRunner):
             params["etype"] = type
         where_equals("r", equals, where, params)
         where_after("r.id", id_gt, where, params)
-        order = "r.id, r.revision" if order_by == "id" else f"r.{order_by}, r.id, r.revision"
+        order_by = require_identifier(order_by, "order_by")
+        order = "r.id, r.revision" if order_by == "id" else f"r.{order_by}"
         query = (
             f"MATCH (a:{from_label})-[r]->(b{blabel}) WHERE {' AND '.join(where)} "
             f"RETURN r, a.id AS from_e, b.id AS to_e, type(r) AS t "

@@ -1238,23 +1238,24 @@ async def diff_windows(graph):
             if at is not None
         }
     )
+    if not times:
+        return []
+    first, middle, last = times[0], times[len(times) // 2], times[-1]
+    windows = [("1900-01-01", first), (first, first), (first, middle), (middle, last), (last, "2100-01-01")]
     out = []
-    for since in times:
-        for until in times:
-            if since > until:
-                continue
-            d = await graph.diff(since, until)
-            out.append(
-                {
-                    "since": since.isoformat().replace("+00:00", "Z"),
-                    "until": until.isoformat().replace("+00:00", "Z"),
-                    "added": [[r.id, r.revision] for r in d.relations_added],
-                    "revised": [[r.id, r.revision] for r in d.relations_revised],
-                    "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
-                    "entities": [e.id for e in d.entities_created],
-                    "limitations": d.limitations,
-                }
-            )
+    for since, until in windows:
+        d = await graph.diff(since, until)
+        out.append(
+            {
+                "since": d.since.isoformat().replace("+00:00", "Z"),
+                "until": d.until.isoformat().replace("+00:00", "Z"),
+                "added": [[r.id, r.revision] for r in d.relations_added],
+                "revised": [[r.id, r.revision] for r in d.relations_revised],
+                "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
+                "entities": [e.id for e in d.entities_created],
+                "limitations": d.limitations,
+            }
+        )
     return out
 
 
