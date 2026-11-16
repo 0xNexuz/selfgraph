@@ -113,7 +113,6 @@ export function parseIso(text: string): Date {
       (Number(digits.slice(0, 2)) * 3600 + Number(digits.slice(2, 4) || 0) * 60 + Number(digits.slice(4, 6) || 0));
   }
   const out = new Date(d.getTime() - offsetSeconds * 1000);
-  assertValid(out);
   MICROS.set(out, { time: out.getTime(), micro });
   return out;
 }

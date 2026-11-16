@@ -12,7 +12,7 @@ import {
 } from "../../src/index.js";
 import { setLogger } from "../../src/internal/log.js";
 import { comparePy } from "../../src/internal/py.js";
-import { jsonIso, toIso } from "../../src/internal/time.js";
+import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
@@ -256,7 +256,7 @@ export function schemaWarnings(): {
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
-  datetime_boundaries: Array<string | null>;
+  datetime_errors: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -308,12 +308,15 @@ export function schemaWarnings(): {
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
-    datetime_boundaries: [
-      "0001-01-01T00:00:00.000001Z",
-      "9999-12-31T23:59:59.999999Z",
-      "0001-01-01T01:00:00.000001+01:00",
-      "9999-12-31T22:59:59.999999-01:00",
-    ].map((text) => toIso(parseTime(text, "event_time"))),
+    datetime_errors: ["0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"].map((text) => {
+      try {
+        parseTime(text, "event_time");
+        return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
     terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
       [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
     ),
