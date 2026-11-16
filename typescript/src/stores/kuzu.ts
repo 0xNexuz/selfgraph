@@ -241,12 +241,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     try {
       return this.connect();
     } catch (exc) {
-      const open = (OPEN_STORES.get(this.cacheKey) ?? 1) - 1;
-      if (open > 0) OPEN_STORES.set(this.cacheKey, open);
-      else {
-        OPEN_STORES.delete(this.cacheKey);
-        await KuzuStore.closeCachedDatabase(this.cacheKey);
-      }
+      await KuzuStore.releaseStore(this.cacheKey);
       throw exc;
     }
   });
@@ -393,6 +388,15 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     await db?.close?.();
   }
 
+  private static async releaseStore(key: string | symbol): Promise<void> {
+    const open = (OPEN_STORES.get(key) ?? 1) - 1;
+    if (open > 0) OPEN_STORES.set(key, open);
+    else {
+      OPEN_STORES.delete(key);
+      await KuzuStore.closeCachedDatabase(key);
+    }
+  }
+
   /** Close the connection, and the database once no other store in this process holds it. */
   async close(): Promise<void> {
     this.closed = true;
@@ -400,12 +404,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       await this.onPath(async () => {
         await conn.close?.();
       });
-      const open = (OPEN_STORES.get(this.cacheKey) ?? 1) - 1;
-      if (open > 0) OPEN_STORES.set(this.cacheKey, open);
-      else {
-        OPEN_STORES.delete(this.cacheKey);
-        await KuzuStore.closeCachedDatabase(this.cacheKey);
-      }
+      await KuzuStore.releaseStore(this.cacheKey);
     });
   }
 
