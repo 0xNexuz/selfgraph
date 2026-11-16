@@ -17,6 +17,7 @@ import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
+import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
 
@@ -271,6 +272,7 @@ export function schemaWarnings(): {
   unknown_keys: string[];
   alias_errors: string[];
   own_keys: Array<Array<{ code: string; message: string }>>;
+  parents: unknown[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
@@ -323,6 +325,42 @@ export function schemaWarnings(): {
         message: w.message,
       })),
     ),
+    parents: [
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "human" },
+        ],
+      },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "HUMAN" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "Person" }] },
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "Human" },
+        ],
+      },
+      { entities: [{ name: "Person" }, { name: "Manager", parent: "X" }] },
+      {
+        entities: [
+          { name: "A", parent: "b" },
+          { name: "B", parent: "a" },
+        ],
+      },
+      { entities: [{ name: "A", parent: "a" }] },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").entities.map((entity) => entity.parent);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     neo4j_dropped: neo4jExportWarnings(),
@@ -640,6 +678,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const requireIdentifierCases: Record<string, string> = {};
+  for (const name of ["id", "external_ids", "a b", "1x", ""]) {
+    try {
+      requireIdentifierCases[name] = requireIdentifier(name);
+    } catch (exc) {
+      requireIdentifierCases[name] = (exc as Error).message;
+    }
+  }
+  out.require_identifier = requireIdentifierCases;
   return out;
 }
 
@@ -749,6 +796,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,
     raw_evidence: rawEvidence,

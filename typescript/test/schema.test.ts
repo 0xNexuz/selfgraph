@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildGraph } from "../src/client.js";
+import { toOssie } from "../src/export.js";
 import { FalkorDBStore, KuzuStore, type LLMClient, SelfGraph, ValidationError } from "../src/index.js";
 import { runStdio } from "../src/mcp.js";
 import { EntityInput, Extraction, parseOrThrow } from "../src/models.js";
@@ -116,7 +117,7 @@ describe("Schema.parse and asSchema", () => {
         { name: "Manager", parent: "human" },
       ],
     });
-    expect(aliased?.entities[1]?.parent).toBe("human");
+    expect(aliased?.entities[1]?.parent).toBe("Person");
   });
 
   it.each([
@@ -199,6 +200,62 @@ describe("Schema.parse and asSchema", () => {
     expect(schema?.entities.map((e) => e.aliases)).toEqual([["person", "Human", "human"], ["org"]]);
     const relation = asSchema({ relations: [{ type: "WORKS_AT", aliases: ["works at", "works-at"] }] });
     expect(relation?.relations[0]?.aliases).toEqual(["works at", "works-at"]);
+  });
+
+  it("stores a parent as the schema type name", () => {
+    const parents = (spec: Schema) => asSchema(spec)?.entities.map((entity) => entity.parent);
+    const stored = [null, "Person"];
+    expect(parents({ entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] })).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "human" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "HUMAN" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(parents({ entities: [{ name: "Person" }, { name: "Manager", parent: "Person" }] })).toEqual(stored);
+    expect(
+      parents({
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Manager", parent: "Human" },
+        ],
+      }),
+    ).toEqual(stored);
+    expect(() => asSchema({ entities: [{ name: "Person" }, { name: "Manager", parent: "X" }] })).toThrow(
+      "entities[1].parent: unknown type 'X'",
+    );
+    expect(() =>
+      asSchema({
+        entities: [
+          { name: "A", parent: "b" },
+          { name: "B", parent: "a" },
+        ],
+      }),
+    ).toThrow("entities[0].parent: parent cycle 'A' -> 'B' -> 'A'");
+    expect(() => asSchema({ entities: [{ name: "A", parent: "a" }] })).toThrow(
+      "entities[0].parent: parent cycle 'A' -> 'A'",
+    );
+    const spec = {
+      entities: [
+        { name: "Person", properties: [{ name: "age", type: "integer" as const, required: true }] },
+        { name: "Manager", parent: "person" },
+      ],
+    };
+    const schema = asSchema(spec);
+    expect((toOssie(schema!).ontology as { extends?: string[] }[])[1]).toMatchObject({ extends: ["Person"] });
+    expect(check(spec, { entities: [{ type: "Manager", name: "M" }] }).map((w) => w.message)).toEqual([
+      "entity manager:m is missing required property 'age'",
+    ]);
   });
 });
 

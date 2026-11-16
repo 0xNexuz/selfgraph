@@ -254,6 +254,23 @@ def schema_warnings():
             alias_errors.append(str(exc))
         else:
             alias_errors.append("no error")
+    parent_specs = [
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "person"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "human"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "HUMAN"}]},
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "Person"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "Human"}]},
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "X"}]},
+        {"entities": [{"name": "A", "parent": "b"}, {"name": "B", "parent": "a"}]},
+        {"entities": [{"name": "A", "parent": "a"}]},
+    ]
+
+    def parent_outcome(spec):
+        try:
+            return [entity.parent for entity in Schema.model_validate(spec).entities]
+        except ValidationError as exc:
+            return str(exc)
+
     return {
         "warnings": [
             [
@@ -268,6 +285,7 @@ def schema_warnings():
             for own_key_schema in [Schema.model_validate(OWN_KEY_SPEC)]
             for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
         ],
+        "parents": [parent_outcome(spec) for spec in parent_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
@@ -643,6 +661,13 @@ async def write(graph):
     out["resettle_versions"] = to_jsonable(
         {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
     )
+    require_identifier_cases = {}
+    for name in ["id", "external_ids", "a b", "1x", ""]:
+        try:
+            require_identifier_cases[name] = ids.require_identifier(name)
+        except ValidationError as exc:
+            require_identifier_cases[name] = str(exc)
+    out["require_identifier"] = require_identifier_cases
     return out
 
 
@@ -810,6 +835,7 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "evidence": evidence,
             "raw_evidence": sorted(raw_evidence, key=lambda r: r["id"]),
