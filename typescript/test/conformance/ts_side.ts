@@ -522,6 +522,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
   try {
+    await graph.insert.facts(null as never);
+    out.facts_none = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.facts_none = exc.message;
+  }
+  try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
     out.unsafe_integer = "accepted";
   } catch (exc) {

@@ -300,6 +300,12 @@ def test_bad_facts_and_schema_files_fail_cleanly_and_warnings_reach_stderr(capsy
     assert json.loads(captured.out)["warnings"][0]["code"] == "unknown_entity_type"
 
 
+def test_null_facts_file_fails_cleanly(capsys, tmp_path):
+    null = json_file(tmp_path, "null.json", None)
+    assert kuzu_main(tmp_path, "insert", "facts", null) == 2
+    assert capsys.readouterr().err == "error: invalid facts: expected object\n"
+
+
 def test_relation_update_aliases_and_dry_run_plans_omit_deleted(capsys):
     g = new_graph()
     t_entities(g, "a", "b")
