@@ -533,6 +533,29 @@ async def write(graph):
         out["schema_null_required"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    await graph.insert.facts(
+        {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
+    )
+    merged = await graph.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": "Mergia Bob"}, {"type": "Tool", "name": "Mergia Anvil"}],
+            "preferences": [
+                {"subject_entity": "person:mergia-bob", "key": "tool", "value_entity": "tool:mergia-anvil"}
+            ],
+        },
+        source_id="merge-doc",
+        resolver="default",
+    )
+    await graph.entities.delete("tool:mergia-anvil")
+    undone = await graph.entities.unmerge(merged.merges[0].id)
+    out["unmerge_after_delete"] = {
+        "entity": undone.entity.id,
+        "survivor": undone.survivor.id if undone.survivor else None,
+        "reverted": undone.merge.reverted_at is not None,
+        "relations": [r.id for r in undone.relations],
+        "preferences": [p.id for p in undone.preferences],
+        "decisions": [d.id for d in undone.decisions],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",

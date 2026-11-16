@@ -509,6 +509,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  await graph.insert.facts(
+    { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
+    { source_id: "merge-seed" },
+  );
+  const merged = await graph.insert.facts(
+    {
+      entities: [
+        { type: "Person", name: "Mergia Bob" },
+        { type: "Tool", name: "Mergia Anvil" },
+      ],
+      preferences: [{ subject_entity: "person:mergia-bob", key: "tool", value_entity: "tool:mergia-anvil" }],
+    },
+    { source_id: "merge-doc", resolver: "default" },
+  );
+  await graph.entities.delete("tool:mergia-anvil");
+  const undone = await graph.entities.unmerge(merged.merges[0]!.id);
+  out.unmerge_after_delete = {
+    entity: undone.entity.id,
+    survivor: undone.survivor?.id ?? null,
+    reverted: undone.merge.reverted_at !== null,
+    relations: undone.relations.map((r) => r.id),
+    preferences: undone.preferences.map((p) => p.id),
+    decisions: undone.decisions.map((d) => d.id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",
