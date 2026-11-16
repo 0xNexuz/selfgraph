@@ -174,6 +174,71 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it.each(["stored", "batch", "generated", "generated-other-source"])(
+    "rejects conflicting relation ids before writing (%s)",
+    async (collision) => {
+      const g = fresh();
+      await g.entities.create("Ada", "Person");
+      await g.entities.create("Bob", "Person");
+      const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
+      const conflicting = {
+        ...original,
+        id: collision.startsWith("generated") ? undefined : original.id,
+        to_entity: "person:cy",
+      };
+      if (collision.startsWith("generated")) {
+        original.id = ids.relationId("person:ada", "KNOWS", "person:cy");
+        if (collision === "generated-other-source") original.from_entity = "person:bob";
+      }
+      const stored = collision !== "batch";
+      if (stored) await g.relations.create(original.from_entity, "KNOWS", "person:bob", { id: original.id });
+
+      await expect(
+        g.insert.facts(
+          { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
+          { source_id: "bad-import" },
+        ),
+      ).rejects.toThrow(/already exists with different endpoints\/type/);
+
+      expect(await g.entities.get("person:cy")).toBeNull();
+      expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
+      const relation = await g.relations.get(original.id);
+      if (stored) expect(relation?.to_entity).toBe("person:bob");
+      else expect(relation).toBeNull();
+    },
+  );
+
+  it.runIf(spec.name === "kuzu")("batches relation ID preflight reads", async () => {
+    const g = fresh();
+    await g.entities.create("Ada", "Person");
+    const runner = g.store as unknown as {
+      _run(query: string, params?: Record<string, unknown>): Promise<unknown>;
+    };
+    const execute = vi.spyOn(runner, "_run");
+    try {
+      const contacts = Array.from({ length: 257 }, (_, i) => i);
+      const result = await g.insert.facts({
+        entities: contacts.map((i) => ({ type: "Person", name: `Contact ${i}` })),
+        relations: contacts.map((i) => ({
+          from_entity: "person:ada",
+          type: "KNOWS",
+          to_entity: `person:contact-${i}`,
+        })),
+      });
+      expect(result.relations).toHaveLength(257);
+      expect(
+        execute.mock.calls
+          .filter(([query]) => query.includes("r.sid IN $ids"))
+          .map(([, params]) => (Array.isArray(params?.ids) ? params.ids.length : 0)),
+      ).toEqual([256, 1]);
+      expect(
+        execute.mock.calls.filter(([query]) => query.includes("r.sid = $sid") && query.includes("RETURN r.doc")),
+      ).toEqual([]);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   it("reports a bad stance or status with the Python text, after the id check", async () => {
     const g = fresh();
     await g.entities.create("X", "T", { id: "t:x" });

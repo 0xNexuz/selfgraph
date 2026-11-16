@@ -424,6 +424,7 @@ export function aliasList(name: string, items: readonly string[]): string[] {
 
 const PAGE = 500;
 const BATCH = 1000;
+const RELATION_ID_BATCH = 256;
 
 /**
  * Call a skip/limit list function page by page until it runs dry or reaches the cap.
@@ -1664,16 +1665,34 @@ async function newestPreference(runner: Runner, ns: string, pid: string): Promis
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
  * @param keyed (ReadonlyArray<readonly [string, Pick<ParsedRelationInput, "id" | "from_entity">]>): (relation id, input) pairs.
+ * @param allIds (boolean): look up every id across all endpoints, since an explicit id can match a generated id.
  * @return (Map<string, EdgeRow>): each found relation's current edge row, else its newest edge row, by id.
  */
 export async function currentRelations(
   runner: Runner,
   ns: string,
   keyed: ReadonlyArray<readonly [string, Pick<ParsedRelationInput, "id" | "from_entity">]>,
+  allIds = false,
 ): Promise<Map<string, EdgeRow>> {
   const wanted = new Set(keyed.map(([rid]) => rid));
   const found = new Map<string, EdgeRow>();
-  const versions = (await runner.edgeVersions?.(ns, L_ENTITY, L_ENTITY, dedupList(keyed.map(([rid]) => rid)))) ?? null;
+  const ids = [...wanted];
+  let versions: EdgeRow[] | null = null;
+  if (runner.edgeVersions) {
+    if (allIds) {
+      versions = [];
+      for (const batch of batches(ids, RELATION_ID_BATCH)) {
+        const rows = await runner.edgeVersions(ns, L_ENTITY, L_ENTITY, batch);
+        if (rows === null) {
+          versions = null;
+          break;
+        }
+        for (const edge of rows) versions.push(edge);
+      }
+    } else {
+      versions = await runner.edgeVersions(ns, L_ENTITY, L_ENTITY, ids);
+    }
+  }
   for (const currentOnly of [true, false]) {
     const pending = dedupList(keyed.filter(([rid]) => !found.has(rid)).map(([, rel]) => rel.from_entity));
     const filter = { from_label: L_ENTITY, to_label: L_ENTITY, current_only: currentOnly };
@@ -1681,18 +1700,54 @@ export async function currentRelations(
     const edges =
       versions === null
         ? await edgesAt(runner, ns, filter, "from_in", pending)
-        : versions.filter((e) => sources.has(e.from_id) && (Boolean(e.props.is_current) || !currentOnly));
+        : versions.filter((e) => (allIds || sources.has(e.from_id)) && (Boolean(e.props.is_current) || !currentOnly));
     for (const edge of edges) {
       if (wanted.has(idOf(edge.props)) && isRelationType(edge.type)) keepNewest(found, edge);
     }
     for (const rid of found.keys()) wanted.delete(rid);
   }
-  for (const [rid, rel] of keyed) {
-    if (!rel.id || found.has(rid)) continue;
+  if (allIds && versions !== null) return found;
+  const missing = dedupList(keyed.filter(([rid, rel]) => (allIds || rel.id) && !found.has(rid)).map(([rid]) => rid));
+  for (const rid of missing) {
     const edge = newestEdge(await typedEdgeVersions(runner, ns, rid, isRelationType));
     if (edge !== null) found.set(rid, edge);
   }
   return found;
+}
+
+/**
+ * Reject conflicting relation ids before the insert writes any facts or provenance.
+ *
+ * @param runner (Runner): the graph runner.
+ * @param ns (string): namespace.
+ * @param relations (readonly ParsedRelationInput[]): the final canonical relations to write.
+ * @return (Promise<void>): nothing; raises ValidationError if a relation id names different endpoints or types.
+ */
+export async function requireRelationIdentities(
+  runner: Runner,
+  ns: string,
+  relations: readonly ParsedRelationInput[],
+): Promise<void> {
+  if (!relations.length) return;
+  const keyed = relations.map((rel) => {
+    const rtype = ids.normalizeRelType(rel.type);
+    const rid = rel.id ?? ids.relationId(rel.from_entity, rtype, rel.to_entity);
+    return [rid, rel, [rel.from_entity, rtype, rel.to_entity]] as const;
+  });
+  const stored = await currentRelations(
+    runner,
+    ns,
+    keyed.map(([rid, rel]) => [rid, rel]),
+    true,
+  );
+  const identities = new Map<string, readonly [string, string, string]>(
+    [...stored].map(([rid, edge]) => [rid, [edge.from_id, edge.type, edge.to_id]]),
+  );
+  for (const [rid, , identity] of keyed) {
+    const previous = identities.get(rid);
+    if (previous === undefined) identities.set(rid, identity);
+    else requireSameEnds(rid, previous, identity);
+  }
 }
 
 export interface RelationCap {

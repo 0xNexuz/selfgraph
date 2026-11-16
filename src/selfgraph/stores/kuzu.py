@@ -429,6 +429,36 @@ class KuzuStore(AutoCommitStore):
         )
         return [edge_row(r) for r in res.rows]
 
+    async def edge_versions(
+        self, ns: str, from_label: str | None, to_label: str | None, ids: list[str]
+    ) -> list[dict] | None:
+        """Read edge versions for a bounded list of ids in one query.
+
+        @param ns (str): namespace.
+        @param from_label (str | None): source label, or None for any.
+        @param to_label (str | None): target label, or None for any.
+        @param ids (list[str]): edge ids.
+        @return (list[dict] | None): rows grouped by requested id, or None for more than 256 ids.
+        """
+        if len(ids) > 256:
+            return None
+        if not ids:
+            return []
+        where = ["r.ns = $ns", "r.sid IN $ids"]
+        params: dict[str, Any] = {"ns": ns, "ids": ids}
+        for alias, label in (("a", from_label), ("b", to_label)):
+            if label is not None:
+                where.append(f"{alias}.label = ${alias}_label")
+                params[f"{alias}_label"] = label
+        result = await self._run(
+            f"MATCH (a:N)-[r:R]->(b:N) WHERE {' AND '.join(where)} "
+            "RETURN r.doc AS doc, a.id AS fa, b.id AS tb, r.etype AS et",
+            params,
+        )
+        rows = [edge_row(row) for row in result.rows]
+        order = {rid: i for i, rid in enumerate(ids)}
+        return sorted(rows, key=lambda row: order[row["props"]["id"]])
+
     async def update_current_edge(self, ns: str, id: str, props: dict) -> None:
         for key in props:
             require_identifier(key)

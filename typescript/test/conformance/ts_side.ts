@@ -969,6 +969,22 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  try {
+    await graph.insert.facts(
+      {
+        entities: [{ type: "Thing", name: "Rejected" }],
+        relations: [{ id: worksAt, type: "WORKS_AT", from_entity: "person:jane-doe", to_entity: "thing:rejected" }],
+      },
+      { source_id: "rejected" },
+    );
+    throw new Error("relation id was accepted with a different destination");
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.rejected_relation = exc.message;
+  }
+  if ((await graph.entities.get("thing:rejected")) !== null) {
+    throw new Error("rejected relation left an entity in the graph");
+  }
   out.context_boundary = await contextBoundary(graph);
   const capped = new SelfGraph(graph.store, {
     namespace: graph.namespace,
