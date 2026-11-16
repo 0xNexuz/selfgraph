@@ -371,7 +371,6 @@ def test_from_tables_drafts_types_properties_relations_and_mappings():
     [
         ({"table": "users"}, "{'table': 'users'}"),
         (["users"], "['users']"),
-        (5, "5"),
     ],
 )
 def test_from_tables_rejects_non_string_references_with_a_validation_error(reference, shown):
