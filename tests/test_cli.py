@@ -306,6 +306,17 @@ def test_null_facts_file_fails_cleanly(capsys, tmp_path):
     assert capsys.readouterr().err == "error: invalid facts: expected object\n"
 
 
+def test_facts_file_with_a_bare_year_or_a_text_strength_fails_like_typescript(capsys, tmp_path):
+    rel = {"from_entity": "person:ann", "type": "JOINED", "to_entity": "company:acme", "event_time": "2021"}
+    pref = {"subject_entity": "person:ann", "key": "k", "value_entity": "company:acme", "strength": "0.9"}
+    bad = json_file(tmp_path, "bad.json", {"relations": [rel], "preferences": [pref]})
+    assert kuzu_main(tmp_path, "insert", "facts", bad) == 2
+    err = capsys.readouterr().err
+    assert "error: invalid facts:\n" in err
+    assert '  relations[0].event_time: invalid ISO 8601 string: "2021"\n' in err
+    assert "  preferences[0].strength: expected number\n" in err
+
+
 def test_relation_update_aliases_and_dry_run_plans_omit_deleted(capsys):
     g = new_graph()
     t_entities(g, "a", "b")
