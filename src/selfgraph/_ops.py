@@ -1855,13 +1855,12 @@ class Contradictions:
                     why[old] = (key, limit, ranked[limit - 1] if len(ranked) >= limit else by)
             for rid in self._past.get(key, {}):
                 newer = self._newer(facts, rid)
-                if rid in retired or rid not in self._ended or len(newer) < limit:
+                ended = retired.get(rid, self._ended.get(rid))
+                if ended is None or len(newer) < limit:
                     continue
                 (at, _, _), by = newer[limit - 1]
-                ended_by, ended_at = self._ended[rid]
-                if (by, at) != (ended_by, ended_at) and (ended_by in facts or at < ended_at):
-                    retired[rid] = (by, at)
-                    self._ended[rid] = (by, at)
+                if (by, at) != ended and (ended[0] in facts or at < ended[1]):
+                    retired[rid] = self._ended[rid] = (by, at)
         warnings: list[InsertWarning] = []
         for slot in slots:
             if not isinstance(slot, str):

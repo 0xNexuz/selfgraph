@@ -1,6 +1,7 @@
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
 import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable } from "../../src/index.js";
 import { comparePy } from "../../src/internal/py.js";
+import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
@@ -384,4 +385,58 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     retrieval_dfs: { seeds: dfs.seeds, context: dfs.context },
     retrieval_tight: tight,
   });
+}
+
+export const SUPERSEDE_SCHEMA: Schema = {
+  entities: [{ name: "Person" }, { name: "Company" }],
+  relations: [
+    { type: "WORKS_AT", from: { types: ["Person"], max_count: 1 }, to: { types: ["Company"], max_count: 1 } },
+  ],
+};
+
+/**
+ * Supersede relations capped at both endpoints, with facts arriving out of order across batches.
+ *
+ * @param graph (SelfGraph): a graph with a two-sided max_count schema and contradiction "supersede".
+ * @return (Promise<Record<string, unknown>>): each relation's versions, newest first, and the warning codes of each insert.
+ */
+export async function supersede(graph: SelfGraph): Promise<Record<string, unknown>> {
+  await graph.insert.facts({
+    entities: [
+      ...["Ann", "Bob"].map((name) => ({ type: "Person", name })),
+      ...["Acme", "Globex", "Initech"].map((name) => ({ type: "Company", name })),
+    ],
+  });
+  const link = (person: string, company: string, year: number) => ({
+    from_entity: `person:${person}`,
+    type: "WORKS_AT",
+    to_entity: `company:${company}`,
+    event_time: new Date(Date.UTC(year, 0, 1)),
+  });
+  const batches = [
+    [link("ann", "acme", 2020)],
+    [link("ann", "initech", 2026)],
+    [link("ann", "globex", 2024), link("bob", "acme", 2022)],
+  ];
+  const warnings: string[][] = [];
+  for (const relations of batches) {
+    const result = await graph.insert.facts({ relations });
+    warnings.push(result.warnings.map((w) => w.code));
+  }
+  const versions: Record<string, unknown> = {};
+  for (const [person, company] of [
+    ["ann", "acme"],
+    ["ann", "globex"],
+    ["ann", "initech"],
+    ["bob", "acme"],
+  ]) {
+    const rid = ids.relationId(`person:${person}`, "WORKS_AT", `company:${company}`);
+    versions[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
+  return { warnings, versions };
 }

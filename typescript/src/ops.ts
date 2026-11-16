@@ -1886,12 +1886,12 @@ export class Contradictions {
         }
       }
       for (const rid of this.past.get(key)?.keys() ?? []) {
-        const was = this.ended.get(rid);
         const newer = this.newer(facts, rid);
-        if (retired.has(rid) || was === undefined || newer.length < limit) continue;
+        const ended = retired.get(rid) ?? this.ended.get(rid);
+        if (ended === undefined || newer.length < limit) continue;
         const by = newer[limit - 1]![1];
         const at = this.times.get(by)!;
-        if ((by !== was[0] || at.getTime() !== was[1].getTime()) && (facts.has(was[0]) || at < was[1])) {
+        if ((by !== ended[0] || at.getTime() !== ended[1].getTime()) && (facts.has(ended[0]) || at < ended[1])) {
           retired.set(rid, [by, at]);
           this.ended.set(rid, [by, at]);
         }

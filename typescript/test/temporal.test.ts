@@ -662,8 +662,7 @@ function suite(spec: StoreSpec): void {
     const entities = [
       { type: "Person", name: "Ann" },
       { type: "Person", name: "Bob" },
-      { type: "Company", name: "Acme" },
-      { type: "Company", name: "Globex" },
+      ...["Acme", "Globex", "Initech"].map((name) => ({ type: "Company", name })),
     ];
     const link = (person: string, company: string, year: number) => ({
       from_entity: `person:${person}`,
@@ -671,28 +670,21 @@ function suite(spec: StoreSpec): void {
       to_entity: `company:${company}`,
       event_time: at(year),
     });
-    const rels = [link("ann", "acme", 2020), link("ann", "globex", 2024), link("bob", "acme", 2022)];
+    const rels = [
+      link("ann", "acme", 2020),
+      link("ann", "globex", 2024),
+      link("bob", "acme", 2022),
+      link("ann", "initech", 2026),
+    ];
     const annAcme = ids.relationId("person:ann", "WORKS_AT", "company:acme");
     const bobAcme = ids.relationId("person:bob", "WORKS_AT", "company:acme");
-    const orders = [
-      [0, 1, 2],
-      [0, 2, 1],
-      [1, 0, 2],
-      [1, 2, 0],
-      [2, 0, 1],
-      [2, 1, 0],
-    ];
-    for (const order of orders) {
-      for (const batched of [false, true]) {
-        const g = open({ schema: spec, contradiction: "supersede" });
-        await g.insert.facts({ entities });
-        for (const batch of batched ? [order] : order.map((i) => [i])) {
-          await g.insert.facts({ relations: batch.map((i) => rels[i]!) });
-        }
-        const [ended] = await g.relations.versions(annAcme);
-        expect([ended!.invalidated_by, ended!.invalidated_at]).toEqual([bobAcme, at(2022)]);
-        expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
-      }
+    for (const batches of [[[0], [1], [2]], [[2], [1], [0]], [[0], [3], [1, 2]], [[0, 1, 2, 3]]]) {
+      const g = open({ schema: spec, contradiction: "supersede" });
+      await g.insert.facts({ entities });
+      for (const batch of batches) await g.insert.facts({ relations: batch.map((i) => rels[i]!) });
+      const [ended] = await g.relations.versions(annAcme);
+      expect([ended!.invalidated_by, ended!.invalidated_at], JSON.stringify(batches)).toEqual([bobAcme, at(2022)]);
+      expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
     }
   });
 

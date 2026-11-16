@@ -1,4 +1,3 @@
-import itertools
 import re
 
 import pytest
@@ -438,7 +437,7 @@ def test_a_relation_ends_at_the_earliest_endpoint_that_displaces_it_in_any_order
         ],
     }
     people = [{"type": t, "name": n} for t, n in (("Person", "Ann"), ("Person", "Bob"), ("Company", "Acme"))]
-    people.append({"type": "Company", "name": "Globex"})
+    people += [{"type": "Company", "name": n} for n in ("Globex", "Initech")]
 
     def link(person, company, year):
         return {
@@ -448,14 +447,18 @@ def test_a_relation_ends_at_the_earliest_endpoint_that_displaces_it_in_any_order
             "event_time": utc(year),
         }
 
-    rels = [link("ann", "acme", 2020), link("ann", "globex", 2024), link("bob", "acme", 2022)]
+    rels = [
+        link("ann", "acme", 2020),
+        link("ann", "globex", 2024),
+        link("bob", "acme", 2022),
+        link("ann", "initech", 2026),
+    ]
     ann_acme, bob_acme = (ids.relation_id(f"person:{p}", "WORKS_AT", "company:acme") for p in ("ann", "bob"))
-    for order in itertools.permutations(rels):
-        for batched in (False, True):
-            g = fresh_graph("contra", schema=spec, contradiction="supersede")
-            run(g.insert.facts({"entities": people}))
-            for batch in [list(order)] if batched else [[rel] for rel in order]:
-                insert(g, *batch)
-            ended = run(g.relations.versions(ann_acme))[0]
-            assert (ended.invalidated_by, ended.invalidated_at) == (bob_acme, utc(2022))
-            assert run(g.relations.get(bob_acme)).is_current
+    for batches in ([[0], [1], [2]], [[2], [1], [0]], [[0], [3], [1, 2]], [[0, 1, 2, 3]]):
+        g = fresh_graph("contra", schema=spec, contradiction="supersede")
+        run(g.insert.facts({"entities": people}))
+        for batch in batches:
+            insert(g, *(rels[i] for i in batch))
+        ended = run(g.relations.versions(ann_acme))[0]
+        assert (ended.invalidated_by, ended.invalidated_at) == (bob_acme, utc(2022)), batches
+        assert run(g.relations.get(bob_acme)).is_current

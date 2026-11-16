@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, ids
+from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -189,6 +189,17 @@ STORES = {
     "kuzu": lambda p: __import__("selfgraph").KuzuStore(p),
 }
 
+SUPERSEDE_SCHEMA = {
+    "entities": [{"name": "Person"}, {"name": "Company"}],
+    "relations": [
+        {
+            "type": "WORKS_AT",
+            "from": {"types": ["Person"], "max_count": 1},
+            "to": {"types": ["Company"], "max_count": 1},
+        }
+    ],
+}
+
 ZOE = ids.entity_id("Person", "Zoë Ångström")
 
 FACTS = {
@@ -295,6 +306,48 @@ async def write(graph):
     return out
 
 
+async def supersede(graph):
+    """Supersede relations capped at both endpoints, with facts arriving out of order across batches.
+
+    @param graph (SelfGraph): a graph with a two-sided max_count schema and contradiction="supersede".
+    @return (dict): each relation's versions, newest first, and the warning codes of each insert.
+    """
+    people = [{"type": "Person", "name": n} for n in ("Ann", "Bob")]
+    companies = [{"type": "Company", "name": n} for n in ("Acme", "Globex", "Initech")]
+    await graph.insert.facts({"entities": [*people, *companies]})
+
+    def link(person, company, year):
+        return {
+            "from_entity": f"person:{person}",
+            "type": "WORKS_AT",
+            "to_entity": f"company:{company}",
+            "event_time": datetime(year, 1, 1, tzinfo=timezone.utc),
+        }
+
+    batches = [
+        [link("ann", "acme", 2020)],
+        [link("ann", "initech", 2026)],
+        [link("ann", "globex", 2024), link("bob", "acme", 2022)],
+    ]
+    out = {"warnings": []}
+    for batch in batches:
+        result = await graph.insert.facts({"relations": batch})
+        out["warnings"].append([w.code for w in result.warnings])
+    out["versions"] = {}
+    for person, company in (("ann", "acme"), ("ann", "globex"), ("ann", "initech"), ("bob", "acme")):
+        rid = ids.relation_id(f"person:{person}", "WORKS_AT", f"company:{company}")
+        out["versions"][rid] = [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
+    return out
+
+
 async def all_evidence(list_fn, oid):
     """Read every page of an entity's or relation's evidence, two items at a time.
 
@@ -388,10 +441,14 @@ async def main():
         return
     store_name, ns = sys.argv[2], sys.argv[3]
     kuzu_path = sys.argv[4] if len(sys.argv) > 4 else None
-    graph = SelfGraph(store=STORES[store_name](kuzu_path), namespace=ns)
+    options = {"schema": SUPERSEDE_SCHEMA, "contradiction": "supersede"} if cmd == "supersede" else {}
+    graph = SelfGraph(store=STORES[store_name](kuzu_path), namespace=ns, **options)
     try:
         await graph.initialize()
-        result = await write(graph) if cmd == "write" else await dump(graph, ns)
+        if cmd == "supersede":
+            result = await supersede(graph)
+        else:
+            result = await write(graph) if cmd == "write" else await dump(graph, ns)
     finally:
         await graph.close()
     json.dump(result, sys.stdout, sort_keys=True, ensure_ascii=False)
