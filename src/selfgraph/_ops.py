@@ -393,6 +393,30 @@ def _canon_props(props: Mapping[str, Any] | None) -> dict[str, Any]:
     return _loads(_dumps(dict(props)), {})
 
 
+def _json_equal(left: Any, right: Any) -> bool:
+    """Compare stored JSON values, keeping booleans distinct from numbers at every depth.
+
+    @param left (Any): the first JSON value.
+    @param right (Any): the second JSON value.
+    @return (bool): whether the two values are equal.
+    """
+    if left is right:
+        return True
+    if isinstance(left, dict):
+        return (
+            isinstance(right, dict)
+            and left.keys() == right.keys()
+            and all(_json_equal(v, right[k]) for k, v in left.items())
+        )
+    if isinstance(left, list):
+        return (
+            isinstance(right, list)
+            and len(left) == len(right)
+            and all(_json_equal(a, b) for a, b in zip(left, right, strict=True))
+        )
+    return isinstance(left, bool) == isinstance(right, bool) and left == right
+
+
 def _merge_props(
     base: Mapping[str, Any] | None, changes: Mapping[str, Any] | None, removed: Iterable[str] = ()
 ) -> dict[str, Any]:
@@ -987,7 +1011,7 @@ async def upsert_entities(
                 etype == prev.type
                 and merged_aliases == prev.aliases
                 and merged_external == prev.external_ids
-                and merged_properties == prev.properties
+                and _json_equal(merged_properties, prev.properties)
                 and sources == prev.source_count
             ):
                 out.append(prev)
@@ -1156,7 +1180,7 @@ async def update_entity(
         and new_name == existing.name
         and aliases == existing.aliases
         and external_ids == existing.external_ids
-        and properties == existing.properties
+        and _json_equal(properties, existing.properties)
     ):
         return existing
     props = encode_entity_props(
@@ -2005,7 +2029,11 @@ async def _contradiction_check(
                     _keep_newest(found, edge)
     current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
     history = [
-        _relation_of(e) for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")
+        _relation_of(e)
+        for e in found.values()
+        if not e["props"]["is_current"]
+        and e["props"].get("invalidated_at")
+        and not (e["props"].get("invalidated_by") or "").startswith("sv:")
     ]
     return Contradictions(caps, contradiction, current, history), found
 
@@ -2161,7 +2189,9 @@ async def upsert_relations(
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
             reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
-            unchanged = prev.properties == merged_properties and to_iso(prev.event_time) == to_iso(event_time)
+            unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
+                event_time
+            )
             if unchanged and not reassert:
                 write = sources != prev.source_count
                 props = {**edge["props"], "source_count": sources}
@@ -2378,7 +2408,7 @@ async def update_relation(
     records, gained = await _plan_evidence(runner, ns, [(rid, ev) for ev in evidence or []], new_targets=set())
     sources = current.source_count + gained.get(rid, 0)
 
-    if new_props == current.properties and to_iso(new_event_time) == to_iso(current.event_time):
+    if _json_equal(new_props, current.properties) and to_iso(new_event_time) == to_iso(current.event_time):
         if sources != current.source_count:
             await runner.update_current_edge(ns, rid, {"source_count": sources})
             current.source_count = sources
@@ -2883,7 +2913,7 @@ async def upsert_preference(
         current is not None
         and current.strength == strength
         and current.about_entity == about_entity
-        and current.properties == merged_props
+        and _json_equal(current.properties, merged_props)
         and to_iso(current.event_time) == to_iso(event_time)
     ):
         return current
@@ -3003,7 +3033,7 @@ async def update_preference(
     if (
         new_strength == current.strength
         and new_about == current.about_entity
-        and new_props == current.properties
+        and _json_equal(new_props, current.properties)
         and to_iso(new_event_time) == to_iso(current.event_time)
     ):
         return current
@@ -3180,6 +3210,33 @@ async def _resolve_steps(runner: Any, ns: str, step_rel_ids: list[str]) -> list[
     return steps
 
 
+async def _trace_links_intact(runner: Any, ns: str, trace: DecisionTrace) -> bool:
+    """Report whether a stored trace has exactly the links its fields name: actor, outcome, alternatives, step ends.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param trace (DecisionTrace): the stored trace, with its steps.
+    @return (bool): True when no link is missing, extra, or repeated.
+    """
+    made = await _edges_into(runner, ns, L_ENTITY, L_TRACE, "to_in", [trace.id], type=R_MADE_DECISION)
+    if sorted(e["from_id"] for e in made) != ([] if trace.actor_entity is None else [trace.actor_entity]):
+        return False
+    named = [(R_CONSIDERED, alt) for alt in trace.alternative_entities]
+    if trace.outcome_entity is not None:
+        named.append((R_RESULTED_IN, trace.outcome_entity))
+    out = await _edges_into(runner, ns, L_TRACE, L_ENTITY, "from_in", [trace.id])
+    if sorted((e["type"], e["to_id"]) for e in out) != sorted(named):
+        return False
+    sids = [_ids.step_id(trace.id, step.order) for step in trace.steps]
+    ends = await _edges_into(runner, ns, L_STEP, L_ENTITY, "from_in", sids) if sids else []
+    expected = [
+        (kind, sid, end)
+        for sid, s in zip(sids, trace.steps, strict=True)
+        for kind, end in ((R_FROM, s.from_entity), (R_TO, s.to_entity))
+    ]
+    return sorted((e["type"], e["from_id"], e["to_id"]) for e in ends) == sorted(expected)
+
+
 async def upsert_trace(
     runner: Any,
     ns: str,
@@ -3245,6 +3302,7 @@ async def upsert_trace(
         and list(existing.alternative_entities) == alternative_entities
         and to_iso(existing.event_time) == to_iso(event_time)
         and [s.relation_id for s in existing.steps] == [s.relation_id for s in steps]
+        and await _trace_links_intact(runner, ns, existing)
     ):
         return existing
     made_at = existing.created_at if existing is not None else created_at

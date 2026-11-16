@@ -6653,8 +6653,7 @@
     {
      "type": "WORKS_AT",
      "aliases": [
-      "employed by",
-      "CEO_OF"
+      "employed by"
      ],
      "from": {
       "max_count": 1
@@ -6676,10 +6675,7 @@
      }
     },
     {
-     "type": "KNOWS",
-     "aliases": [
-      "meets"
-     ]
+     "type": "KNOWS"
     },
     {
      "type": "MEETS"
@@ -6691,8 +6687,7 @@
     "WORKS_AT",
     [
      "WORKS_AT",
-     "EMPLOYED_BY",
-     "CEO_OF"
+     "EMPLOYED_BY"
     ],
     [
      [
@@ -6705,8 +6700,7 @@
     "WORKS_AT",
     [
      "WORKS_AT",
-     "EMPLOYED_BY",
-     "CEO_OF"
+     "EMPLOYED_BY"
     ],
     [
      [

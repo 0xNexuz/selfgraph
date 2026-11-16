@@ -192,7 +192,7 @@ def fold_properties(survivor: Relation, duplicates: list[Relation]) -> tuple[dic
         for key, value in rel.properties.items():
             if key not in merged:
                 merged[key] = value
-            elif merged[key] != value:
+            elif not _ops._json_equal(merged[key], value):
                 conflicts.setdefault(rel.id, []).append(key)
     return merged, {rid: sorted(keys) for rid, keys in conflicts.items()}
 
