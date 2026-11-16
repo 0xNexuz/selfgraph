@@ -844,21 +844,21 @@ def _assemble(
     """
     lines: list[str] = []
     first: list[str] = []
-    used = 0
+    context = ""
     full = False
 
     def add(line: str, cap: int) -> bool:
-        nonlocal used, full
+        nonlocal context, full
         if not first:
             first.append(line)
         if full:
             return False
-        cost = count_tokens(line)
-        if used + cost > cap:
+        candidate = f"{context}\n{line}" if lines else line
+        if count_tokens(candidate) > cap:
             full = cap >= budget_tokens
             return False
         lines.append(line)
-        used += cost
+        context = candidate
         return True
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100
@@ -909,7 +909,7 @@ def _assemble(
         if not add(f"{e.name} [{e.type}]", budget_tokens):
             break
 
-    return "\n".join(lines) if lines or not first else _truncate(first[0], budget_tokens)
+    return context if lines or not first else _truncate(first[0], budget_tokens)
 
 
 def _truncate(text: str, budget: int) -> str:

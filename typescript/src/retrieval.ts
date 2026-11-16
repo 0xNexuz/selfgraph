@@ -860,18 +860,18 @@ function assemble(
   const nameOf = (id: string): string => names.get(id) ?? id;
   const lines: string[] = [];
   let first: string | null = null;
-  let used = 0;
+  let context = "";
   let full = false;
   const add = (line: string, cap: number): boolean => {
     first ??= line;
     if (full) return false;
-    const cost = countTokens(line);
-    if (used + cost > cap) {
+    const candidate = lines.length ? `${context}\n${line}` : line;
+    if (countTokens(candidate) > cap) {
       full = cap >= budgetTokens;
       return false;
     }
     lines.push(line);
-    used += cost;
+    context = candidate;
     return true;
   };
 
@@ -917,7 +917,7 @@ function assemble(
     if (!add(`${e.name} [${e.type}]`, budgetTokens)) break;
   }
 
-  return lines.length || first === null ? lines.join("\n") : truncate(first, budgetTokens, countTokens);
+  return lines.length || first === null ? context : truncate(first, budgetTokens, countTokens);
 }
 
 /**
