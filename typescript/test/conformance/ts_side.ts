@@ -964,6 +964,20 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
     mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
   ];
+  const batchNames = new SelfGraph(graph.store, { namespace: `${graph.namespace}_batch_names`, resolver: "default" });
+  const mergedNames = await batchNames.insert.facts({
+    entities: [
+      { type: "Thing", name: "Bob", aliases: ["Robert"] },
+      { type: "Person", name: "Robert" },
+    ],
+  });
+  const storedName = (await batchNames.entities.get("person:robert"))!;
+  const restoredNames = await batchNames.entities.unmerge(mergedNames.merges[0]!.id);
+  out.batch_survivor_name = [
+    [storedName.id, storedName.name, storedName.aliases],
+    [restoredNames.survivor!.name, restoredNames.survivor!.aliases],
+    [restoredNames.entity.id, restoredNames.entity.name, restoredNames.entity.aliases],
+  ];
   const replacedSrc = new SelfGraph(graph.store, {
     namespace: `${graph.namespace}_replace_src`,
     extraction: "regex",
