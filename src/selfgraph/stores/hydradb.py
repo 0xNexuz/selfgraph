@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -42,6 +43,7 @@ _PROTOCOL_MARKERS = ("protocol version", "unsupported protocol")
 _OTHER_ENGINE_MARKERS = (*_PROTOCOL_MARKERS, "neo.clienterror.database.databasenotfound", "memgraph")
 _OTHER_ENGINE_HINT = f"; if this is Neo4j or Memgraph, {OTHER_ENGINE_HINT}"
 _NO_TOKEN = f"HydraDB needs a token: {TOKEN_HINT}"
+_LABEL_KEY = re.compile(r"[A-Za-z0-9_.-]+")
 
 
 def _transient(lowered: str) -> bool:
@@ -205,6 +207,15 @@ def _label_key(label: str) -> int:
     @return (int): the key.
     """
     return _sk("", f"\x00label\x00{label}")
+
+
+def _engine_label(label: str | None) -> str | None:
+    """The label as HydraDB can store it, or None when the engine rejects it as a label key.
+
+    @param label (str | None): the label to add or remove, such as an entity type.
+    @return (str | None): the label, or None when it is missing or not a valid HydraDB label key.
+    """
+    return label if label is not None and _LABEL_KEY.fullmatch(label) else None
 
 
 class HydraDBStore(AutoCommitStore):
@@ -454,6 +465,7 @@ class HydraDBStore(AutoCommitStore):
         @param extra_label (str | None): an additional label to add to every node.
         @return (None): nothing.
         """
+        extra_label = _engine_label(extra_label)
         marks = [_label_key(label), _label_key(extra_label)] if extra_label is not None else [_label_key(label)]
         for batch in _by_columns(rows):
             ids = [r["id"] for r in batch]
@@ -522,10 +534,10 @@ class HydraDBStore(AutoCommitStore):
             await self._run(f"MATCH (k:{_KEY}) WHERE k.eid IN $iids DETACH DELETE k", {"iids": batch})
 
     async def remove_node_label(self, ns: str, label: str, id: str, drop_label: str) -> None:
-        await self._run(
-            f"MATCH (n:{label} {{id: $iid}}) REMOVE n:{quote_label(drop_label)}",
-            {"iid": _sk(ns, id)},
-        )
+        quoted = quote_label(drop_label)
+        if _engine_label(drop_label) is None:
+            return
+        await self._run(f"MATCH (n:{label} {{id: $iid}}) REMOVE n:{quoted}", {"iid": _sk(ns, id)})
 
     async def match_nodes(
         self,
