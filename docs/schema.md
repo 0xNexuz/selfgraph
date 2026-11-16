@@ -357,10 +357,12 @@ Within the mapped subset above, a round trip is lossless. Outside it:
 - Import drops what SelfGraph does not model: `UNIQUENESS` constraints, the
   uniqueness half of `KEY`, the `additional_*` flags, indexes, and any other key.
 - Export warns about `name`, `version`, `parent`, cardinality, `json`
-  properties, and an endpoint constrained on one side only.
+  properties, `synonyms`, `mappings`, `definitions`, the `certified` flag, and
+  an endpoint constrained on one side only.
 - Neo4j to SelfGraph to Neo4j turns `DATE` and `LOCAL_DATETIME` into
   `ZONED_DATETIME`.
-- SelfGraph to Neo4j to SelfGraph loses `parent`, `min_count`, and `max_count`.
+- SelfGraph to Neo4j to SelfGraph loses `parent`, `min_count`, `max_count`,
+  `synonyms`, `mappings`, `definitions`, and each type's `certified` flag.
 
 Each direction names every loss in one warning on the `selfgraph` logger. The
 CLI and TypeScript print it on stderr.

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -149,10 +150,31 @@ def unknown_key_error(kind, value):
     return "no error"
 
 
+def neo4j_export_warnings():
+    """Export a schema holding every field the Neo4j ontology cannot carry, and return what it logs.
+
+    @return (str): the logged warning lines joined by newlines, empty when the export logs nothing.
+    """
+    lines: list[str] = []
+
+    class _Sink(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            lines.append(record.getMessage())
+
+    sink = _Sink()
+    logger = logging.getLogger("selfgraph")
+    logger.addHandler(sink)
+    try:
+        Schema.model_validate(NEO4J_LOSS_SPEC).to_neo4j_ontology()
+    finally:
+        logger.removeHandler(sink)
+    return "\n".join(lines)
+
+
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, and one message per unknown-key case.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, and the fields the Neo4j export drops.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -167,6 +189,7 @@ def schema_warnings():
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
+        "neo4j_dropped": neo4j_export_warnings(),
         "terms": [
             sorted(expand_tokens(_tokens(q), terms, _tokens))
             for terms in [Schema.model_validate(TERMS_SPEC)]
@@ -266,6 +289,32 @@ FACTS = {
 }
 
 TEXT = "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京."
+
+
+NEO4J_LOSS_SPEC = {
+    "name": "conformance",
+    "entities": [
+        {
+            "name": "Person",
+            "aliases": ["Human"],
+            "synonyms": ["individual"],
+            "certified": True,
+            "mappings": [{"source": "crm", "table": "users"}],
+            "definitions": [{"name": "seniority", "expression": "count(Job)"}],
+        },
+        {"name": "Org"},
+        {"name": "Company", "parent": "Org"},
+    ],
+    "relations": [
+        {
+            "type": "OWNS",
+            "synonyms": ["holds"],
+            "certified": True,
+            "from": {"types": ["Person"]},
+            "to": {"types": ["Company"]},
+        }
+    ],
+}
 
 
 async def write(graph):
