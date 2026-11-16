@@ -1,7 +1,7 @@
 import pytest
 from helpers import create_entities, fresh_graph, new_graph, run, skip_on_generic
 
-from selfgraph import ConflictError, NotFoundError, ValidationError
+from selfgraph import ConflictError, NotFoundError, ValidationError, ids
 from selfgraph._serde import L_ENTITY, L_STEP, L_TRACE
 
 
@@ -109,19 +109,15 @@ def test_delete_trace_keeps_relations():
 def trace_links(g, tid):
     made = run(g.store.match_edges(g.namespace, from_label=L_ENTITY, to_label=L_TRACE, to_in=[tid]))
     out = run(g.store.match_edges(g.namespace, from_label=L_TRACE, to_label=L_ENTITY, from_in=[tid]))
-    ends = run(g.store.match_edges(g.namespace, from_label=L_STEP, to_label=L_ENTITY, from_in=[f"{tid}:step:0"]))
+    ends = run(g.store.match_edges(g.namespace, from_label=L_STEP, to_label=L_ENTITY, from_in=[ids.step_id(tid, 0)]))
     return sorted((e["type"], e["from_id"], e["to_id"]) for e in made + out + ends)
 
 
 @pytest.mark.parametrize(
     ("with_step", "lost", "extra"),
     [
-        (False, [(L_TRACE, "MADE_DECISION")], []),
-        (True, [(L_TRACE, "MADE_DECISION")], []),
-        (True, [(L_TRACE, "RESULTED_IN"), (L_TRACE, "CONSIDERED")], []),
-        (True, [(L_STEP, "FROM"), (L_STEP, "TO")], []),
-        (True, [], [("CONSIDERED", "company:beta")]),
-        (True, [], [("CONSIDERED", "person:ann")]),
+        (False, [(L_TRACE, "MADE_DECISION"), (L_TRACE, "RESULTED_IN"), (L_TRACE, "CONSIDERED")], []),
+        (True, [(L_STEP, "FROM"), (L_STEP, "TO")], [("CONSIDERED", "company:beta"), ("CONSIDERED", "person:ann")]),
     ],
 )
 def test_reinserting_a_decision_repairs_links_a_partial_write_left_wrong(with_step, lost, extra):
@@ -140,7 +136,7 @@ def test_reinserting_a_decision_repairs_links_a_partial_write_left_wrong(with_st
     whole = trace_links(g, "decision:pick")
     assert len(whole) == (5 if with_step else 3)
     for label, rtype in lost:
-        node = "decision:pick:step:0" if label == L_STEP else "decision:pick"
+        node = ids.step_id("decision:pick", 0) if label == L_STEP else "decision:pick"
         run(g.store.delete_edges_touching_by_type(g.namespace, label, node, rtype))
     if extra:
         rows = [(rtype, "decision:pick", to, {"ns": g.namespace}) for rtype, to in extra]

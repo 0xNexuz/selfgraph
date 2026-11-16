@@ -357,6 +357,27 @@ async def write(graph):
             }
         )
     )
+    step = ids.step_id(dec, 0)
+    for label, node, rtype in [
+        (_serde.L_STEP, step, "FROM"),
+        (_serde.L_STEP, step, "TO"),
+    ]:
+        await graph.store.delete_edges_touching_by_type(graph.namespace, label, node, rtype)
+    await graph.insert.facts({"decisions": [restated]})
+    links = []
+    for source, target, filters in [
+        (_serde.L_ENTITY, _serde.L_TRACE, {"to_in": [dec]}),
+        (_serde.L_TRACE, _serde.L_ENTITY, {"from_in": [dec]}),
+        (_serde.L_STEP, _serde.L_ENTITY, {"from_in": [step]}),
+    ]:
+        links.extend(await graph.store.match_edges(graph.namespace, from_label=source, to_label=target, **filters))
+    repaired = await graph.decisions.get(dec)
+    await graph.insert.facts({"decisions": [restated]})
+    retried = await graph.decisions.get(dec)
+    out["dec_retry"] = {
+        "links": sorted([e["type"], e["from_id"], e["to_id"]] for e in links),
+        "unchanged": retried.updated_at == repaired.updated_at,
+    }
     out["ent_update"] = to_jsonable(
         await graph.entities.update("company:acme", aliases=["ACME", "Acme Co"], properties={"hq": "Paris", "n": 3})
     )

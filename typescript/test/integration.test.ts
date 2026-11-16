@@ -430,11 +430,10 @@ function suite(spec: StoreSpec) {
   });
 
   it.each([
-    [false, [["DecisionTrace", "MADE_DECISION"]], []],
-    [true, [["DecisionTrace", "MADE_DECISION"]], []],
     [
-      true,
+      false,
       [
+        ["DecisionTrace", "MADE_DECISION"],
         ["DecisionTrace", "RESULTED_IN"],
         ["DecisionTrace", "CONSIDERED"],
       ],
@@ -446,10 +445,11 @@ function suite(spec: StoreSpec) {
         ["DecisionStep", "FROM"],
         ["DecisionStep", "TO"],
       ],
-      [],
+      [
+        ["CONSIDERED", "company:beta"],
+        ["CONSIDERED", "person:ann"],
+      ],
     ],
-    [true, [], [["CONSIDERED", "company:beta"]]],
-    [true, [], [["CONSIDERED", "person:ann"]]],
   ] as const)(
     "reinserting a decision repairs links a partial write left wrong (%j, %j, %j)",
     async (withStep, lost, extra) => {
@@ -491,7 +491,7 @@ function suite(spec: StoreSpec) {
         const ends = await g.store.matchEdges(ns, {
           from_label: "DecisionStep",
           to_label: "Entity",
-          from_in: ["decision:pick:step:0"],
+          from_in: [ids.stepId("decision:pick", 0)],
         });
         return [...made, ...out, ...ends].map((e) => [e.type, e.from_id, e.to_id].join(" ")).sort();
       };
@@ -499,7 +499,7 @@ function suite(spec: StoreSpec) {
       const whole = await links();
       expect(whole).toHaveLength(withStep ? 5 : 3);
       for (const [label, type] of lost) {
-        const node = label === "DecisionStep" ? "decision:pick:step:0" : "decision:pick";
+        const node = label === "DecisionStep" ? ids.stepId("decision:pick", 0) : "decision:pick";
         await g.store.deleteEdgesTouchingByType(g.namespace, label, node, type);
       }
       if (extra.length) {
