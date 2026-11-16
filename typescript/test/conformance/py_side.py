@@ -347,7 +347,6 @@ FACTS = {
             "value_entity": "database:hydradb",
             "strength": 0.9,
             "about_entity": "company:acme",
-            "event_time": "2024-06-15T10:30:00Z",
         },
         {
             "subject_entity": "person:jane-doe",
@@ -412,6 +411,8 @@ async def write(graph):
     )
     pref = ids.preference_id("person:jane-doe", "preference", "database", "database:hydradb")
     out["pref_update"] = to_jsonable(await graph.preferences.update(pref, strength=0.25))
+    await graph.store.update_current_edge(graph.namespace, pref, {"event_time": "2024-02-29T23:59:59Z"})
+    out["stored_z"] = to_jsonable((await graph.preferences.versions(pref))[0])["event_time"]
     dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
     out["dec_update"] = to_jsonable(await graph.decisions.update(dec, status="active", rationale=None))
     restated = {"title": "Pick HydraDB", "actor_entity": "person:jane-doe"}
