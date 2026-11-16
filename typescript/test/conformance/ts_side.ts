@@ -656,6 +656,48 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     preferences: undone.preferences.map((p) => p.id),
     decisions: undone.decisions.map((d) => d.id),
   };
+  const stepsGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:unmerge-steps`,
+    resolver: "fuzzy",
+  });
+  await stepsGraph.initialize();
+  const ibm = ids.entityId("Company", "International Business Machines");
+  const bigBlue = ids.entityId("Company", "Big Blue");
+  const bob = ids.entityId("Person", "Bob");
+  const loop1 = ids.relationId(bigBlue, "OWNS", ibm);
+  const loop2 = ids.relationId(bigBlue, "PARENT_OF", ibm);
+  const bobRel = ids.relationId(bob, "WORKS_AT", ibm);
+  const mergedSteps = await stepsGraph.insert.facts({
+    entities: [
+      { type: "Company", name: "International Business Machines", external_ids: { ticker: "IBM" } },
+      { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+      { type: "Person", name: "Robert", aliases: ["Bob"] },
+      { type: "Person", name: "Bob" },
+    ],
+    relations: [
+      { from_entity: bigBlue, type: "OWNS", to_entity: ibm },
+      { from_entity: bigBlue, type: "PARENT_OF", to_entity: ibm },
+      { from_entity: bob, type: "WORKS_AT", to_entity: ibm },
+    ],
+    decisions: [{ title: "acquisition", steps: [loop1, loop2, bobRel] }],
+  });
+  const mergeBB = mergedSteps.merges.find((m) => m.absorbed_id === bigBlue)!;
+  const mergeBob = mergedSteps.merges.find((m) => m.absorbed_id === bob)!;
+  const [decision] = mergedSteps.decisions;
+  const decisionSteps = async (did: string): Promise<string[]> =>
+    (await stepsGraph.decisions.get(did))!.steps.map((s) => s.relation_id);
+  const afterMerge = await decisionSteps(decision!.id);
+  const afterBbMerge = await stepsGraph.entities.unmerge(mergeBB.id);
+  const afterBb = await decisionSteps(decision!.id);
+  const afterBobMerge = await stepsGraph.entities.unmerge(mergeBob.id);
+  const afterBob = await decisionSteps(decision!.id);
+  out.unmerge_decision_steps = {
+    after_merge: afterMerge,
+    after_bb: afterBb,
+    after_bob: afterBob,
+    returned_after_bb: afterBbMerge.decisions[0]!.steps.map((s) => s.relation_id),
+    returned_after_bob: afterBobMerge.decisions[0]!.steps.map((s) => s.relation_id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",

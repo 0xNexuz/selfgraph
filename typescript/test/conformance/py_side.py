@@ -664,6 +664,49 @@ async def write(graph):
         "preferences": [p.id for p in undone.preferences],
         "decisions": [d.id for d in undone.decisions],
     }
+    steps_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:unmerge-steps", resolver="fuzzy")
+    await steps_graph.initialize()
+    ibm = ids.entity_id("Company", "International Business Machines")
+    big_blue = ids.entity_id("Company", "Big Blue")
+    bob = ids.entity_id("Person", "Bob")
+    loop1 = ids.relation_id(big_blue, "OWNS", ibm)
+    loop2 = ids.relation_id(big_blue, "PARENT_OF", ibm)
+    bob_rel = ids.relation_id(bob, "WORKS_AT", ibm)
+    merged_steps = await steps_graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Company", "name": "International Business Machines", "external_ids": {"ticker": "IBM"}},
+                {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
+                {"type": "Person", "name": "Robert", "aliases": ["Bob"]},
+                {"type": "Person", "name": "Bob"},
+            ],
+            "relations": [
+                {"from_entity": big_blue, "type": "OWNS", "to_entity": ibm},
+                {"from_entity": big_blue, "type": "PARENT_OF", "to_entity": ibm},
+                {"from_entity": bob, "type": "WORKS_AT", "to_entity": ibm},
+            ],
+            "decisions": [{"title": "acquisition", "steps": [loop1, loop2, bob_rel]}],
+        }
+    )
+    merge_bb = next(m for m in merged_steps.merges if m.absorbed_id == big_blue)
+    merge_bob = next(m for m in merged_steps.merges if m.absorbed_id == bob)
+    [decision] = merged_steps.decisions
+
+    async def decision_steps(did):
+        return [s.relation_id for s in (await steps_graph.decisions.get(did)).steps]
+
+    after_merge = await decision_steps(decision.id)
+    after_bb_merge = await steps_graph.entities.unmerge(merge_bb.id)
+    after_bb = await decision_steps(decision.id)
+    after_bob_merge = await steps_graph.entities.unmerge(merge_bob.id)
+    after_bob = await decision_steps(decision.id)
+    out["unmerge_decision_steps"] = {
+        "after_merge": after_merge,
+        "after_bb": after_bb,
+        "after_bob": after_bob,
+        "returned_after_bb": [s.relation_id for s in after_bb_merge.decisions[0].steps],
+        "returned_after_bob": [s.relation_id for s in after_bob_merge.decisions[0].steps],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",
