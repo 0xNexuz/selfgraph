@@ -998,7 +998,12 @@ export async function retrieve(
   const skipHubs = options.skip_hubs ?? false;
   requireBool("skip_hubs", skipHubs);
   const asOf = ops.parseAsOf(options.as_of, options.known_at);
-  const { depth, k, max_nodes: maxNodes, budget_tokens: budgetTokens } = { ...RETRIEVE_DEFAULTS, ...options };
+  const {
+    depth = RETRIEVE_DEFAULTS.depth,
+    k = RETRIEVE_DEFAULTS.k,
+    max_nodes: maxNodes = RETRIEVE_DEFAULTS.max_nodes,
+    budget_tokens: budgetTokens = RETRIEVE_DEFAULTS.budget_tokens,
+  } = options;
   const strategy = (options.strategy ?? graph.tiers.strategy).toLowerCase();
   if (!(STRATEGIES as readonly string[]).includes(strategy)) {
     throw new ValidationError(`strategy must be one of ${STRATEGIES.join(", ")}, got ${pyRepr(strategy)}`);
