@@ -920,6 +920,17 @@ async def write(graph):
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
     ]
+    batch_names = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_batch_names", resolver="default")
+    merged_names = await batch_names.insert.facts(
+        {"entities": [{"type": "Thing", "name": "Bob", "aliases": ["Robert"]}, {"type": "Person", "name": "Robert"}]}
+    )
+    stored_name = await batch_names.entities.get("person:robert")
+    restored_names = await batch_names.entities.unmerge(merged_names.merges[0].id)
+    out["batch_survivor_name"] = [
+        [stored_name.id, stored_name.name, stored_name.aliases],
+        [restored_names.survivor.name, restored_names.survivor.aliases],
+        [restored_names.entity.id, restored_names.entity.name, restored_names.entity.aliases],
+    ]
     replaced_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_src", extraction="regex")
     rv1 = await replaced_src.insert.text("Alice works at Acme. Alice knows Bob.", source_id="hr")
     await replaced_src.relations.certify(rv1.relations[1].id, by="hr")

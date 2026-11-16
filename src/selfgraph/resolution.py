@@ -764,14 +764,14 @@ def _redirect(ent: EntityInput, target: Entity) -> EntityInput:
 
     @param ent (EntityInput): the candidate, already folded into the target view.
     @param target (Entity): the target view, whose values win for every key the candidate shares with it.
-    @return (EntityInput): an input with the target's id and type, the candidate's surface forms, and the target's
-        values for the candidate's external id and property keys.
+    @return (EntityInput): an input with the target's id, name, and type, the candidate's surface forms as aliases,
+        and the target's values for the candidate's external id and property keys.
     """
     return EntityInput(
         id=target.id,
         type=target.type,
-        name=ent.name,
-        aliases=list(ent.aliases),
+        name=target.name,
+        aliases=[*ent.aliases, ent.name],
         external_ids={k: target.external_ids[k] for k in ent.external_ids},
         properties={k: target.properties[k] for k in ent.properties if k in target.properties},
     )

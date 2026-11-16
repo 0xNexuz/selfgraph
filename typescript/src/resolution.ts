@@ -692,7 +692,7 @@ function absorbInto(view: Entity, ent: ParsedEntityInput, ename: string, merge =
  *
  * @param ent (ParsedEntityInput): the candidate, already folded into the target view.
  * @param target (Entity): the target view, whose values win for every key the candidate shares with it.
- * @return (ParsedEntityInput): an input with the target's id and type, the candidate's surface forms, and the target's values for the candidate's external id and property keys.
+ * @return (ParsedEntityInput): an input with the target's id, name, and type, the candidate's surface forms as aliases, and the target's values for the candidate's external id and property keys.
  */
 function redirect(ent: ParsedEntityInput, target: Entity): ParsedEntityInput {
   return parseOrThrow(
@@ -700,8 +700,8 @@ function redirect(ent: ParsedEntityInput, target: Entity): ParsedEntityInput {
     {
       id: target.id,
       type: target.type,
-      name: ent.name,
-      aliases: [...ent.aliases],
+      name: target.name,
+      aliases: [...ent.aliases, ent.name],
       external_ids: Object.fromEntries(Object.keys(ent.external_ids).map((k) => [k, target.external_ids[k]!])),
       properties: Object.fromEntries(
         Object.keys(ent.properties)
