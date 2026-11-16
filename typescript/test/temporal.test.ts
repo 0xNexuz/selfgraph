@@ -543,7 +543,7 @@ function suite(spec: StoreSpec): void {
     expect(await counts({ known_at: learned })).toEqual([1]);
   });
 
-  it("known_at keeps entity seed order and source counts", async () => {
+  it("known_at uses historical entity source counts for scoring and results", async () => {
     const g = open();
     const east = { type: "Project", name: "Orchid East" };
     const west = { type: "Project", name: "Orchid West" };

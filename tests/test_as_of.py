@@ -310,7 +310,7 @@ def test_known_at_counts_only_the_sources_recorded_by_then():
     assert [r.source_count for r in run(g.retrieve("Ann", known_at=learned)).subgraph.relations] == [1]
 
 
-def test_known_at_keeps_entity_seed_order_and_source_counts():
+def test_known_at_uses_historical_entity_source_counts_for_scoring_and_results():
     g = fresh_graph("asof")
     east, west = ({"type": "Project", "name": name} for name in ("Orchid East", "Orchid West"))
     run(g.insert.facts({"entities": [east, west]}, source_id="initial"))
