@@ -175,7 +175,7 @@ export class Preferences extends Resource {
       ops.updatePreference(tx, ns, id, {
         strength: options.strength,
         properties: options.properties ?? null,
-        remove_properties: [...(options.remove_properties ?? [])],
+        remove_properties: options.remove_properties === undefined ? [] : options.remove_properties,
         event_time: eventTime,
         clear: options.clear ?? [],
       }),

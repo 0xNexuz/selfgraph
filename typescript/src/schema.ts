@@ -251,6 +251,13 @@ function schemaProblem(schema: z.output<typeof SchemaObject>): [Array<string | n
   const index = entityIndex(schema);
   for (const [i, entity] of schema.entities.entries()) {
     if (entity.parent == null) continue;
+    const given = entity.parent;
+    const resolved = canonicalEntityType(given, schema);
+    if (!index.has(resolved)) return [["entities", i, "parent"], `unknown type ${pyRepr(given)}`];
+    entity.parent = resolved;
+  }
+  for (const [i, entity] of schema.entities.entries()) {
+    if (entity.parent == null) continue;
     let current = index.get(entity.parent);
     if (current === undefined) return [["entities", i, "parent"], `unknown type ${pyRepr(entity.parent)}`];
     const chain = [entity.name];

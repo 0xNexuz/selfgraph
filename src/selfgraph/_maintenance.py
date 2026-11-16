@@ -236,12 +236,16 @@ async def merge_relations(runner: Any, ns: str, survivor: str, duplicates: list[
         event_time=None if same_time else first,
         evidence=evidence,
     )
+    gone = [
+        {"props": {"id": rel.id}, "type": rel.type, "from_id": rel.from_entity, "to_id": rel.to_entity} for rel in found
+    ]
     found = [rel.id for rel in found]
     tids = await _ops._traces_touching_relations(runner, ns, found)
     await _ops._repoint_steps(runner, ns, tids, dict.fromkeys(found, survivor))
     for rid in found:
         counts["deleted_relation_versions"] += await runner.delete_edges(ns, rid)
         await _ops._delete_evidence(runner, ns, rid)
+    await _ops.repoint_retired(runner, ns, gone, survivor)
     return counts
 
 

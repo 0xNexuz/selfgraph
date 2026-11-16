@@ -18,7 +18,15 @@ import {
   type UpsertNodeOptions,
 } from "../protocols.js";
 import { checkOptions, keysOf } from "../validate.js";
-import { AutoCommitStore, quoteLabel, sortedEntries, toCount, whereAfter, writeBatches } from "./cypherPrimitives.js";
+import {
+  AutoCommitStore,
+  quoteLabel,
+  requireIdentifier,
+  sortedEntries,
+  toCount,
+  whereAfter,
+  writeBatches,
+} from "./cypherPrimitives.js";
 import { docs, edgeRow, firstDoc, mergedCurrentEdge } from "./docRows.js";
 
 const SCHEMA = [
@@ -163,7 +171,7 @@ function intLiteral(n: number): number {
 function whereDocEquals(alias: string, equals: Props | null | undefined, where: string[], params: Props): void {
   sortedEntries(equals).forEach(([key, value], i) => {
     where.push(`json_extract(${alias}.doc, $k${i}) = json($v${i})`);
-    params[`k${i}`] = key;
+    params[`k${i}`] = requireIdentifier(key);
     params[`v${i}`] = jv(value);
   });
 }
@@ -183,6 +191,7 @@ function whereDocAnyOf(
   params: Props,
 ): void {
   sortedEntries(anyOf).forEach(([key, values], i) => {
+    requireIdentifier(key);
     const list = values as unknown[];
     if (list.length === 0) {
       where.push("false");
@@ -376,6 +385,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     if (options.extra_label != null) quoteLabel(options.extra_label);
+    for (const key of Object.keys(props)) requireIdentifier(key);
     await this._run("MERGE (n:N {pk:$pk}) SET n.id = $id, n.ns = $ns, n.label = $label, n.doc = $doc", {
       pk: pk(ns, id),
       id,
@@ -400,6 +410,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     if (options.extra_label != null) quoteLabel(options.extra_label);
+    for (const [, props] of rows) for (const key of Object.keys(props)) requireIdentifier(key);
     for (const [, batch] of writeBatches(
       rows.map(([id, props]) => [null, { pk: pk(ns, id), id, doc: jv(props) }] as const),
     )) {
@@ -423,6 +434,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     toLabel: string,
     rows: readonly EdgeWrite[],
   ): Promise<void> {
+    for (const [, , , props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const keyed = rows.map(([type, fromId, toId, props]) => {
       const row = {
         f: pk(ns, fromId),
@@ -492,6 +504,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   ): Promise<boolean> {
     if (!(await this.nodeExists(ns, fromLabel, fromId))) return false;
     if (!(await this.nodeExists(ns, toLabel, toId))) return false;
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const sid = props.id ?? null;
     const rev = props.revision ?? null;
     const params = {
@@ -530,6 +543,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   }
 
   async updateCurrentEdge(ns: string, id: string, props: Props): Promise<void> {
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const merged = await mergedCurrentEdge(this, ns, id, props);
     if (merged === null) return;
     await this._run(`${BY_SID} AND r.is_current = true SET r.doc = $doc, r.is_current = $isc, r.revision = $rev`, {
