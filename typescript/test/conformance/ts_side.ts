@@ -40,6 +40,23 @@ const LENIENT_EVENT_TIMES = [
   null,
 ] as const;
 
+const ISO_TIMES = [
+  "2021-03-04T10:15:00Z",
+  "2021-03-04 10:15",
+  "2021-03-04T10:15:00.5",
+  "2021-03-04T10:15:00,123456789",
+  "2021-03-04T10:15:00+0530",
+  "2021-03-04T10:15:00+05",
+  "2021-03-04T10:15:00 -05:30:15",
+  "20210304",
+  "2021-W09-4",
+  "2021-03-04T1015",
+  "2021-03-04X10:15:00",
+  "2021-03-04T10:15:00+24:00",
+  "2021-03-04T10:15:00+05:60",
+  "2021-02-29",
+];
+
 const TERMS_SPEC = {
   entities: [
     {
@@ -325,6 +342,7 @@ export function schemaWarnings(): {
   term_forms: unknown;
   terms: unknown[];
   datetime_errors: string[];
+  iso_times: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -447,6 +465,14 @@ export function schemaWarnings(): {
       try {
         parseTime(text, "event_time");
         return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
+    iso_times: ISO_TIMES.map((text) => {
+      try {
+        return jsonIso(parseTime(text, "as_of"));
       } catch (exc) {
         if (!(exc instanceof ValidationError)) throw exc;
         return exc.message;

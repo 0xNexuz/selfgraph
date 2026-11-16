@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 import pytest
 from helpers import (
@@ -224,6 +225,28 @@ def test_time_flags_share_one_parser(capsys):
     with pytest.raises(SystemExit):
         cli(g, ["relation", "create", "t:a", "KNOWS", "t:b", "--event-time", "soon"], capsys)
     assert "is not an ISO 8601 date or time" in capsys.readouterr().err
+
+
+def test_time_arguments_read_one_iso_grammar_on_every_python():
+    accepted = {
+        "2021-03-04T10:15:00,5": datetime(2021, 3, 4, 10, 15, 0, 500000, tzinfo=timezone.utc),
+        "2021-03-04T10:15:00.123456789Z": datetime(2021, 3, 4, 10, 15, 0, 123456, tzinfo=timezone.utc),
+        "2021-03-04T10:15:00+0530": datetime(2021, 3, 4, 4, 45, tzinfo=timezone.utc),
+        "2021-03-04T10:15:00+05": datetime(2021, 3, 4, 5, 15, tzinfo=timezone.utc),
+        "2021-03-04T10:15:00 -05:30:15": datetime(2021, 3, 4, 15, 45, 15, tzinfo=timezone.utc),
+    }
+    for text, want in accepted.items():
+        assert parse_time(text, "as_of") == want, text
+    rejected = ["20210304", "2021-W09-4", "2021-063", "2021-03-04T1015", "2021-03-04X10:15:00"]
+    rejected += ["2021-03-04T10:15:00+24:00", "2021-03-04T10:15:00+05:60", "2021-03-04T10:15:00\u00a0+05:30"]
+    for text in rejected:
+        with pytest.raises(ValidationError, match="is not an ISO 8601 date or time"):
+            parse_time(text, "as_of")
+    schema = {"entities": [{"name": "Company", "properties": [{"name": "founded", "type": "datetime"}]}]}
+    g = fresh_graph("iso", schema=schema, schema_mode="strict")
+    run(g.entities.create("Acme", "Company", properties={"founded": "2021-03-04T10:15:00+0530"}))
+    with pytest.raises(ValidationError):
+        run(g.entities.create("Globex", "Company", properties={"founded": "20210304"}))
 
 
 def test_schema_formats_default_to_neo4j_and_bare_schema_hints(capsys, tmp_path):

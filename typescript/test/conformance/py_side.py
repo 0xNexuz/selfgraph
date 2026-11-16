@@ -29,6 +29,23 @@ LENIENT_EVENT_TIMES = [
     None,
 ]
 
+ISO_TIMES = [
+    "2021-03-04T10:15:00Z",
+    "2021-03-04 10:15",
+    "2021-03-04T10:15:00.5",
+    "2021-03-04T10:15:00,123456789",
+    "2021-03-04T10:15:00+0530",
+    "2021-03-04T10:15:00+05",
+    "2021-03-04T10:15:00 -05:30:15",
+    "20210304",
+    "2021-W09-4",
+    "2021-03-04T1015",
+    "2021-03-04X10:15:00",
+    "2021-03-04T10:15:00+24:00",
+    "2021-03-04T10:15:00+05:60",
+    "2021-02-29",
+]
+
 TERMS_SPEC = {
     "entities": [
         {
@@ -362,6 +379,7 @@ def schema_warnings():
             for q in TERM_QUESTIONS
         ],
         "datetime_errors": datetime_errors(),
+        "iso_times": iso_times(),
         "terms_subtypes": [
             sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
             for sub_schema in [
@@ -399,6 +417,20 @@ def datetime_errors():
         except ValidationError as exc:
             errors.append(str(exc))
     return errors
+
+
+def iso_times():
+    """Parse each ISO_TIMES string as a time argument.
+
+    @return (list[str]): each time in UTC, or the validation error.
+    """
+    out = []
+    for text in ISO_TIMES:
+        try:
+            out.append(json_iso(parse_time(text, "as_of")))
+        except ValidationError as exc:
+            out.append(str(exc))
+    return out
 
 
 STORES = {

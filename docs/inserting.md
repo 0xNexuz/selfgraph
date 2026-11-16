@@ -223,6 +223,12 @@ await graph.insert.facts({
 decisions that carry none. Time arguments take a datetime or ISO 8601 text. No
 offset means UTC.
 
+Both SDKs read one ISO 8601 grammar on every Python version: `YYYY-MM-DD`,
+optionally followed by `T`, `t`, or a space and `HH`, `HH:MM`, or `HH:MM:SS` with
+a fraction after `.` or `,`, then `Z` or an offset such as `+05`, `+0530`, or
+`+05:30` below 24 hours. Basic forms such as `20210304`, week dates such as
+`2021-W09-4`, and ordinal dates are rejected.
+
 The `event_time` of each relation, preference, and decision in the facts is read
 the same way. A bare year such as `"2021"`, a number, or a boolean is rejected,
 not read as Unix seconds. A preference `strength` and an evidence `confidence`

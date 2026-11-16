@@ -565,5 +565,9 @@ describe("CLI settings", () => {
     expect(llm("openai", "meta-llama/x")?.model).toBe("meta-llama/x");
     expect(parseTime("2024-01-02", "now").toISOString()).toBe("2024-01-02T00:00:00.000Z");
     expect(() => parseTime("soon", "now")).toThrow("invalid now: 'soon' is not an ISO 8601 date or time");
+    expect(parseTime("2021-03-04T10:15:00+0530", "as_of").toISOString()).toBe("2021-03-04T04:45:00.000Z");
+    for (const text of ["2021-03-04T10:15:00+24:00", "2021-03-04T10:15:00+05:60", "2021-03-04T10:15:00\u00a0+05:30"]) {
+      expect(() => parseTime(text, "as_of"), text).toThrow("is not an ISO 8601 date or time");
+    }
   });
 });

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any, NamedTuple, TypeVar, get_args
 
@@ -29,7 +30,6 @@ from ._serde import (
     R_RESULTED_IN,
     R_TO,
     _dumps,
-    _iso_text,
     _loads,
     aware,
     child_edge_id,
@@ -102,6 +102,11 @@ DECISION_CLEARABLE = (
     "event_time",
 )
 _MAX_ID_BYTES = 1024
+_ISO_TIME = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:[Tt ]([0-9]{2})(?::([0-9]{2})(?::([0-9]{2})(?:[.,]([0-9]{1,9}))?)?)?)?"
+    r"(?:[ \t\n\r\f\v]*(Z|z|[+-][0-9]{2}(?::?[0-9]{2}(?::?[0-9]{2})?)?))?"
+)
 _PAGE = 500
 _BATCH = 1000
 
@@ -241,8 +246,37 @@ def _require_datetime(field: str, value: Any) -> None:
         raise ValidationError(f"{field} is outside the representable datetime range") from exc
 
 
+def _parse_iso(text: str) -> datetime:
+    """Parse the ISO 8601 forms both SDKs accept, with one grammar on every Python version.
+
+    The text is YYYY-MM-DD, then optionally T, t, or a space and HH, HH:MM, or HH:MM:SS with a 1 to 9 digit
+    fraction after '.' or ',', truncated to microseconds. Then optional ASCII whitespace and Z, z, or an offset of
+    +HH, +HHMM, +HH:MM, +HHMMSS, or +HH:MM:SS below 24 hours. No offset means UTC.
+
+    @param text (str): the ISO text.
+    @return (datetime): the timezone-aware datetime; raises ValueError when the text does not match or a field is
+        out of range.
+    """
+    m = _ISO_TIME.fullmatch(text)
+    if m is None:
+        raise ValueError(f"not an ISO 8601 date or time: {text!r}")
+    year, month, day, hour, minute, second, fraction, tz = m.groups()
+    offset = timezone.utc
+    if tz and tz not in ("Z", "z"):
+        digits = tz[1:].replace(":", "")
+        hours, minutes, seconds = int(digits[:2]), int(digits[2:4] or 0), int(digits[4:6] or 0)
+        if hours > 23 or minutes > 59 or seconds > 59:
+            raise ValueError(f"UTC offset out of range: {tz!r}")
+        sign = -1 if tz[0] == "-" else 1
+        offset = timezone(sign * timedelta(hours=hours, minutes=minutes, seconds=seconds))
+    micro = int(fraction[:6].ljust(6, "0")) if fraction else 0
+    return datetime(
+        int(year), int(month), int(day), int(hour or 0), int(minute or 0), int(second or 0), micro, tzinfo=offset
+    )
+
+
 def parse_time(value: Any, field: str) -> datetime | None:
-    """Accept a datetime or ISO 8601 text; a trailing Z or an offset is honored, none means UTC.
+    """Accept a datetime or ISO 8601 text in the grammar of _parse_iso; a Z or an offset is honored, none is UTC.
 
     @param value (Any): a datetime, ISO 8601 text, or None.
     @param field (str): the parameter name, for the error.
@@ -251,10 +285,9 @@ def parse_time(value: Any, field: str) -> datetime | None:
     if not isinstance(value, str):
         _require_datetime(field, value)
         return value
-    text = _iso_text(value)
     try:
-        parsed = aware(datetime.fromisoformat(text))
-    except (TypeError, ValueError) as exc:
+        parsed = _parse_iso(value)
+    except ValueError as exc:
         raise ValidationError(
             f"invalid {field}: {value!r} is not an ISO 8601 date or time (e.g. 2024-01-02T03:04:05Z)"
         ) from exc
