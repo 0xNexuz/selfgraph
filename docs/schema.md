@@ -97,6 +97,10 @@ first problem by its path:
 | A `min_count` or `max_count` with a fractional part (`2.0` is read as `2`) | `relations[0].from.max_count: expected integer` |
 | A `min_count` or `max_count` that is not a number, such as `true` or `"1"` | `relations[0].from.max_count: expected number` |
 | A `min_count` or `max_count` above 2^53 - 1, the largest integer JavaScript holds exactly | `relations[0].from.max_count: must be <= 9007199254740991` |
+| A `min_count` or `max_count` below -(2^53 - 1) | `relations[0].from.max_count: must be >= -9007199254740991` |
+
+A count outside that range is listed together with the first problem above, if any, one per line, as in
+`invalid schema:\n  relations[0].from.max_count: must be >= -9007199254740991\n  relations[0].from.max_count: must be >= 1`.
 
 Constructing `Schema(...)` or `Extraction(...)` directly raises the same
 `ValidationError`, never a raw pydantic error.

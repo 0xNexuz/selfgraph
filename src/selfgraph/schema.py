@@ -3,7 +3,9 @@ import math
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, ClassVar, Literal, get_args
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from . import _ops
 from ._serde import L_ENTITY, decode_entity
@@ -82,6 +84,10 @@ class EntityType(InputModel):
     certified: bool = False
 
 
+_COUNT_RANGE = "count_range"
+_UNBOUNDED_COUNTS = "selfgraph_unbounded_counts"
+
+
 class RelationEndpoint(InputModel):
     input_label: ClassVar[str] = "relation endpoint"
 
@@ -91,10 +97,11 @@ class RelationEndpoint(InputModel):
 
     @field_validator("min_count", "max_count", mode="before")
     @classmethod
-    def _whole_count(cls, value: Any) -> Any:
+    def _whole_count(cls, value: Any, info: ValidationInfo) -> Any:
         """Accept a safe integer count, or a float with no fractional part, with the TypeScript error text.
 
         @param value (Any): the raw count.
+        @param info (ValidationInfo): the validation context; _UNBOUNDED_COUNTS skips the safe integer range.
         @return (Any): the count as an int, or None.
         """
         if value is None:
@@ -105,10 +112,12 @@ class RelationEndpoint(InputModel):
             if not value.is_integer():
                 raise ValueError("expected integer")
             value = int(value)
+        if (info.context or {}).get(_UNBOUNDED_COUNTS):
+            return value
         if value > MAX_SAFE_INTEGER:
-            raise ValueError(f"must be <= {MAX_SAFE_INTEGER}")
+            raise PydanticCustomError(_COUNT_RANGE, f"must be <= {MAX_SAFE_INTEGER}")
         if value < -MAX_SAFE_INTEGER:
-            raise ValueError(f"must be >= {-MAX_SAFE_INTEGER}")
+            raise PydanticCustomError(_COUNT_RANGE, f"must be >= {-MAX_SAFE_INTEGER}")
         return value
 
 
@@ -134,6 +143,41 @@ class Schema(TopInputModel):
     version: str | None = None
     entities: list[EntityType] = Field(default_factory=list)
     relations: list[RelationType] = Field(default_factory=list)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _report_counts_with_consistency(cls, data: Any, handler: Any) -> Any:
+        """Report the first consistency problem after counts outside the safe integer range, as TypeScript does.
+
+        zod's range check on an integer does not stop the schema refinement, so TypeScript lists both. When every
+        field error is a count range error, this builds the schema without the range and appends its first problem.
+
+        @param data (Any): the raw schema.
+        @param handler (Any): the inner validator.
+        @return (Any): the validated schema.
+        """
+        try:
+            return handler(data)
+        except PydanticValidationError as exc:
+            errors = exc.errors()
+            if not isinstance(data, Mapping) or any(e["type"] != _COUNT_RANGE for e in errors):
+                raise
+            unbounded = {_UNBOUNDED_COUNTS: True}
+            schema = cls.model_construct(
+                entities=[EntityType.model_validate(e, context=unbounded) for e in data.get("entities") or []],
+                relations=[RelationType.model_validate(r, context=unbounded) for r in data.get("relations") or []],
+            )
+            try:
+                schema._check_consistency()
+            except ValueError as problem:
+                errors.append({"type": "value_error", "msg": str(problem), "loc": (), "input": data})
+            else:
+                raise
+            details = [
+                InitErrorDetails(type=PydanticCustomError(e["type"], str(e["msg"])), loc=e["loc"], input=e["input"])
+                for e in errors
+            ]
+            raise PydanticValidationError.from_exception_data(cls.__name__, details) from exc
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "Schema":

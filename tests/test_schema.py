@@ -296,6 +296,36 @@ def test_inconsistent_schemas_are_rejected_with_a_path(spec, message):
     assert str(direct.value) == f"invalid schema: {message}"
 
 
+@pytest.mark.parametrize(
+    ("spec", "lines"),
+    [
+        (
+            {"relations": [{"type": "R", "from": {"max_count": -(2**53)}}]},
+            ["relations[0].from.max_count: must be >= -9007199254740991", "relations[0].from.max_count: must be >= 1"],
+        ),
+        (
+            {"relations": [{"type": "R", "to": {"min_count": -1e20}}]},
+            ["relations[0].to.min_count: must be >= -9007199254740991", "relations[0].to.min_count: must be >= 0"],
+        ),
+        (
+            {"relations": [{"type": "R", "from": {"min_count": 2**53, "max_count": 5}}]},
+            [
+                "relations[0].from.min_count: must be <= 9007199254740991",
+                "relations[0].from.min_count: min_count 9007199254740992 is greater than max_count 5",
+            ],
+        ),
+    ],
+)
+def test_unsafe_counts_also_report_the_first_consistency_problem(spec, lines):
+    expected = "invalid schema:" + "".join(f"\n  {line}" for line in lines)
+    with pytest.raises(ValidationError) as err:
+        as_schema(spec)
+    assert str(err.value) == expected
+    with pytest.raises(ValidationError) as direct:
+        Schema(**spec)
+    assert str(direct.value) == expected
+
+
 def test_endpoint_counts_accept_integral_floats_and_the_largest_safe_integer():
     end = as_schema({"relations": [{"type": "R", "from": {"min_count": 1.0, "max_count": 2.0}}]}).relations[0].from_
     assert (end.min_count, end.max_count) == (1, 2)
