@@ -10,6 +10,7 @@ import {
   StoreError,
   ValidationError,
 } from "../src/index.js";
+import { jsonIso } from "../src/internal/time.js";
 import type { ContradictionMode, Schema, SchemaMode } from "../src/schema.js";
 import { captureWarnings, forEachStore, freshGraphs, type StoreSpec, worksAt } from "./helpers.js";
 
@@ -776,6 +777,72 @@ function suite(spec: StoreSpec): void {
       expect([ended!.invalidated_by, ended!.invalidated_at], JSON.stringify(batches)).toEqual([bobAcme, at(2022)]);
       expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
     }
+
+    const subms = open({ schema: spec, contradiction: "supersede" });
+    await subms.insert.facts({
+      entities,
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000100Z",
+        },
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:globex",
+          event_time: "2024-01-01T00:00:00.000300Z",
+        },
+        {
+          from_entity: "person:bob",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000200Z",
+        },
+      ],
+    });
+    const [subEnded] = await subms.relations.versions(annAcme);
+    expect([subEnded!.invalidated_by, jsonIso(subEnded!.invalidated_at!)]).toEqual([
+      bobAcme,
+      "2024-01-01T00:00:00.000200Z",
+    ]);
+
+    const lateSubms = open({ schema: spec, contradiction: "supersede" });
+    await lateSubms.insert.facts({
+      entities,
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000100Z",
+        },
+        {
+          from_entity: "person:bob",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000300Z",
+        },
+      ],
+    });
+    await lateSubms.insert.facts({
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:initech",
+          event_time: "2024-01-01T00:00:00.000200Z",
+        },
+      ],
+    });
+    const annInitech = ids.relationId("person:ann", "WORKS_AT", "company:initech");
+    const [corrected] = await lateSubms.relations.versions(annAcme);
+    expect([corrected!.revision, corrected!.invalidated_by, jsonIso(corrected!.invalidated_at!)]).toEqual([
+      2,
+      annInitech,
+      "2024-01-01T00:00:00.000200Z",
+    ]);
   });
 
   it("source-withdrawn relations stay out of supersede history", async () => {

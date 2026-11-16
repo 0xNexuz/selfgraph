@@ -1938,7 +1938,7 @@ export class Contradictions {
         const by = newer[limit - 1]![1];
         const at = this.times.get(by)!;
         if (!retired.has(old)) slots.push(old);
-        if (!retired.has(old) || at.getTime() < retired.get(old)![1].getTime()) {
+        if (!retired.has(old) || epochMicros(at) < epochMicros(retired.get(old)![1])) {
           retired.set(old, [by, at]);
           why.set(old, [key, limit, ranked.length >= limit ? ranked[limit - 1]! : by]);
         }
@@ -1949,7 +1949,10 @@ export class Contradictions {
         if (ended === undefined || newer.length < limit) continue;
         const by = newer[limit - 1]![1];
         const at = this.times.get(by)!;
-        if ((by !== ended[0] || at.getTime() !== ended[1].getTime()) && (facts.has(ended[0]) || at < ended[1])) {
+        if (
+          (by !== ended[0] || epochMicros(at) !== epochMicros(ended[1])) &&
+          (facts.has(ended[0]) || epochMicros(at) < epochMicros(ended[1]))
+        ) {
           retired.set(rid, [by, at]);
           this.ended.set(rid, [by, at]);
         }
