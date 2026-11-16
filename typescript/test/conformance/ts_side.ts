@@ -796,6 +796,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const moved = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_moved`,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  await moved.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const use = (name: string, year: number) => ({
+    from_entity: "person:ann",
+    type: "USES",
+    to_entity: `tool:${name}`,
+    event_time: `${year}-01-01T00:00:00+00:00`,
+  });
+  await moved.insert.facts({ relations: [use("a", 2020), use("b", 2021), use("c", 2022)] });
+  const updated = await moved.relations.update(uses[2]!, { event_time: "2019-01-01T00:00:00+00:00" });
+  await moved.insert.facts({ relations: [use("d", 2023)] });
+  await moved.insert.facts({ relations: [use("d", 2018)] });
+  const movedVersions: Record<string, unknown> = {};
+  for (const rid of uses) movedVersions[rid] = await moved.relations.versions(rid, { newest_first: false });
+  out.resettle_moved = toJsonable({
+    updated: [updated.revision, updated.is_current, updated.invalidated_by],
+    versions: movedVersions,
+  });
   const requireIdentifierCases: Record<string, string> = {};
   for (const name of ["id", "external_ids", "a b", "1x", ""]) {
     try {

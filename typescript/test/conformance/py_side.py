@@ -782,6 +782,31 @@ async def write(graph):
     out["resettle_versions"] = to_jsonable(
         {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
     )
+    moved = SelfGraph(
+        store=graph.store, namespace=f"{graph.namespace}_moved", schema=USES_SPEC, contradiction="supersede"
+    )
+    await moved.insert.facts(
+        {"entities": [{"type": "Person", "name": "Ann"}, *({"type": "Tool", "name": n} for n in "abcd")]}
+    )
+
+    def use(name, year):
+        return {
+            "from_entity": "person:ann",
+            "type": "USES",
+            "to_entity": f"tool:{name}",
+            "event_time": datetime(year, 1, 1, tzinfo=timezone.utc),
+        }
+
+    await moved.insert.facts({"relations": [use("a", 2020), use("b", 2021), use("c", 2022)]})
+    updated = await moved.relations.update(uses[2], event_time=datetime(2019, 1, 1, tzinfo=timezone.utc))
+    await moved.insert.facts({"relations": [use("d", 2023)]})
+    await moved.insert.facts({"relations": [use("d", 2018)]})
+    out["resettle_moved"] = to_jsonable(
+        {
+            "updated": [updated.revision, updated.is_current, updated.invalidated_by],
+            "versions": {rid: await moved.relations.versions(rid, newest_first=False) for rid in uses},
+        }
+    )
     require_identifier_cases = {}
     for name in ["id", "external_ids", "a b", "1x", ""]:
         try:

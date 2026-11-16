@@ -1466,7 +1466,7 @@ export async function deleteEntities(
     for (const batch of batches(merges)) await runner.deleteNodes(ns, L_MERGE, batch);
   }
   counts.deleted_entities = eids.length;
-  counts.restored_relations = await resettleAfterDelete(runner, ns, newest.values(), caps, new Date());
+  counts.restored_relations = await resettleEndpoints(runner, ns, newest.values(), caps, new Date());
   return counts;
 }
 
@@ -2223,7 +2223,7 @@ export async function retireRelations(
 }
 
 /**
- * Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
+ * Settle again each max_count endpoint a deleted or moved relation sat at, as supersede would settle it now.
  *
  * Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
  * Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
@@ -2232,16 +2232,16 @@ export async function retireRelations(
  * retired one whose invalidation settle corrects, takes a new revision naming the relation and time that now displace
  * it, so known_at reads still see the earlier retirement. A current one settle retires is retired as a supersede
  * retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so it is left as it
- * is. Both endpoints of each deleted relation are locked before they are read.
+ * is. Both endpoints of each deleted or moved relation are locked before they are read.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
- * @param given (Iterable<EdgeRow>): the edge rows of the deleted relations, read before they were deleted.
+ * @param given (Iterable<EdgeRow>): the edge rows of the deleted relations, read before they were deleted, or of the new versions of the moved ones.
  * @param caps (ReadonlyMap<string, RelationCap> | null | undefined): the schema's max_count limits, or null without a schema.
- * @param at (Date): the delete's timestamp, the created_at of each restored revision.
+ * @param at (Date): the write's timestamp, the created_at of each restored revision.
  * @return (number): how many relations came back.
  */
-export async function resettleAfterDelete(
+export async function resettleEndpoints(
   runner: Runner,
   ns: string,
   given: Iterable<EdgeRow>,
@@ -2251,20 +2251,20 @@ export async function resettleAfterDelete(
   const limits = caps ?? new Map<string, RelationCap>();
   const slotsOf = (edge: EdgeRow) => capSlots(limits, edge.type, edge.from_id, edge.to_id);
   const endsOf = (edges: readonly EdgeRow[]) => edges.map((e) => [e.type, e.from_id, e.to_id] as const);
-  const deleted = [...given].filter((edge) => slotsOf(edge).length);
-  if (!deleted.length) return 0;
-  for (const eid of dedupList(deleted.flatMap((edge) => [edge.from_id, edge.to_id]))) {
+  const moved = [...given].filter((edge) => slotsOf(edge).length);
+  if (!moved.length) return 0;
+  for (const eid of dedupList(moved.flatMap((edge) => [edge.from_id, edge.to_id]))) {
     await runner.lockNode(ns, L_ENTITY, eid);
   }
-  const found = await endpointEdges(runner, ns, limits, endsOf(deleted));
+  const found = await endpointEdges(runner, ns, limits, endsOf(moved));
   const members = new Map<string, Set<string>>();
-  for (const edge of [...deleted, ...found.values()]) {
+  for (const edge of [...moved, ...found.values()]) {
     for (const [slot] of slotsOf(edge)) {
       const key = JSON.stringify(slot);
       members.set(key, (members.get(key) ?? new Set<string>()).add(idOf(edge.props)));
     }
   }
-  const freed = new Set(deleted.flatMap((edge) => slotsOf(edge).map(([slot]) => JSON.stringify(slot))));
+  const freed = new Set(moved.flatMap((edge) => slotsOf(edge).map(([slot]) => JSON.stringify(slot))));
   const stale = [...found.values()].filter(
     (edge) =>
       !edge.props.is_current &&
@@ -2407,6 +2407,7 @@ export async function upsertRelations(
   const writes = new Map<string, readonly [string, Props]>();
   const retires = new Map<string, readonly [string, Props]>();
   const out: Array<readonly [string, number, Relation]> = [];
+  const moved = new Set<string>();
   for (const { rid, rtype, rel } of keyed) {
     const named = rel.event_time ?? defaultEventTime ?? null;
     let edge = current.get(rid);
@@ -2437,6 +2438,7 @@ export async function upsertRelations(
         !prev.is_current &&
         (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
       const unchanged = deepEqual(prev.properties, mergedProperties) && toIso(prev.event_time) === toIso(eventTime);
+      if (eventTime != null && toIso(prev.event_time) !== toIso(eventTime)) moved.add(rid);
       if (unchanged && !reassert) {
         write = sources !== prev.source_count;
         props = { ...edge.props, source_count: sources };
@@ -2501,6 +2503,18 @@ export async function upsertRelations(
     if (rows.length) await runner.createEdges(ns, L_ENTITY, L_ENTITY, rows);
   }
   await writeEvidence(runner, ns, records, createdAt);
+  if (options.contradiction === "supersede" && moved.size) {
+    await resettleEndpoints(
+      runner,
+      ns,
+      [...moved].map((rid) => current.get(rid)!),
+      options.caps,
+      createdAt,
+    );
+    const stored = new Map<string, Relation>();
+    for (const rid of dedupList(out.map(([rid]) => rid))) stored.set(rid, (await newestRelation(runner, ns, rid))!);
+    return out.map(([rid]) => stored.get(rid)!);
+  }
   return out.map(([rid, revision, rel]) => {
     const key = JSON.stringify([rid, revision]);
     const final = retires.get(key) ?? writes.get(key);
@@ -2668,14 +2682,16 @@ async function lockCurrent<T>(
 }
 
 /**
- * Create a new version of a relation with changed properties; an unchanged update is a no-op.
+ * Create a new version of a relation, settling its max_count endpoints again when supersede moves its event_time; an
+ * unchanged update is a no-op.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
  * @param rid (string): the relation id.
  * @param args (UpdateRelationArgs): the properties to set and remove, a new valid time, and evidence to add.
  * @param schemaCheck (SchemaCheck | undefined): checks the resulting relation against the schema before the write, given the stored version too so only violations the update introduces count.
- * @return (Relation): the current version; throws ValidationError for a relation a contradiction invalidated.
+ * @param options (ContradictionOptions): "supersede" settles the endpoints again when event_time moves, against the max_count limits; any other mode leaves them as they are, since an update adds no relation.
+ * @return (Relation): the new version, current unless supersede retired it; throws ValidationError for a relation a contradiction invalidated.
  */
 export async function updateRelation(
   runner: Runner,
@@ -2683,6 +2699,7 @@ export async function updateRelation(
   rid: string,
   args: UpdateRelationArgs,
   schemaCheck?: SchemaCheck,
+  options: ContradictionOptions = {},
 ): Promise<Relation> {
   requireJsonMapping("set_properties", args.set_properties);
   requireList("remove_properties", args.remove_properties);
@@ -2735,6 +2752,11 @@ export async function updateRelation(
   });
   const rel = await writeRelationVersion(runner, ns, current, props, true);
   await writeEvidence(runner, ns, records, createdAt);
+  if (options.contradiction === "supersede" && toIso(newEventTime) !== toIso(current.event_time)) {
+    const edge = { type: rel.type, from_id: rel.from_entity, to_id: rel.to_entity, props };
+    await resettleEndpoints(runner, ns, [edge], options.caps, createdAt);
+    return (await newestRelation(runner, ns, rid))!;
+  }
   return rel;
 }
 
@@ -3149,7 +3171,7 @@ export async function deleteRelation(
   const deletedVersions = await runner.deleteEdges(ns, rid);
   await deleteEvidence(runner, ns, rid);
   const deletedDecisions = await deleteTraces(runner, ns, traceIds);
-  const restored = await resettleAfterDelete(runner, ns, [newest], caps, new Date());
+  const restored = await resettleEndpoints(runner, ns, [newest], caps, new Date());
   return {
     ...NO_DELETES,
     deleted_relation_versions: deletedVersions,
