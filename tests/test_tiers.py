@@ -366,6 +366,20 @@ def test_from_tables_drafts_types_properties_relations_and_mappings():
         Schema.from_tables([{}])
 
 
+@pytest.mark.parametrize(
+    "reference, shown",
+    [
+        ({"table": "users"}, "{'table': 'users'}"),
+        (["users"], "['users']"),
+        (5, "5"),
+    ],
+)
+def test_from_tables_rejects_non_string_references_with_a_validation_error(reference, shown):
+    with pytest.raises(ValidationError) as exc:
+        Schema.from_tables([{"name": "orders", "columns": [{"name": "user_id", "references": reference}]}])
+    assert str(exc.value) == f"tables[0].columns[0].references: unknown table {shown}"
+
+
 def test_from_tables_maps_only_integer_sql_types_to_integer():
     types = ["int", "INT UNSIGNED", "hugeint", "point", "interval"]
     schema = Schema.from_tables([{"name": "t", "columns": [{"name": f"c{i}", "type": t} for i, t in enumerate(types)]}])

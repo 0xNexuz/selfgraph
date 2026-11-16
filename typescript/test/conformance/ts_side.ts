@@ -264,9 +264,26 @@ function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
 }
 
 /**
+ * Draft a schema with each invalid column reference and return the resulting error messages.
+ *
+ * @return (string[]): one message per reference, including unhashable ones.
+ */
+function tablesReferenceErrors(): string[] {
+  return [{ table: "users" }, ["users"], 5].map((reference) => {
+    try {
+      fromTables([{ name: "orders", columns: [{ name: "user_id", references: reference }] }]);
+      return "accepted";
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      return exc.message;
+    }
+  });
+}
+
+/**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; tables_errors: string[]; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
@@ -275,6 +292,7 @@ export function schemaWarnings(): {
   own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
   tables: unknown;
+  tables_errors: string[];
   term_forms: unknown;
   terms: unknown[];
   datetime_errors: string[];
@@ -365,6 +383,7 @@ export function schemaWarnings(): {
     }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
+    tables_errors: tablesReferenceErrors(),
     neo4j_dropped: neo4jExportWarnings(),
     json_constants: jsonConstants(),
     term_forms: Object.fromEntries(

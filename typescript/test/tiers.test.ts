@@ -436,6 +436,9 @@ function suite(spec: StoreSpec): void {
     );
     expect(() => fromTables([{}])).toThrow(/each table needs a name/);
     expect(() => fromTables({} as never)).toThrow(/tables must be a list of table mappings/);
+    expect(() =>
+      fromTables([{ name: "orders", columns: [{ name: "user_id", references: { table: "users" } }] }]),
+    ).toThrow(/references: unknown table \{'table': 'users'\}/);
   });
 
   it("fromTables maps only integer SQL types to integer", () => {
