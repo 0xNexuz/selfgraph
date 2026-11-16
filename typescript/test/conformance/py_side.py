@@ -368,6 +368,11 @@ FACTS = {
     ],
 }
 
+USES_SPEC = {
+    "entities": [{"name": "Person"}, {"name": "Tool"}],
+    "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
+}
+
 TEXT = "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京."
 
 
@@ -585,6 +590,19 @@ async def write(graph):
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
     out["retrieval_overflow"] = await overflow(graph)
+    capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
+    await capped.insert.facts(
+        {"entities": [{"type": "Person", "name": "Ann"}, *({"type": "Tool", "name": n} for n in "abcd")]}
+    )
+    uses = [ids.relation_id("person:ann", "USES", f"tool:{n}") for n in "abcd"]
+    for year, name in enumerate("abcd", 2020):
+        await capped.relations.create(
+            "person:ann", "USES", f"tool:{name}", event_time=datetime(year, 1, 1, tzinfo=timezone.utc)
+        )
+    out["resettle_delete"] = to_jsonable(await capped.relations.delete(uses[2]))
+    out["resettle_versions"] = to_jsonable(
+        {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
+    )
     return out
 
 
@@ -644,6 +662,23 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Dan", "Eve")),
+                *({"type": "Company", "name": n} for n in ("Hooli", "Umbrella", "Wayne")),
+            ]
+        }
+    )
+    for person, company, year in (("dan", "hooli", 2020), ("dan", "umbrella", 2021), ("eve", "hooli", 2022)):
+        await graph.insert.facts({"relations": [link(person, company, year)]})
+    await graph.insert.facts({"relations": [link("eve", "wayne", 2023)]})
+    deleted = await graph.relations.delete(ids.relation_id("person:dan", "WORKS_AT", "company:umbrella"))
+    out["delete_restored"] = deleted.restored_relations
+    out["delete_versions"] = [
+        [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
+    ]
     return out
 
 

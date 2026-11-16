@@ -251,6 +251,12 @@ export async function mergeRelations(
     event_time: toIso(first) === toIso(current.event_time) ? null : first,
     evidence,
   });
+  const gone = found.map((rel) => ({
+    props: { id: rel.id },
+    type: rel.type,
+    from_id: rel.from_entity,
+    to_id: rel.to_entity,
+  }));
   const rids = found.map((rel) => rel.id);
   const tids = await ops.tracesTouchingRelations(runner, ns, rids);
   await ops.repointSteps(runner, ns, tids, new Map(rids.map((rid) => [rid, survivor])));
@@ -258,6 +264,7 @@ export async function mergeRelations(
     counts.deleted_relation_versions += await runner.deleteEdges(ns, rid);
     await ops.deleteEvidence(runner, ns, rid);
   }
+  await ops.repointRetired(runner, ns, gone, survivor);
   return counts;
 }
 

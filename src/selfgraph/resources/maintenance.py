@@ -185,7 +185,7 @@ class Maintenance(Resource):
         counts = dict(_ops._NO_DELETES)
         for op, ids in ((_ops.delete_entities, doomed), (_ops.delete_relations, direct)):
             for batch in _ops._batches(ids):
-                _m.add_counts(counts, await self._c._write(op, batch))
+                _m.add_counts(counts, await self._c._write(op, batch, self._c._caps()))
         result.deleted = DeleteResult(**counts)
         _log.info(
             "pruned %d entities and %d relations in namespace %r (min_relevance=%s, older_than=%s, types=%s, "

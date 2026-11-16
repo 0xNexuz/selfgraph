@@ -392,6 +392,11 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const USES_SPEC = {
+  entities: [{ name: "Person" }, { name: "Tool" }],
+  relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
+};
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -569,6 +574,27 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.repeated_merges = repeatedMerges;
   out.retrieval_overflow = await overflow(graph);
+  const capped = new SelfGraph(graph.store, {
+    namespace: graph.namespace,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  const names = ["a", "b", "c", "d"];
+  await capped.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const uses = names.map((n) => ids.relationId("person:ann", "USES", `tool:${n}`));
+  for (const [i, name] of names.entries()) {
+    await capped.relations.create("person:ann", "USES", `tool:${name}`, {
+      event_time: `${2020 + i}-01-01T00:00:00+00:00`,
+    });
+  }
+  out.resettle_delete = toJsonable(await capped.relations.delete(uses[2]!));
+  const versions: Record<string, unknown> = {};
+  for (const rid of uses.filter((r) => r !== uses[2])) {
+    versions[rid] = await capped.relations.versions(rid, { newest_first: false });
+  }
+  out.resettle_versions = toJsonable(versions);
   return out;
 }
 
@@ -750,5 +776,30 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
-  return { warnings, versions, withdrawn_warnings: cidOlder.warnings.map((w) => w.code), withdrawn_versions };
+  await graph.insert.facts({
+    entities: [
+      ...["Dan", "Eve"].map((name) => ({ type: "Person", name })),
+      ...["Hooli", "Umbrella", "Wayne"].map((name) => ({ type: "Company", name })),
+    ],
+  });
+  for (const [person, company, year] of [
+    ["dan", "hooli", 2020],
+    ["dan", "umbrella", 2021],
+    ["eve", "hooli", 2022],
+  ] as const) {
+    await graph.insert.facts({ relations: [link(person, company, year)] });
+  }
+  await graph.insert.facts({ relations: [link("eve", "wayne", 2023)] });
+  const deleted = await graph.relations.delete(ids.relationId("person:dan", "WORKS_AT", "company:umbrella"));
+  const delete_versions = (
+    await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
+  ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  return {
+    warnings,
+    versions,
+    withdrawn_warnings: cidOlder.warnings.map((w) => w.code),
+    withdrawn_versions,
+    delete_restored: deleted.restored_relations,
+    delete_versions,
+  };
 }
