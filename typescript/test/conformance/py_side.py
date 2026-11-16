@@ -814,6 +814,37 @@ async def write(graph):
         except ValidationError as exc:
             require_identifier_cases[name] = str(exc)
     out["require_identifier"] = require_identifier_cases
+    replay_graph = SelfGraph(
+        store=graph.store,
+        namespace=graph.namespace + "-strict-replay",
+        schema={"relations": [{"type": "WORKS_AT", "from": {"max_count": 1}}]},
+        schema_mode="strict",
+    )
+    old = {
+        "from_entity": "person:ann",
+        "type": "WORKS_AT",
+        "to_entity": "company:acme",
+        "event_time": "2020-01-01",
+    }
+    await replay_graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Person", "name": "Ann"},
+                {"type": "Company", "name": "Acme"},
+                {"type": "Company", "name": "Globex"},
+            ],
+            "relations": [old],
+        }
+    )
+    await replay_graph.insert.facts(
+        {"relations": [{**old, "to_entity": "company:globex", "event_time": "2023-01-01"}]},
+        contradiction="supersede",
+    )
+    replayed = await replay_graph.insert.facts({"relations": [old]})
+    out["strict_retired_replay"] = {
+        "relations": [(r.id, r.revision, r.is_current) for r in replayed.relations],
+        "warnings": [w.code for w in replayed.warnings],
+    }
     extra_ns = f"{graph.namespace}:extra"
     await graph.store.upsert_nodes(
         extra_ns,

@@ -1727,6 +1727,16 @@ const restatedEventTime = (named: Date | null, stored: Date | null, keepStored: 
   return keepStored ? stored : null;
 };
 
+/**
+ * Tell whether a write at an effective time brings a retired relation back as current.
+ *
+ * @param prev (Relation): the stored version.
+ * @param effective (Date): the write's effective time.
+ * @return (boolean): true when prev is retired and the write is not earlier than its invalidation.
+ */
+const reasserts = (prev: Relation, effective: Date): boolean =>
+  !prev.is_current && (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
+
 type Slot = readonly [string, string, string];
 type Rank = readonly [number, number, number];
 
@@ -2065,12 +2075,16 @@ async function endpointEdges(
  * @param ns (string): the namespace.
  * @param caps (ReadonlyMap<string, RelationCap> | null): the max_count limits, or null without a schema.
  * @param relations (readonly ParsedRelationInput[]): the relations about to be written.
+ * @param defaultEventTime (Date | null): fallback event time.
+ * @param createdAt (Date): timestamp of the planned write.
  */
 export async function requireMaxCount(
   runner: Runner,
   ns: string,
   caps: ReadonlyMap<string, RelationCap> | null,
   relations: readonly ParsedRelationInput[],
+  defaultEventTime: Date | null,
+  createdAt: Date,
 ): Promise<void> {
   const keyed = relations.map((rel) => {
     const rtype = ids.normalizeRelType(rel.type);
@@ -2082,10 +2096,24 @@ export async function requireMaxCount(
     { contradiction: "strict", caps },
     keyed.map(({ rtype, rel }) => [rtype, rel.from_entity, rel.to_entity] as const),
   );
-  const at = new Date();
-  const rank: Rank = [epochMicros(at), 0, epochMicros(at)];
-  for (const { rid, rtype, rel } of tracker ? keyed : [])
-    tracker!.admit(rid, rtype, rel.from_entity, rel.to_entity, rank, at);
+  if (tracker === null) return;
+  const stored = await currentRelations(
+    runner,
+    ns,
+    keyed.map(({ rid, rel }) => [rid, rel] as const),
+  );
+  const admitted = new Set<string>();
+  for (const { rid, rtype, rel } of keyed) {
+    const effective = rel.event_time ?? defaultEventTime ?? createdAt;
+    const edge = stored.get(rid);
+    if (edge !== undefined && !admitted.has(rid)) {
+      const prev = relationOf(edge);
+      if (!prev.is_current && !reasserts(prev, effective)) continue;
+    }
+    const rank: Rank = [epochMicros(effective), 0, epochMicros(createdAt)];
+    tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, rank, effective);
+    admitted.add(rid);
+  }
 }
 
 /**
@@ -2434,9 +2462,7 @@ export async function upsertRelations(
       const effective = eventTime ?? createdAt;
       const sources = prev.source_count + takeGained(gained, rid);
       const mergedProperties = mergeProps(prev.properties, rel.properties);
-      const reassert =
-        !prev.is_current &&
-        (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
+      const reassert = reasserts(prev, effective);
       const unchanged = deepEqual(prev.properties, mergedProperties) && toIso(prev.event_time) === toIso(eventTime);
       if (eventTime != null && toIso(prev.event_time) !== toIso(eventTime)) moved.add(rid);
       if (unchanged && !reassert) {

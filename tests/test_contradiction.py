@@ -30,6 +30,41 @@ ACME = ids.relation_id("person:ann", "WORKS_AT", "company:acme")
 GLOBEX = ids.relation_id("person:ann", "WORKS_AT", "company:globex")
 
 
+@pytest.mark.parametrize("side", ["from", "to"])
+@pytest.mark.parametrize("default_time", [False, True])
+def test_strict_retired_historical_replay(side, default_time):
+    spec = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [{"type": "WORKS_AT", side: {"max_count": 1}}],
+    }
+    g = fresh_graph("contra", schema=spec, schema_mode="strict")
+
+    def fact(company, year):
+        rel = works_at(company, year)
+        if side == "to":
+            rel["from_entity"], rel["to_entity"] = rel["to_entity"], rel["from_entity"]
+        return rel
+
+    old = fact("acme", 2020)
+    run(g.insert.facts({"entities": ANN_ACME_GLOBEX, "relations": [old]}))
+    run(g.insert.facts({"relations": [fact("globex", 2023)]}, contradiction="supersede"))
+    rid = ids.relation_id(old["from_entity"], old["type"], old["to_entity"])
+    before = run(g.relations.versions(rid))
+    replay = {k: v for k, v in old.items() if k != "event_time"} if default_time else old
+    options = {"event_time": "2020-01-01"} if default_time else {}
+    result = run(g.insert.facts({"relations": [replay, replay]}, **options))
+    assert result.warnings == []
+    assert result.relations == before
+    assert run(g.relations.versions(rid)) == before
+    assert run(g.relations.get(rid)) is None
+    assert len(run(g.relations.list()).items) == 1
+    for year in (2023, 2024):
+        for batch in ([fact("acme", year)], [old, fact("acme", year)], [fact("acme", year), old]):
+            with pytest.raises(ValidationError, match="would exceed max_count"):
+                run(g.insert.facts({"relations": batch}))
+            assert run(g.relations.versions(rid)) == before
+
+
 def graph(**kwargs):
     g = fresh_graph("contra", schema=SPEC, **kwargs)
     run(g.insert.facts({"entities": PEOPLE}))

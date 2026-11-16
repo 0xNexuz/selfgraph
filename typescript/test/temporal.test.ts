@@ -46,6 +46,44 @@ async function instant(): Promise<Date> {
 function suite(spec: StoreSpec): void {
   const open = freshGraphs(spec, "temporal");
 
+  for (const side of ["from", "to"] as const) {
+    for (const defaultTime of [false, true]) {
+      it(`strict retired historical replay at ${side}, default time ${defaultTime}`, async () => {
+        const schema: Schema = {
+          entities: [{ name: "Person" }, { name: "Company" }],
+          relations: [{ type: "WORKS_AT", [side]: { max_count: 1 } }],
+        };
+        const g = open({ schema, schema_mode: "strict" });
+        const fact = (company: string, year: number) => {
+          const rel = annAt(company, year);
+          return side === "from" ? rel : { ...rel, from_entity: rel.to_entity, to_entity: rel.from_entity };
+        };
+        const old = fact("acme", 2020);
+        await g.insert.facts({ entities: PEOPLE, relations: [old] });
+        await g.insert.facts({ relations: [fact("globex", 2023)] }, { contradiction: "supersede" });
+        const rid = ids.relationId(old.from_entity, old.type, old.to_entity);
+        const before = await g.relations.versions(rid);
+        const { event_time: _time, ...undated } = old;
+        const replay = defaultTime ? undated : old;
+        const result = await g.insert.facts(
+          { relations: [replay, replay] },
+          defaultTime ? { event_time: "2020-01-01" } : {},
+        );
+        expect(result.warnings).toEqual([]);
+        expect(result.relations).toEqual(before);
+        expect(await g.relations.versions(rid)).toEqual(before);
+        expect(await g.relations.get(rid)).toBeNull();
+        expect((await g.relations.list()).items).toHaveLength(1);
+        for (const year of [2023, 2024]) {
+          for (const batch of [[fact("acme", year)], [old, fact("acme", year)], [fact("acme", year), old]]) {
+            await expect(g.insert.facts({ relations: batch })).rejects.toThrow(/would exceed max_count/);
+            expect(await g.relations.versions(rid)).toEqual(before);
+          }
+        }
+      });
+    }
+  }
+
   it.each([
     "0001-01-01T00:00:00+01:00",
     "9999-12-31T23:00:00-02:00",
