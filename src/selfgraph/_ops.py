@@ -2289,9 +2289,11 @@ async def upsert_relations(
     A superseded relation is retired in place: its version keeps its revision and gains invalidated_at and
     invalidated_by, so the version list shows exactly the writes that happened. In supersede mode each constrained
     endpoint the batch touches is settled once after the whole batch (see Contradictions.settle): an input older than
-    the relations it conflicts with is written already invalidated. New versions are written before any retirement,
-    so a failed write never leaves an endpoint without its current relation. A new revision of a certified relation
-    is not certified, and a certified_dropped warning says so.
+    the relations it conflicts with is written already invalidated. A stored relation restated with a new
+    event_time has moved in time order, so its endpoints are then settled again by resettle_endpoints, which brings
+    back a relation it retired and no longer displaces. New versions are written before any retirement, so a failed
+    write never leaves an endpoint without its current relation. A new revision of a certified relation is not
+    certified, and a certified_dropped warning says so.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2327,6 +2329,7 @@ async def upsert_relations(
     writes: dict[tuple[str, int], dict] = {}
     retires: dict[tuple[str, int], dict] = {}
     out: list[tuple[str, int, Relation]] = []
+    moved: dict[str, None] = {}
     for rid, rtype, rel, _ in keyed:
         named = rel.event_time if rel.event_time is not None else default_event_time
         edge = current.get(rid)
@@ -2357,6 +2360,8 @@ async def upsert_relations(
             unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
                 event_time
             )
+            if event_time is not None and to_iso(prev.event_time) != to_iso(event_time):
+                moved[rid] = None
             if unchanged and not reassert:
                 write = sources != prev.source_count
                 props = {**edge["props"], "source_count": sources}
@@ -2410,6 +2415,8 @@ async def upsert_relations(
         if rows:
             await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     await _write_evidence(runner, ns, records, created_at)
+    if contradiction == "supersede" and moved:
+        await resettle_endpoints(runner, ns, [current[rid] for rid in moved], caps, created_at)
     final = {**writes, **retires}
     result = []
     for rid, revision, rel in out:
