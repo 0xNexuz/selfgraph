@@ -125,8 +125,8 @@ backends.
   read-only.
 - `result.counters` is always empty on Kuzu.
 - The Kuzu store reopens its connection every 500 statements to free the memory
-  Kuzu keeps per statement, so a `CALL` setting or a `BEGIN TRANSACTION` may not
-  last until a later statement.
+  Kuzu keeps per statement, so a `CALL` setting or `USE` may not last until a
+  later statement. It does not reopen while a raw transaction is open.
 
 Every SelfGraph node carries a kind label: `Entity`, `Profile`, `DecisionTrace`,
 `DecisionStep`, `Source`, `SourceVersion`, `Chunk`, `Evidence`, `EntityMerge`, or

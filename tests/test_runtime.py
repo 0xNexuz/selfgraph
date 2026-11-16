@@ -284,6 +284,36 @@ def test_kuzu_reopens_its_connection_without_changing_results(tmp_path):
     run(g.close())
 
 
+def test_kuzu_keeps_its_connection_while_a_raw_transaction_is_open(tmp_path):
+    pytest.importorskip("kuzu")
+    store = KuzuStore(str(tmp_path / "t.kuzu"))
+    g = SelfGraph(store, namespace="tx")
+    run(g.initialize())
+    held = store._conn
+
+    async def session():
+        await g.run_cypher("BEGIN /* keep */ TRANSACTION")
+        for i in range(300):
+            await g.run_cypher("CREATE (:N {pk: $pk, ns: 'tx'})", {"pk": f"p{i}"})
+        await g.entities.create("Jane", "Person")
+        for _ in range(600):
+            await g.entities.get("person:jane")
+        await g.run_cypher("ROLLBACK")
+
+    run(session())
+    assert store._conn is held
+    assert run(g.run_cypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n")).rows == [{"n": 0}]
+    assert run(g.entities.get("person:jane")) is None
+
+    async def reads():
+        for i in range(600):
+            await g.run_cypher("RETURN $i AS i", {"i": i})
+
+    run(reads())
+    assert store._conn is not held
+    run(g.close())
+
+
 def test_bind_params_checks_references_and_drops_unused():
     assert bind_params("RETURN $a AS a", {"a": 1, "b": 2}) == {"a": 1}
     assert bind_params("RETURN '$a' AS a, `$b` AS b /* $c */ // $d", None) == {}

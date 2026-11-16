@@ -864,6 +864,31 @@ describe("store setup errors", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("keeps the Kuzu connection while a raw transaction is open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-tx-"));
+    const store = new KuzuStore(join(dir, "t.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "tx" });
+    try {
+      await g.initialize();
+      const held = await conn();
+      await g.runCypher("BEGIN /* keep */ TRANSACTION");
+      for (let i = 0; i < 300; i++) await g.runCypher("CREATE (:N {pk: $pk, ns: 'tx'})", { pk: `p${i}` });
+      await g.entities.create("Jane", "Person");
+      for (let i = 0; i < 600; i++) await g.entities.get("person:jane");
+      await g.runCypher("ROLLBACK");
+      expect(await conn()).toBe(held);
+      const count = await g.runCypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n");
+      expect(count.rows).toEqual([{ n: 0 }]);
+      expect(await g.entities.get("person:jane")).toBeNull();
+      for (let i = 0; i < 600; i++) await g.runCypher("RETURN $i AS i", { i });
+      expect(await conn()).not.toBe(held);
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("property values", () => {
