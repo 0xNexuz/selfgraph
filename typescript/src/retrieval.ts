@@ -872,7 +872,7 @@ function contextPayload(text: string, source = false): string {
  * @param subgraph (Subgraph): the collected entities, relations, preferences, and decisions.
  * @param names (Map<string, string>): entity id to display name.
  * @param dist (Map<string, number>): entity id to hop distance from the seeds.
- * @param budgetTokens (number): the token budget; the first line that does not fit ends the context, so a farther line never takes the place of a nearer one, and when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
+ * @param budgetTokens (number): the token budget. Records are counted separately; the cached change when the preceding record gains a newline is charged only when a following record fits. The counter's empty-string cost (one for the length estimate, zero for cl100k) covers fallback rounding. The first line that does not fit ends the context, so a farther line never takes the place of a nearer one, and when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
  * @param countTokens ((text: string) => number): the token counter.
  * @param hubs (ReadonlySet<string>): hub entity ids; a relation line through one is marked "(via hub)".
  * @return (string): the context text. Certified relations come first among equally close ones and are marked "[certified]".
@@ -890,17 +890,27 @@ function assemble(
   const nameOf = (id: string): string => names.get(id) ?? id;
   const lines: string[] = [];
   let first: string | null = null;
+  let used = 0;
+  let rounding = 0;
+  let boundary = 0;
   let full = false;
   const add = (payload: string, cap: number, header = "GRAPH"): boolean => {
     const line = header === "SOURCE" ? contextPayload(payload, true) : `${header} | ${contextPayload(payload)}`;
-    first ??= line;
+    if (first === null) {
+      first = line;
+      rounding = countTokens("");
+    }
     if (full) return false;
-    const cost = countTokens([...lines, line].join("\n"));
-    if (cost > cap) {
+    const plain = countTokens(line);
+    const cost = plain + boundary;
+    if (used + cost > cap) {
       full = cap >= budgetTokens;
       return false;
     }
     lines.push(line);
+    used += cost;
+    const delta = countTokens(`${line}\n`) - plain;
+    boundary = rounding ? Math.max(rounding, delta) : delta;
     return true;
   };
 

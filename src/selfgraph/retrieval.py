@@ -862,31 +862,42 @@ def _assemble(
     @param decisions (list[DecisionTrace]): the collected decision traces.
     @param names (dict[str, str]): display name for every entity id the context mentions.
     @param dist (dict[str, int]): each entity's closeness rank to the query, lower first (hops, or PageRank rank).
-    @param budget_tokens (int): the maximum estimated tokens to emit; the first line that does not fit ends the
-        context, so a farther line never takes the place of a nearer one, and when even the first line does not fit,
-        that line is cut to the budget, so a non-empty subgraph never yields an empty context.
+    @param budget_tokens (int): the maximum estimated tokens to emit. Records are counted separately; the
+        cached change when the preceding record gains a newline is charged only when a following record fits.
+        The counter's empty-string cost (one for the length estimate, zero for cl100k) covers fallback rounding.
+        The first line that does not fit ends the context, so a farther line never takes the place of a nearer
+        one, and when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph
+        never yields an empty context.
     @param hubs (Collection[str]): hub entity ids; a relation line through one is marked "(via hub)".
     @return (str): the assembled context text. Certified relations come first among equally close ones and are
         marked "[certified]".
     """
     lines: list[str] = []
     first: list[str] = []
+    used = 0
+    rounding = 0
+    boundary = 0
     full = False
 
     def add(payload: str, cap: int, header: str = "GRAPH") -> bool:
-        nonlocal full
+        nonlocal used, full, rounding, boundary
         line = (
             _context_payload(payload, source=True) if header == "SOURCE" else f"{header} | {_context_payload(payload)}"
         )
         if not first:
             first.append(line)
+            rounding = count_tokens("")
         if full:
             return False
-        cost = count_tokens("\n".join([*lines, line]))
-        if cost > cap:
+        plain = count_tokens(line)
+        cost = plain + boundary
+        if used + cost > cap:
             full = cap >= budget_tokens
             return False
         lines.append(line)
+        used += cost
+        delta = count_tokens(line + "\n") - plain
+        boundary = max(rounding, delta) if rounding else delta
         return True
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100

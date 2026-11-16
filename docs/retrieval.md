@@ -54,8 +54,11 @@ Unicode text remain readable.
 This rendering applies only to `context`. Stored text, retrieval matching,
 structured `subgraph` values, IDs, and certification state are unchanged. It is
 a separation of data from SDK trust labels, not a general prompt-injection
-defense. Headers, escaping, and line separators count toward `budget_tokens`;
-a tiny budget may return only an incomplete prefix, which carries no metadata.
+defense. Headers, escaping, and line separators count toward `budget_tokens`.
+Records are counted incrementally, including their joining newlines. Without
+the optional tokenizer, conservative rounding can leave part of the budget
+unused. A tiny budget may return only an incomplete prefix, which carries no
+metadata.
 
 ## Parameters
 

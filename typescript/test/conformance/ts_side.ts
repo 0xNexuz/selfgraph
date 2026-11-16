@@ -615,6 +615,25 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  const pruneGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:prune`,
+    schema: {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [{ type: "WORKS_AT", aliases: ["employed_by"] }],
+    },
+  });
+  await pruneGraph.initialize();
+  const person = await pruneGraph.entities.create("Alice", "Person");
+  const company = await pruneGraph.entities.create("Acme", "Company");
+  const relation = await pruneGraph.relations.create(person.id, "employed_by", company.id);
+  await pruneGraph.maintenance.decay({ now: new Date(), half_life_days: 1e-9, dry_run: false });
+  const byAlias = await pruneGraph.maintenance.prune({ min_relevance: 1.0, relation_types: ["employed_by"] });
+  const byCanonical = await pruneGraph.maintenance.prune({ min_relevance: 1.0, relation_types: ["WORKS_AT"] });
+  out.prune_relation_alias = {
+    relation_id: relation.id,
+    alias: byAlias.relation_ids,
+    canonical: byCanonical.relation_ids,
+  };
   await graph.insert.facts(
     { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
     { source_id: "merge-seed" },
@@ -750,7 +769,16 @@ async function contextBoundary(graph: SelfGraph): Promise<unknown> {
   strictEqual(result.context.split("\n").filter((line) => line.startsWith("GRAPH [certified] | ")).length, 1);
   deepStrictEqual(stored!.properties, props);
   deepStrictEqual(result.subgraph.relations[0]!.properties, props);
-  return { context: result.context, stored: stored!.properties, structured: result.subgraph.relations[0]!.properties };
+  const budgets: string[] = [];
+  for (const budget of [1, 7, 12, 21, 50, 100]) {
+    budgets.push((await g.retrieve("Ann Acme", { budget_tokens: budget })).context);
+  }
+  return {
+    context: result.context,
+    budgets,
+    stored: stored!.properties,
+    structured: result.subgraph.relations[0]!.properties,
+  };
 }
 
 /**
