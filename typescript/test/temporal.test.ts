@@ -314,6 +314,19 @@ function suite(spec: StoreSpec): void {
     expect(merged.warnings.map((w) => w.code)).toEqual(["entity_merged", "contradiction"]);
   });
 
+  it("undated restatement keeps event_time and supersede order", async () => {
+    const g = await graph("supersede");
+    await g.insert.facts({ relations: [annAt("acme", 2020)] }, { source_id: "a" });
+    await g.insert.facts({ relations: [annAt("acme")] }, { source_id: "b" });
+    const current = (await g.relations.get(ACME))!;
+    expect([current.event_time, current.revision, current.source_count]).toEqual([at(2020), 1, 2]);
+    const res = await g.insert.facts({ relations: [annAt("globex", 2022)] }, { source_id: "c" });
+    expect(res.warnings.map((w) => w.code)).toEqual(["relation_superseded"]);
+    expect((await g.relations.list()).items.map((r) => r.id)).toEqual([GLOBEX]);
+    const asOf = new Set((await g.retrieve("Ann", { as_of: at(2023) })).subgraph.relations.map((r) => r.id));
+    expect(asOf).toEqual(new Set([GLOBEX]));
+  });
+
   it("does not treat equal effective times as out of order, and a create without event_time supersedes from now", async () => {
     const g = await graph("supersede");
     await insert(g, [annAt("acme", 2024)]);
@@ -596,6 +609,150 @@ function suite(spec: StoreSpec): void {
       expect(await valid(new Date(Date.UTC(2020, 5, 1)))).toEqual(new Set([initech]));
       expect(await valid(at(2023))).toEqual(new Set([GLOBEX]));
     }
+  });
+
+  it("known_at keeps the retirement a late middle fact corrected", async () => {
+    const g = await graph("supersede");
+    await g.insert.facts({ entities: [{ type: "Company", name: "Initech" }] });
+    const acme = await g.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: at(2020) });
+    const initech = await g.relations.create("person:ann", "WORKS_AT", "company:initech", { event_time: at(2024) });
+    const learned = await instant();
+    const globex = await g.relations.create("person:ann", "WORKS_AT", "company:globex", { event_time: at(2022) });
+    const held = async (year: number, options: object = {}) =>
+      new Set(
+        (await g.retrieve("Ann", { as_of: new Date(Date.UTC(year, 5, 1)), ...options })).subgraph.relations.map(
+          (r) => r.id,
+        ),
+      );
+    expect([await held(2021), await held(2023), await held(2025)]).toEqual([
+      new Set([acme.id]),
+      new Set([globex.id]),
+      new Set([initech.id]),
+    ]);
+    const known = { known_at: learned };
+    expect([await held(2021, known), await held(2023, known), await held(2025, known)]).toEqual([
+      new Set([acme.id]),
+      new Set([acme.id]),
+      new Set([initech.id]),
+    ]);
+    const [fresh, old] = await g.relations.versions(acme.id);
+    expect([old!.invalidated_by, fresh!.invalidated_by, fresh!.revision]).toEqual([
+      initech.id,
+      globex.id,
+      old!.revision + 1,
+    ]);
+  });
+
+  it("a late middle fact corrects the retired history it lands in", async () => {
+    const [acme, globex, initech] = [annAt("acme", 2020), annAt("globex", 2022), annAt("initech", 2024)];
+    const initechId = ids.relationId("person:ann", "WORKS_AT", "company:initech");
+    for (const order of [
+      [acme, globex, initech],
+      [acme, initech, globex],
+      [initech, acme, globex],
+    ]) {
+      const g = await graph("supersede");
+      for (const rel of order) await insert(g, [rel!]);
+      const [first] = await g.relations.versions(ACME);
+      const [mid] = await g.relations.versions(GLOBEX);
+      expect([first!.invalidated_by, first!.invalidated_at]).toEqual([GLOBEX, at(2022)]);
+      expect([mid!.invalidated_by, mid!.invalidated_at]).toEqual([initechId, at(2024)]);
+      const valid = async (when: Date) =>
+        new Set((await g.retrieve("Ann", { as_of: when })).subgraph.relations.map((r) => r.id));
+      expect(await valid(new Date(Date.UTC(2021, 5, 1)))).toEqual(new Set([ACME]));
+      expect(await valid(at(2023))).toEqual(new Set([GLOBEX]));
+      expect(await valid(at(2025))).toEqual(new Set([initechId]));
+    }
+  });
+
+  it("a relation ends at the earliest endpoint that displaces it in any order", async () => {
+    const spec: Schema = {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [
+        { type: "WORKS_AT", from: { types: ["Person"], max_count: 1 }, to: { types: ["Company"], max_count: 1 } },
+      ],
+    };
+    const entities = [
+      { type: "Person", name: "Ann" },
+      { type: "Person", name: "Bob" },
+      ...["Acme", "Globex", "Initech"].map((name) => ({ type: "Company", name })),
+    ];
+    const link = (person: string, company: string, year: number) => ({
+      from_entity: `person:${person}`,
+      type: "WORKS_AT",
+      to_entity: `company:${company}`,
+      event_time: at(year),
+    });
+    const rels = [
+      link("ann", "acme", 2020),
+      link("ann", "globex", 2024),
+      link("bob", "acme", 2022),
+      link("ann", "initech", 2026),
+    ];
+    const annAcme = ids.relationId("person:ann", "WORKS_AT", "company:acme");
+    const bobAcme = ids.relationId("person:bob", "WORKS_AT", "company:acme");
+    for (const batches of [[[0], [1], [2]], [[2], [1], [0]], [[0], [3], [1, 2]], [[0, 1, 2, 3]]]) {
+      const g = open({ schema: spec, contradiction: "supersede" });
+      await g.insert.facts({ entities });
+      for (const batch of batches) await g.insert.facts({ relations: batch.map((i) => rels[i]!) });
+      const [ended] = await g.relations.versions(annAcme);
+      expect([ended!.invalidated_by, ended!.invalidated_at], JSON.stringify(batches)).toEqual([bobAcme, at(2022)]);
+      expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
+    }
+  });
+
+  it("source-withdrawn relations stay out of supersede history", async () => {
+    let g = await graph("supersede");
+    await g.insert.facts({ relations: [annAt("acme", 2020)] }, { source_id: "src-acme" });
+    await g.insert.text("nothing happened.", { source_id: "src-acme", replace_source: true });
+    const older = await g.insert.facts({ relations: [annAt("globex", 2019)] }, { source_id: "src-globex" });
+    expect(older.warnings).toEqual([]);
+    expect((await g.relations.list({ from_entity: "person:ann" })).items.map((r) => r.id)).toEqual([GLOBEX]);
+    let [acme] = await g.relations.versions(ACME);
+    expect([acme!.revision, acme!.is_current]).toEqual([1, false]);
+    expect(acme!.invalidated_by?.startsWith("sv:")).toBe(true);
+
+    g = open({ schema: SPEC, contradiction: "supersede", resolver: "default" });
+    const annSmith = "person:ann-smith";
+    const smithAcme = ids.relationId(annSmith, "WORKS_AT", "company:acme");
+    await g.insert.facts(
+      {
+        entities: [...PEOPLE, { type: "Person", name: "Ann Smith", aliases: ["Annie"] }],
+        relations: [{ from_entity: annSmith, type: "WORKS_AT", to_entity: "company:acme", event_time: at(2020) }],
+      },
+      { source_id: "src-withdrawn" },
+    );
+    await g.insert.text("nothing happened.", { source_id: "src-withdrawn", replace_source: true });
+    await g.insert.facts(
+      { relations: [{ from_entity: annSmith, type: "WORKS_AT", to_entity: "company:globex", event_time: at(2024) }] },
+      { source_id: "src-globex" },
+    );
+    const merged = await g.insert.facts(
+      {
+        entities: [{ type: "Person", name: "Annie" }],
+        relations: [
+          { from_entity: "person:annie", type: "WORKS_AT", to_entity: "company:initech", event_time: at(2022) },
+        ],
+      },
+      { source_id: "src-initech" },
+    );
+    [acme] = await g.relations.versions(smithAcme);
+    expect([acme!.revision, acme!.is_current]).toEqual([1, false]);
+    expect(acme!.invalidated_by?.startsWith("sv:")).toBe(true);
+    await g.entities.unmerge(merged.merges[0]!.id);
+    const [after] = await g.relations.versions(smithAcme);
+    expect([after!.revision, after!.is_current, after!.invalidated_by]).toEqual([1, false, acme!.invalidated_by]);
+
+    const judge: LLMClient = {
+      generate: async ({ output }) => output.parse({ retired: [1] }),
+    };
+    const llmSpec: Schema = { ...SPEC, relations: [...(SPEC.relations ?? []), { type: "LEFT" }] };
+    g = open({ schema: llmSpec, contradiction: "llm", llm: judge });
+    await g.insert.facts({ entities: PEOPLE, relations: [annAt("acme", 2020)] });
+    await g.relations.create("person:ann", "LEFT", "company:acme", { event_time: at(2022) });
+    const late = await g.insert.facts({ relations: [annAt("globex", 2019)] });
+    expect(late.warnings.map((w) => w.code)).toEqual(["contradiction_out_of_order"]);
+    expect((await g.relations.list({ from_entity: "person:ann", type: "WORKS_AT" })).items).toEqual([]);
   });
 
   it("rejects an invalid as_of and a closed graph", async () => {

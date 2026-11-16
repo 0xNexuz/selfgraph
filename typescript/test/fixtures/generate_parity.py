@@ -1,5 +1,6 @@
 import json
 import sys
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel
@@ -163,6 +164,9 @@ TEXTS = [
     "The rain fell. A Storm hit Paris; Berlin, Rome: Madrid! Done?",
     "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.",
     "Jane Doe met\nBob Smith at Acme.",
+    unicodedata.normalize(
+        "NFD", "Zoë met José García at Café Société in São Paulo. Émile Zola met Bo\u0302b Lee. Q\u1acfing Fox."
+    ),
     "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing",
     "Acme Report\u2028Ann works at Acme\x85Bob Lee\u2029Initech Inc\x1cGlobex\x1dHooli\x1eSoylent\rUmbrella\vStark\n",
 ]
@@ -560,10 +564,10 @@ def known_cases():
 
 CONTRADICTION_SCHEMA = {
     "relations": [
-        {"type": "WORKS_AT", "aliases": ["employed by", "CEO_OF"], "from": {"max_count": 1}},
+        {"type": "WORKS_AT", "aliases": ["employed by"], "from": {"max_count": 1}},
         {"type": "CEO_OF", "from": {"max_count": 1}, "to": {"max_count": 1}},
         {"type": "MEMBER_OF", "from": {"max_count": 2}},
-        {"type": "KNOWS", "aliases": ["meets"]},
+        {"type": "KNOWS"},
         {"type": "MEETS"},
     ]
 }
@@ -725,6 +729,7 @@ ANSWER_ENTITIES = [
     _ent("thing:bo", "Bo"),
     _ent("city:new-york", "New York", "City"),
     _ent("city:york", "York", "City"),
+    _ent("thing:ann-s-bakery", "Ann's Bakery"),
 ]
 ANSWER_RELATIONS = [
     _rel("relation:w", "person:ann-lee", "WORKS_AT", "company:acme", since=2020),
@@ -736,7 +741,7 @@ ANSWER_RELATIONS = [
 ANSWER_SCHEMA = Schema.model_validate(
     {
         "entities": [{"name": "Person", "aliases": ["employee"]}, {"name": "Company"}],
-        "relations": [{"type": "FOUNDED", "aliases": ["started"]}],
+        "relations": [{"type": "FOUNDED", "aliases": ["started"], "synonyms": ["Lee's backer"]}],
     }
 )
 ANSWER_CASES = [
@@ -751,6 +756,17 @@ ANSWER_CASES = [
     ["Annie since", None, 3],
     ["the a of", None, 3],
     ["ÉCOLE Straße 北京", None, 3],
+    ["what is Ann Lee's employer", None, 3],
+    ["what is Ann Lee’s employer", None, 3],
+    ["Doesn't Ann Lee work at Acme Corp", None, 3],
+    ["why can't Ann Lee work at Acme Corp", None, 3],
+    ["Won't Globex grow, and isn't Acme Corp's revenue what we'll see", None, 3],
+    ["Ann Lee's", None, 3],
+    ["O'Brien", None, 3],
+    ["what is Ann's Bakery", None, 3],
+    ["what is Ann’s Bakery", None, 3],
+    ["who is Lee's backer", None, 3],
+    ["who is Lee’s backer", None, 3],
 ]
 
 

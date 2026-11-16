@@ -496,6 +496,48 @@ def test_reinserting_the_same_merge_is_idempotent_and_counts_every_source():
     assert run(g.entities.get(ROBERT_ID)).aliases == ["Bob"]
 
 
+ROBERT_RICH = {
+    "type": "Person",
+    "name": "Robert",
+    "aliases": ["Bob"],
+    "external_ids": {"hr": "R1"},
+    "properties": {"team": "red"},
+}
+BOB_FIRST = {
+    "type": "Person",
+    "name": "Bob",
+    "aliases": ["Bobby"],
+    "external_ids": {"crm": "C1"},
+    "properties": {"one": 1, "team": "blue"},
+}
+BOB_LATER = {
+    "type": "Person",
+    "name": "Bob",
+    "aliases": ["Robbie"],
+    "external_ids": {"crm": "C2", "hr": "B2"},
+    "properties": {"one": 3, "two": 2},
+}
+
+
+@pytest.mark.parametrize("together", [False, True], ids=["across_inserts", "one_insert"])
+def test_a_repeated_merge_restores_every_absorbed_field_on_unmerge(together):
+    g = fresh_graph("res", resolver="default")
+    _seed(g, ROBERT_RICH)
+    before = run(g.entities.get(ROBERT_ID))
+    batches = [[BOB_FIRST, BOB_LATER]] if together else [[BOB_FIRST], [BOB_LATER]]
+    merges = [run(g.insert.facts({"entities": b})).merges[0] for b in [*batches, batches[-1]]]
+    assert len({m.id for m in merges}) == 1 and merges[-1].created_at == merges[0].created_at
+    assert merges[-1].absorbed == merges[-2].absorbed
+    merged = run(g.entities.get(ROBERT_ID))
+    assert merged.aliases == ["Bob", "Bobby", "Robbie"]
+    assert (merged.external_ids, merged.properties) == ({"hr": "R1", "crm": "C1"}, {"team": "red", "one": 1, "two": 2})
+    out = run(g.entities.unmerge(merges[-1].id))
+    restored = (out.entity.aliases, out.entity.external_ids, out.entity.properties)
+    assert restored == (["Bobby", "Robbie"], {"crm": "C2", "hr": "B2"}, {"one": 3, "team": "blue", "two": 2})
+    survivor = (out.survivor.aliases, out.survivor.external_ids, out.survivor.properties)
+    assert survivor == (before.aliases, before.external_ids, before.properties)
+
+
 def test_a_merge_repeated_by_many_inserts_keeps_its_record_small_and_unmerges_every_relation():
     g = fresh_graph("res", resolver="default")
     _seed(g, ROBERT)

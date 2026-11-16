@@ -72,6 +72,27 @@ describe("DefaultResolver", () => {
 const BOB = entityId("Person", "Bob");
 const ROBERT = entityId("Person", "Robert");
 const TOOL = entityId("Tool", "Hammer");
+const ROBERT_RICH = {
+  type: "Person",
+  name: "Robert",
+  aliases: ["Bob"],
+  external_ids: { hr: "R1" },
+  properties: { team: "red" },
+};
+const BOB_FIRST = {
+  type: "Person",
+  name: "Bob",
+  aliases: ["Bobby"],
+  external_ids: { crm: "C1" },
+  properties: { one: 1, team: "blue" },
+};
+const BOB_LATER = {
+  type: "Person",
+  name: "Bob",
+  aliases: ["Robbie"],
+  external_ids: { crm: "C2", hr: "B2" },
+  properties: { one: 3, two: 2 },
+};
 
 const RICH: Extraction = {
   entities: [
@@ -585,6 +606,38 @@ function suite(spec: StoreSpec) {
     expect([restored.id, restored.source_count]).toEqual([BOB, 2]);
     expect((await g.entities.get(ROBERT))!.aliases).toEqual(["Bob"]);
   });
+
+  for (const together of [false, true]) {
+    it(`restores every absorbed field of a merge repeated ${together ? "in one insert" : "across inserts"}`, async () => {
+      const g = open({ resolver: "default" });
+      await seed(g, ROBERT_RICH);
+      const before = (await g.entities.get(ROBERT))!;
+      const batches = together ? [[BOB_FIRST, BOB_LATER]] : [[BOB_FIRST], [BOB_LATER]];
+      const merges = [];
+      for (const entities of [...batches, batches.at(-1)!])
+        merges.push((await g.insert.facts({ entities })).merges[0]!);
+      expect(new Set(merges.map((m) => m.id)).size).toBe(1);
+      expect(merges.at(-1)!.created_at).toEqual(merges[0]!.created_at);
+      expect(merges.at(-1)!.absorbed).toEqual(merges.at(-2)!.absorbed);
+      const merged = (await g.entities.get(ROBERT))!;
+      expect(merged.aliases).toEqual(["Bob", "Bobby", "Robbie"]);
+      expect([merged.external_ids, merged.properties]).toEqual([
+        { hr: "R1", crm: "C1" },
+        { team: "red", one: 1, two: 2 },
+      ]);
+      const out = await g.entities.unmerge(merges.at(-1)!.id);
+      expect([out.entity.aliases, out.entity.external_ids, out.entity.properties]).toEqual([
+        ["Bobby", "Robbie"],
+        { crm: "C2", hr: "B2" },
+        { one: 3, team: "blue", two: 2 },
+      ]);
+      expect([out.survivor!.aliases, out.survivor!.external_ids, out.survivor!.properties]).toEqual([
+        before.aliases,
+        before.external_ids,
+        before.properties,
+      ]);
+    });
+  }
 
   it("keeps a merge repeated by many inserts small and unmerges every relation it rewrote", async () => {
     const g = open({ resolver: "default" });

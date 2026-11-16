@@ -43,6 +43,9 @@ const STOPWORDS = new Set(
   ).split(" "),
 );
 
+const IRREGULAR = /(?<![\p{L}\p{N}_])(?:won|can)['’ʼ]t(?![\p{L}\p{N}_])/giu;
+const CLITIC =
+  /(?<=[\p{L}\p{N}_])n['’ʼ]t(?![\p{L}\p{N}_])|(?<=[\p{L}\p{N}_])['’ʼ](?:s|ll|re|ve|d|m)(?![\p{L}\p{N}_])/giu;
 const FILLER = new Set(
   (
     "about all any can could describe does explain find give i know list many me much my our please should show " +
@@ -839,7 +842,7 @@ async function collectPreferences(
  * @param subgraph (Subgraph): the collected entities, relations, preferences, and decisions.
  * @param names (Map<string, string>): entity id to display name.
  * @param dist (Map<string, number>): entity id to hop distance from the seeds.
- * @param budgetTokens (number): the token budget; when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
+ * @param budgetTokens (number): the token budget; the first line that does not fit ends the context, so a farther line never takes the place of a nearer one, and when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
  * @param countTokens ((text: string) => number): the token counter.
  * @param hubs (ReadonlySet<string>): hub entity ids; a relation line through one is marked "(via hub)".
  * @return (string): the context text. Certified relations come first among equally close ones and are marked "[certified]".
@@ -858,10 +861,15 @@ function assemble(
   const lines: string[] = [];
   let first: string | null = null;
   let used = 0;
+  let full = false;
   const add = (line: string, cap: number): boolean => {
     first ??= line;
+    if (full) return false;
     const cost = countTokens(line);
-    if (used + cost > cap) return false;
+    if (used + cost > cap) {
+      full = cap >= budgetTokens;
+      return false;
+    }
     lines.push(line);
     used += cost;
     return true;
@@ -1120,19 +1128,40 @@ async function run(
 }
 
 /**
+ * Split text into content tokens like tokenList, with possessive and contraction endings dropped.
+ *
+ * "Ann's" is "ann" and "Doesn't" is "does", so a name, a synonym, and a question spell the same words. "won't" and "can't" are irregular and stay whole.
+ *
+ * @param text (string): the question, name, or synonym.
+ * @return (string[]): the content tokens, repeats kept.
+ */
+function termWords(text: string): string[] {
+  const words: string[] = [];
+  let last = 0;
+  for (const m of text.matchAll(IRREGULAR)) {
+    words.push(...tokenList(text.slice(last, m.index).replace(CLITIC, "")));
+    words.push(m[0].toLowerCase().replace(/[’ʼ]/g, "'"));
+    last = m.index + m[0].length;
+  }
+  return [...words, ...tokenList(text.slice(last).replace(CLITIC, ""))];
+}
+
+/**
  * Split a question into terms: each longest run of its content tokens that spells a multi-word name or alias, and every other content token on its own, except filler words such as "where", "tell", and "me".
+ *
+ * A possessive or contraction ending is dropped from the question and from the names, so "Ann's Bakery" is one term whichever way it is written; "won't" and "can't" stay whole.
  *
  * @param question (string): the question.
  * @param names (Iterable<string>): the entity names, aliases, and schema term forms a run may spell, ignoring a plain plural ending.
  * @return (string[]): the distinct terms, in question order.
  */
 function questionTerms(question: string, names: Iterable<string>): string[] {
-  const words = tokenList(question).filter((w) => !FILLER.has(w));
+  const words = termWords(question).filter((w) => !FILLER.has(w));
   const stems = words.map(stem);
   const spelled = new Set<string>();
   let longest = 1;
   for (const name of names) {
-    const phrase = tokenList(name).map(stem);
+    const phrase = termWords(name).map(stem);
     if (phrase.length > 1) {
       spelled.add(JSON.stringify(phrase));
       longest = Math.max(longest, phrase.length);

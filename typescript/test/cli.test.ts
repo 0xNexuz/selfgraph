@@ -95,6 +95,50 @@ describe("built CLI against Kuzu", () => {
     }
   });
 
+  it("keeps NaN and Infinity flag values as text, since they are not JSON", () => {
+    const ns = ["--namespace", "nan_flags"];
+    const props = ["--prop", "a=NaN", "--prop", "b=Infinity", "--prop", "c=-Infinity"];
+    const created = cli([...kuzu, ...ns, "entity", "create", "--name", "A", "--type", "T", ...props]);
+    expect(created.code).toBe(0);
+    expect(created.out).toMatchObject({ properties: { a: "NaN", b: "Infinity", c: "-Infinity" } });
+  });
+
+  it("rejects llm tiers before version and mcp unless the cap or an llm removes them", () => {
+    const cleared = {
+      SELFGRAPH_LLM_PROVIDER: undefined,
+      SELFGRAPH_LLM_MODEL: undefined,
+      SELFGRAPH_LEVEL: undefined,
+      SELFGRAPH_MAX_TIER: undefined,
+      SELFGRAPH_RESOLVER: undefined,
+      SELFGRAPH_CONTRADICTION: undefined,
+    };
+    for (const [args, message] of [
+      [["--level", "max"], "level 'max' needs an LLM"],
+      [["--resolver", "llm"], "resolver 'llm' needs an LLM"],
+      [["--contradiction", "llm"], "contradiction 'llm' needs an LLM"],
+    ] as Array<[string[], string]>) {
+      const res = cli([...args, "version"], { env: cleared });
+      expect(res.code, args.join(" ")).toBe(2);
+      expect(res.err).toContain(message);
+    }
+    const strict = cli(["--schema-mode", "strict", "version"], { env: cleared });
+    expect([strict.code, strict.err]).toEqual([2, expect.stringContaining("schema_mode 'strict' needs a schema")]);
+    expect(cli(["--level", "max", "--max-tier", "light", "version"], { env: cleared }).code).toBe(0);
+    const llm = { SELFGRAPH_LLM_PROVIDER: "openai", SELFGRAPH_LLM_MODEL: "gpt-4o-mini" };
+    for (const args of [
+      ["--level", "max"],
+      ["--resolver", "llm"],
+      ["--contradiction", "llm"],
+    ]) {
+      expect(cli([...args, "version"], { env: llm }).code, args.join(" ")).toBe(0);
+    }
+    const env = { ...process.env };
+    for (const key of Object.keys(cleared)) delete env[key];
+    const mcp = spawnSync(process.execPath, [CLI, "--level", "max", "mcp"], { encoding: "utf8", timeout: 3000, env });
+    expect(mcp.status).toBe(2);
+    expect(mcp.stderr).toContain("level 'max' needs an LLM");
+  });
+
   it("exits 2 on bad command input with a message in CLI words", () => {
     const noLlm = { SELFGRAPH_LLM_PROVIDER: "", SELFGRAPH_LLM_MODEL: "", SELFGRAPH_RESOLVER: "" };
     for (const [args, message, env] of [
@@ -106,6 +150,7 @@ describe("built CLI against Kuzu", () => {
       [["insert", "text", "  "], "text cannot be empty or whitespace"],
       [["insert", "text", "Ann.", "--metadata", "nope"], "--metadata expects KEY=VALUE, got 'nope'"],
       [["insert", "text", "Ann.", "--metadata", "{notjson"], "invalid JSON in --metadata"],
+      [["insert", "text", "Ann.", "--metadata", '{"n": Infinity}'], "invalid JSON in --metadata"],
       [
         ["entity", "create", "--name", "a", "--type", "T", "--prop", '{"x":1}'],
         `--prop expects KEY=VALUE, got '{"x":1}'`,
