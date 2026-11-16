@@ -485,14 +485,24 @@ def test_reinserting_the_same_merge_is_idempotent_and_counts_every_source():
         "entities": [{"type": "Person", "name": "Bob", "aliases": ["Bobby"]}],
         "relations": [{"from_entity": ADA, "type": "KNOWS", "to_entity": BOB_ID}],
     }
-    merges = [run(g.insert.facts(facts, source_id=s)).merges[0] for s in ("s1", "s2", "s1")]
+    merges = []
+    for i, source in enumerate(("s1", "s2", "s1")):
+        facts["relations"][0]["properties"] = {"revision": i}
+        merges.append(run(g.insert.facts(facts, source_id=source)).merges[0])
     assert len({m.id for m in merges}) == 1
     last = merges[-1]
     assert (last.source_id, last.source_ids, last.added_aliases) == ("s1", ["s1", "s2"], ["Bobby"])
     assert [r.existed for r in last.rewrites] == [False]
+    assert last.rewrites[0].original["properties"] == {"revision": 0}
     assert len(run(g.entities.merges(ROBERT_ID)).items) == 1
-    restored = run(g.entities.unmerge(last.id)).entity
-    assert (restored.id, restored.source_count) == (BOB_ID, 2)
+    redirected = relation_id(ADA, "KNOWS", ROBERT_ID)
+    assert run(g.relations.get(redirected)).properties == {"revision": 2}
+    assert {e.source_id for e in run(g.relations.evidence(redirected)).items} == {"s1", "s2"}
+    out = run(g.entities.unmerge(last.id))
+    assert (out.entity.id, out.entity.source_count) == (BOB_ID, 2)
+    [restored] = out.relations
+    assert restored.properties == {"revision": 2}
+    assert {e.source_id for e in run(g.relations.evidence(restored.id)).items} == {"s1", "s2"}
     assert run(g.entities.get(ROBERT_ID)).aliases == ["Bob"]
 
 
@@ -554,6 +564,43 @@ def test_a_merge_repeated_by_many_inserts_keeps_its_record_small_and_unmerges_ev
     restored = run(g.entities.unmerge(rec.id))
     assert restored.entity.id == BOB_ID and len(restored.relations) == 80
     assert {r.from_entity for r in run(g.relations.list(type="VISITED", limit=200)).items} == {BOB_ID}
+
+
+@pytest.mark.parametrize("reverse_first", [False, True])
+def test_a_repeated_merge_keeps_both_reciprocal_self_loop_rewrites(reverse_first):
+    g = fresh_graph("res", resolver="default")
+    _seed(g, ROBERT)
+    pairs = [(BOB_ID, ROBERT_ID), (ROBERT_ID, BOB_ID)]
+    if reverse_first:
+        pairs.reverse()
+    merges = []
+    for i, (source, target) in enumerate([*pairs, *pairs]):
+        result = run(
+            g.insert.facts(
+                {
+                    "entities": [BOB],
+                    "relations": [
+                        {"from_entity": source, "type": "KNOWS", "to_entity": target, "properties": {"revision": i}}
+                    ],
+                },
+                source_id=f"s{i % 2}",
+            )
+        )
+        merges.append(result.merges[0])
+    [record] = run(g.entities.merges(ROBERT_ID)).items
+    assert len({m.id for m in merges}) == 1
+    assert record.source_ids == ["s0", "s1"]
+    assert len(record.rewrites) == 2
+    assert all(r.kind == "relation" and r.dropped for r in record.rewrites)
+    assert len({r.id for r in record.rewrites}) == 1
+    assert [r.original["properties"] for r in record.rewrites] == [{"revision": 0}, {"revision": 1}]
+    assert run(g.relations.list()).items == []
+    out = run(g.entities.unmerge(record.id))
+    expected = {relation_id(BOB_ID, "KNOWS", ROBERT_ID), relation_id(ROBERT_ID, "KNOWS", BOB_ID)}
+    assert {r.id for r in out.relations} == expected
+    assert {r.id for r in run(g.relations.list()).items} == expected
+    assert out.entity.source_count == 2
+    assert {e.source_id for e in run(g.entities.evidence(BOB_ID)).items} == {"s0", "s1"}
 
 
 def test_deleting_either_side_drops_merge_records_so_a_later_merge_starts_fresh():

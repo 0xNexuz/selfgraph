@@ -672,6 +672,25 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    reciprocal = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_reciprocal", resolver="default")
+    await reciprocal.entities.create("Robert", "Person", aliases=["Bob"])
+    for source, target in (
+        ("person:bob", "person:robert"),
+        ("person:robert", "person:bob"),
+        ("person:bob", "person:robert"),
+    ):
+        await reciprocal.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Bob"}],
+                "relations": [{"from_entity": source, "type": "KNOWS", "to_entity": target}],
+            }
+        )
+    record = (await reciprocal.entities.merges("person:robert")).items[0]
+    restored = await reciprocal.entities.unmerge(record.id)
+    out["reciprocal_merge"] = {
+        "rewrites": len(record.rewrites),
+        "relations": sorted(r.id for r in restored.relations),
+    }
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",

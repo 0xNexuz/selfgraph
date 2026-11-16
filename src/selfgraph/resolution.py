@@ -997,6 +997,18 @@ async def _write_merges(
     await runner.upsert_nodes(ns, L_MERGE, nodes)
 
 
+def _rewrite_key(rw: MergeRewrite) -> tuple[Any, ...]:
+    """Keep distinct originals of dropped self-loops without duplicating a repeated original.
+
+    @param rw (MergeRewrite): the recorded rewrite.
+    @return (tuple[Any, ...]): its deduplication key.
+    """
+    key = (rw.kind, rw.id)
+    if rw.kind == "relation" and rw.dropped:
+        return (*key, *(rw.original.get(name) for name in ("id", "from_entity", "type", "to_entity")))
+    return key
+
+
 async def save_merges(
     runner: Any, ns: str, resolution: Resolution, *, source_id: str | None, created_at: datetime
 ) -> list[MergeRecord]:
@@ -1035,7 +1047,7 @@ async def save_merges(
         )
         prev = _decode_merge(stored[mid], entries[mid]) if mid in stored else None
         if prev is not None and prev.reverted_at is None:
-            seen = {(r.kind, r.id) for r in prev.rewrites}
+            seen = {_rewrite_key(r) for r in prev.rewrites}
             rec = prev.model_copy(
                 update={
                     "source_ids": _ops._dedup_list([*prev.source_ids, *rec.source_ids]),
@@ -1043,7 +1055,7 @@ async def save_merges(
                     "added_aliases": _ops._dedup_list([*prev.added_aliases, *merge.added_aliases]),
                     "added_external_ids": _ops._dedup_list([*prev.added_external_ids, *merge.added_external_ids]),
                     "added_properties": _ops._dedup_list([*prev.added_properties, *merge.added_properties]),
-                    "rewrites": [*prev.rewrites, *(r for r in merge.rewrites if (r.kind, r.id) not in seen)],
+                    "rewrites": [*prev.rewrites, *(r for r in merge.rewrites if _rewrite_key(r) not in seen)],
                 }
             )
         records.append(rec)

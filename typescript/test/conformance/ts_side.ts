@@ -672,6 +672,24 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  const reciprocal = new SelfGraph(graph.store, { namespace: `${graph.namespace}_reciprocal`, resolver: "default" });
+  await reciprocal.entities.create("Robert", "Person", { aliases: ["Bob"] });
+  for (const [source, target] of [
+    ["person:bob", "person:robert"],
+    ["person:robert", "person:bob"],
+    ["person:bob", "person:robert"],
+  ] as const) {
+    await reciprocal.insert.facts({
+      entities: [{ type: "Person", name: "Bob" }],
+      relations: [{ from_entity: source, type: "KNOWS", to_entity: target }],
+    });
+  }
+  const reciprocalRecord = (await reciprocal.entities.merges("person:robert")).items[0]!;
+  const reciprocalRestored = await reciprocal.entities.unmerge(reciprocalRecord.id);
+  out.reciprocal_merge = {
+    rewrites: reciprocalRecord.rewrites.length,
+    relations: reciprocalRestored.relations.map((r) => r.id).sort(),
+  };
   await graph.insert.facts(
     {
       entities: [
