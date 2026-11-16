@@ -145,6 +145,16 @@ export interface Relation {
   certifications: Certification[];
 }
 
+export interface GraphDiff {
+  since: Date;
+  until: Date;
+  relations_added: Relation[];
+  relations_retired: Relation[];
+  relations_revised: Relation[];
+  entities_created: Entity[];
+  limitations: string[];
+}
+
 export interface Preference {
   id: string;
   revision: number;

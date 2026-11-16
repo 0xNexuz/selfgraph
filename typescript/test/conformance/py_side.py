@@ -998,6 +998,8 @@ async def write(graph):
         "relations": [(r.id, r.revision, r.is_current) for r in replayed.relations],
         "warnings": [w.code for w in replayed.warnings],
     }
+    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
+    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     extra_ns = f"{graph.namespace}:extra"
     await graph.store.upsert_nodes(
         extra_ns,
@@ -1259,6 +1261,37 @@ async def all_evidence(list_fn, oid):
         cursor = page.next_cursor
 
 
+async def diff_windows(graph):
+    d = await graph.diff("1900-01-01", "2100-01-01")
+    times = sorted(
+        {
+            at
+            for r in [*d.relations_added, *d.relations_revised, *d.relations_retired]
+            for at in (r.created_at, r.invalidated_known_at)
+            if at is not None
+        }
+    )
+    if not times:
+        return []
+    first, middle, last = times[0], times[len(times) // 2], times[-1]
+    windows = [("1900-01-01", first), (first, first), (first, middle), (middle, last), (last, "2100-01-01")]
+    out = []
+    for since, until in windows:
+        d = await graph.diff(since, until)
+        out.append(
+            {
+                "since": d.since.isoformat().replace("+00:00", "Z"),
+                "until": d.until.isoformat().replace("+00:00", "Z"),
+                "added": [[r.id, r.revision] for r in d.relations_added],
+                "revised": [[r.id, r.revision] for r in d.relations_revised],
+                "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
+                "entities": [e.id for e in d.entities_created],
+                "limitations": d.limitations,
+            }
+        )
+    return out
+
+
 async def dump(graph, ns):
     store = graph.store
     entities = [e async for e in graph.entities.iterate(limit=3)]
@@ -1309,6 +1342,8 @@ async def dump(graph, ns):
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
+            "diff": await graph.diff("1900-01-01", "2100-01-01"),
+            "diff_windows": await diff_windows(graph),
             "answerable": answerable,
             "prune_types": pruned,
             "known_at_sources": {
