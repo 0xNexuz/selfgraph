@@ -3206,6 +3206,33 @@ async def _resolve_steps(runner: Any, ns: str, step_rel_ids: list[str]) -> list[
     return steps
 
 
+async def _trace_links_intact(runner: Any, ns: str, trace: DecisionTrace) -> bool:
+    """Report whether a stored trace has exactly the links its fields name: actor, outcome, alternatives, step ends.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param trace (DecisionTrace): the stored trace, with its steps.
+    @return (bool): True when no link is missing, extra, or repeated.
+    """
+    made = await _edges_into(runner, ns, L_ENTITY, L_TRACE, "to_in", [trace.id], type=R_MADE_DECISION)
+    if sorted(e["from_id"] for e in made) != ([] if trace.actor_entity is None else [trace.actor_entity]):
+        return False
+    named = [(R_CONSIDERED, alt) for alt in trace.alternative_entities]
+    if trace.outcome_entity is not None:
+        named.append((R_RESULTED_IN, trace.outcome_entity))
+    out = await _edges_into(runner, ns, L_TRACE, L_ENTITY, "from_in", [trace.id])
+    if sorted((e["type"], e["to_id"]) for e in out) != sorted(named):
+        return False
+    sids = [_ids.step_id(trace.id, step.order) for step in trace.steps]
+    ends = await _edges_into(runner, ns, L_STEP, L_ENTITY, "from_in", sids) if sids else []
+    expected = [
+        (kind, sid, end)
+        for sid, s in zip(sids, trace.steps, strict=True)
+        for kind, end in ((R_FROM, s.from_entity), (R_TO, s.to_entity))
+    ]
+    return sorted((e["type"], e["from_id"], e["to_id"]) for e in ends) == sorted(expected)
+
+
 async def upsert_trace(
     runner: Any,
     ns: str,
@@ -3271,6 +3298,7 @@ async def upsert_trace(
         and list(existing.alternative_entities) == alternative_entities
         and to_iso(existing.event_time) == to_iso(event_time)
         and [s.relation_id for s in existing.steps] == [s.relation_id for s in steps]
+        and await _trace_links_intact(runner, ns, existing)
     ):
         return existing
     made_at = existing.created_at if existing is not None else created_at

@@ -3401,6 +3401,35 @@ export interface UpsertTraceArgs {
 }
 
 /**
+ * Report whether a stored trace has exactly the links its fields name: actor, outcome, alternatives, step ends.
+ *
+ * @param runner (Runner): the graph runner.
+ * @param ns (string): the namespace.
+ * @param trace (DecisionTrace): the stored trace, with its steps.
+ * @return (boolean): true when no link is missing, extra, or repeated.
+ */
+async function traceLinksIntact(runner: Runner, ns: string, trace: DecisionTrace): Promise<boolean> {
+  const made = await edgesAt(runner, ns, { from_label: L_ENTITY, to_label: L_TRACE, type: R_MADE_DECISION }, "to_in", [
+    trace.id,
+  ]);
+  const actors = made.map((e) => e.from_id).sort();
+  if (!deepEqual(actors, trace.actor_entity === null ? [] : [trace.actor_entity])) return false;
+  const named = trace.alternative_entities.map((alt) => `${R_CONSIDERED}\u0000${alt}`);
+  if (trace.outcome_entity !== null) named.push(`${R_RESULTED_IN}\u0000${trace.outcome_entity}`);
+  const out = await edgesAt(runner, ns, { from_label: L_TRACE, to_label: L_ENTITY }, "from_in", [trace.id]);
+  if (!deepEqual(out.map((e) => `${e.type}\u0000${e.to_id}`).sort(), named.sort())) return false;
+  const sids = trace.steps.map((step) => ids.stepId(trace.id, step.order));
+  const ends = sids.length
+    ? await edgesAt(runner, ns, { from_label: L_STEP, to_label: L_ENTITY }, "from_in", sids)
+    : [];
+  const expected = trace.steps.flatMap((step, k) => [
+    `${R_FROM}\u0000${sids[k]}\u0000${step.from_entity}`,
+    `${R_TO}\u0000${sids[k]}\u0000${step.to_entity}`,
+  ]);
+  return deepEqual(ends.map((e) => `${e.type}\u0000${e.from_id}\u0000${e.to_id}`).sort(), expected.sort());
+}
+
+/**
  * Insert-semantics upsert of a decision trace and its structure; an unchanged trace is a no-op.
  *
  * @param runner (Runner): the graph runner.
@@ -3444,7 +3473,8 @@ export async function upsertTrace(runner: Runner, ns: string, given: UpsertTrace
     deepEqual(
       existing.steps.map((s) => s.relation_id),
       steps.map((s) => s.relation_id),
-    )
+    ) &&
+    (await traceLinksIntact(runner, ns, existing))
   ) {
     return existing;
   }

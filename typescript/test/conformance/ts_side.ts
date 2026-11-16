@@ -346,6 +346,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
       ],
     }),
   );
+  const step = ids.stepId(dec, 0);
+  for (const [label, node, type] of [
+    ["DecisionStep", step, "FROM"],
+    ["DecisionStep", step, "TO"],
+  ] as const) {
+    await graph.store.deleteEdgesTouchingByType(graph.namespace, label, node, type);
+  }
+  await graph.insert.facts({ decisions: [restated] });
+  const links: string[][] = [];
+  for (const [from_label, to_label, filters] of [
+    ["Entity", "DecisionTrace", { to_in: [dec] }],
+    ["DecisionTrace", "Entity", { from_in: [dec] }],
+    ["DecisionStep", "Entity", { from_in: [step] }],
+  ] as const) {
+    const edges = await graph.store.matchEdges(graph.namespace, { from_label, to_label, ...filters });
+    links.push(...edges.map((e) => [e.type, e.from_id, e.to_id]));
+  }
+  const repaired = (await graph.decisions.get(dec))!;
+  await graph.insert.facts({ decisions: [restated] });
+  const retried = (await graph.decisions.get(dec))!;
+  out.dec_retry = {
+    links: links.sort((a, b) => comparePy(a[0]!, b[0]!)),
+    unchanged: retried.updated_at.getTime() === repaired.updated_at.getTime(),
+  };
   out.ent_update = toJsonable(
     await graph.entities.update("company:acme", { aliases: ["ACME", "Acme Co"], properties: { hq: "Paris", n: 3 } }),
   );
