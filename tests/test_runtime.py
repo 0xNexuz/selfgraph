@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import sys
 import weakref
 from types import SimpleNamespace
@@ -68,6 +70,61 @@ def test_unknown_llm_provider_fails_every_command_and_mcp_startup(monkeypatch, c
     assert "unknown LLM provider 'nonesuch'" in capsys.readouterr().err
     assert main(["--llm-provider", "nonesuch", "version"]) == 2
     assert "an LLM needs a model" in capsys.readouterr().err
+
+
+def test_llm_tiers_fail_before_version_and_mcp(monkeypatch, capsys):
+    from selfgraph.cli import main
+
+    for key in (
+        "SELFGRAPH_LLM_PROVIDER",
+        "SELFGRAPH_LLM_MODEL",
+        "SELFGRAPH_LEVEL",
+        "SELFGRAPH_MAX_TIER",
+        "SELFGRAPH_RESOLVER",
+        "SELFGRAPH_CONTRADICTION",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    for args, message in (
+        (["--level", "max", "version"], "level 'max' needs an LLM"),
+        (["--resolver", "llm", "version"], "resolver 'llm' needs an LLM"),
+        (["--contradiction", "llm", "version"], "contradiction 'llm' needs an LLM"),
+    ):
+        assert main(args) == 2
+        assert message in capsys.readouterr().err
+    assert main(["--schema-mode", "strict", "version"]) == 2
+    assert "schema_mode 'strict' needs a schema" in capsys.readouterr().err
+    assert main(["--level", "max", "--max-tier", "light", "version"]) == 0
+    capsys.readouterr()
+    llm = ["--llm-provider", "openai", "--llm-model", "gpt-4o-mini"]
+    for args in (
+        ["--level", "max", *llm, "version"],
+        ["--resolver", "llm", *llm, "version"],
+        ["--contradiction", "llm", *llm, "version"],
+    ):
+        assert main(args) == 0
+        capsys.readouterr()
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in {
+            "SELFGRAPH_LLM_PROVIDER",
+            "SELFGRAPH_LLM_MODEL",
+            "SELFGRAPH_LEVEL",
+            "SELFGRAPH_MAX_TIER",
+            "SELFGRAPH_RESOLVER",
+            "SELFGRAPH_CONTRADICTION",
+        }
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "selfgraph", "--level", "max", "mcp"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=env,
+    )
+    assert proc.returncode == 2
+    assert "level 'max' needs an LLM" in proc.stderr
 
 
 def test_check_settings_needs_no_store():

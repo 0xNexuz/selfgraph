@@ -103,6 +103,42 @@ describe("built CLI against Kuzu", () => {
     expect(created.out).toMatchObject({ properties: { a: "NaN", b: "Infinity", c: "-Infinity" } });
   });
 
+  it("rejects llm tiers before version and mcp unless the cap or an llm removes them", () => {
+    const cleared = {
+      SELFGRAPH_LLM_PROVIDER: undefined,
+      SELFGRAPH_LLM_MODEL: undefined,
+      SELFGRAPH_LEVEL: undefined,
+      SELFGRAPH_MAX_TIER: undefined,
+      SELFGRAPH_RESOLVER: undefined,
+      SELFGRAPH_CONTRADICTION: undefined,
+    };
+    for (const [args, message] of [
+      [["--level", "max"], "level 'max' needs an LLM"],
+      [["--resolver", "llm"], "resolver 'llm' needs an LLM"],
+      [["--contradiction", "llm"], "contradiction 'llm' needs an LLM"],
+    ] as Array<[string[], string]>) {
+      const res = cli([...args, "version"], { env: cleared });
+      expect(res.code, args.join(" ")).toBe(2);
+      expect(res.err).toContain(message);
+    }
+    const strict = cli(["--schema-mode", "strict", "version"], { env: cleared });
+    expect([strict.code, strict.err]).toEqual([2, expect.stringContaining("schema_mode 'strict' needs a schema")]);
+    expect(cli(["--level", "max", "--max-tier", "light", "version"], { env: cleared }).code).toBe(0);
+    const llm = { SELFGRAPH_LLM_PROVIDER: "openai", SELFGRAPH_LLM_MODEL: "gpt-4o-mini" };
+    for (const args of [
+      ["--level", "max"],
+      ["--resolver", "llm"],
+      ["--contradiction", "llm"],
+    ]) {
+      expect(cli([...args, "version"], { env: llm }).code, args.join(" ")).toBe(0);
+    }
+    const env = { ...process.env };
+    for (const key of Object.keys(cleared)) delete env[key];
+    const mcp = spawnSync(process.execPath, [CLI, "--level", "max", "mcp"], { encoding: "utf8", timeout: 3000, env });
+    expect(mcp.status).toBe(2);
+    expect(mcp.stderr).toContain("level 'max' needs an LLM");
+  });
+
   it("exits 2 on bad command input with a message in CLI words", () => {
     const noLlm = { SELFGRAPH_LLM_PROVIDER: "", SELFGRAPH_LLM_MODEL: "", SELFGRAPH_RESOLVER: "" };
     for (const [args, message, env] of [
