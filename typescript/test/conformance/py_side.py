@@ -6,8 +6,9 @@ import sys
 from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, _serde, ids
+from selfgraph.cli import _kv
 from selfgraph.retrieval import _tokens
-from selfgraph.runtime import to_jsonable
+from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
 from selfgraph.terms import expand_tokens, schema_forms
 
@@ -171,10 +172,32 @@ def neo4j_export_warnings():
     return "\n".join(lines)
 
 
+JSON_INPUTS = ["NaN", "Infinity", "-Infinity", "1.5", "[1]", "nope"]
+
+
+def json_constants():
+    """Parse each input as a KEY=VALUE flag value and inside a JSON document, as the CLI and settings do.
+
+    @return (dict): each input's flag value, and each document's parsed value or its error up to the first colon,
+        since the two JSON parsers word a syntax error differently.
+    """
+
+    def document(text):
+        try:
+            return parse_json(text, " in --metadata")
+        except ValidationError as exc:
+            return str(exc).partition(":")[0]
+
+    return {
+        "flags": [_kv([f"v={x}"], "--prop")["v"] for x in JSON_INPUTS],
+        "documents": [document(f'{{"v": {x}}}') for x in JSON_INPUTS],
+    }
+
+
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, and the fields the Neo4j export drops.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -190,6 +213,7 @@ def schema_warnings():
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
         "neo4j_dropped": neo4j_export_warnings(),
+        "json_constants": json_constants(),
         "terms": [
             sorted(expand_tokens(_tokens(q), terms, _tokens))
             for terms in [Schema.model_validate(TERMS_SPEC)]

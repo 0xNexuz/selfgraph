@@ -130,16 +130,25 @@ def read_text(path: str) -> str:
         raise ValidationError(f"cannot read {path!r}: {exc.strerror or exc}") from exc
 
 
+def _reject_constant(name: str) -> Any:
+    """Refuse NaN, Infinity, and -Infinity, which Python's json accepts but JSON and the TypeScript SDK do not.
+
+    @param name (str): the constant as written.
+    @return (Any): never returns; raises ValueError.
+    """
+    raise ValueError(f"{name} is not a JSON value")
+
+
 def parse_json(text: str, where: str = "") -> Any:
-    """Parse JSON text, naming where it came from in the error.
+    """Parse strict JSON text, naming where it came from in the error.
 
     @param text (str): the JSON text.
     @param where (str): appended to "invalid JSON" in the error, e.g. " in 'graph.json'".
     @return (Any): the parsed value.
     """
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
+        return json.loads(text, parse_constant=_reject_constant)
+    except ValueError as exc:
         raise ValidationError(f"invalid JSON{where}: {exc}") from exc
 
 
