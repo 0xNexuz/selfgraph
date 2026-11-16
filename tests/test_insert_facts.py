@@ -1,5 +1,5 @@
 import pytest
-from helpers import fresh_graph, new_graph, run, t_entities
+from helpers import KUZU, fresh_graph, new_graph, run, t_entities
 
 from selfgraph import Extraction, ValidationError, relation_id
 
@@ -263,3 +263,27 @@ def test_facts_bare_years_and_string_strengths_are_rejected():
         assert str(exc.value) == f"invalid facts: {message}"
     assert run(g.relations.list()).items == []
     run(g.close())
+
+
+@pytest.mark.skipif(not KUZU, reason="counts Kuzu statements")
+def test_relation_id_preflight_batches_kuzu_reads(monkeypatch):
+    g = fresh_graph("relation_id_batches")
+    run(g.entities.create("Ada", "Person"))
+    original = g.store._run
+    batches = []
+    single_reads = []
+
+    async def capture(query, params=None, **kwargs):
+        if "r.sid IN $ids" in query:
+            batches.append(len(params["ids"]))
+        if "r.sid = $sid" in query and "RETURN r.doc" in query:
+            single_reads.append(query)
+        return await original(query, params, **kwargs)
+
+    monkeypatch.setattr(g.store, "_run", capture)
+    entities = [{"type": "Person", "name": f"Contact {i}"} for i in range(257)]
+    relations = [{"from_entity": "person:ada", "type": "KNOWS", "to_entity": f"person:contact-{i}"} for i in range(257)]
+    result = run(g.insert.facts({"entities": entities, "relations": relations}))
+    assert len(result.relations) == 257
+    assert batches == [256, 1]
+    assert single_reads == []

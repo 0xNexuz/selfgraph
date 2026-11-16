@@ -424,6 +424,7 @@ export function aliasList(name: string, items: readonly string[]): string[] {
 
 const PAGE = 500;
 const BATCH = 1000;
+const RELATION_ID_BATCH = 256;
 
 /**
  * Call a skip/limit list function page by page until it runs dry or reaches the cap.
@@ -1675,7 +1676,23 @@ export async function currentRelations(
 ): Promise<Map<string, EdgeRow>> {
   const wanted = new Set(keyed.map(([rid]) => rid));
   const found = new Map<string, EdgeRow>();
-  const versions = (await runner.edgeVersions?.(ns, L_ENTITY, L_ENTITY, dedupList(keyed.map(([rid]) => rid)))) ?? null;
+  const ids = [...wanted];
+  let versions: EdgeRow[] | null = null;
+  if (runner.edgeVersions) {
+    if (allIds) {
+      versions = [];
+      for (const batch of batches(ids, RELATION_ID_BATCH)) {
+        const rows = await runner.edgeVersions(ns, L_ENTITY, L_ENTITY, batch);
+        if (rows === null) {
+          versions = null;
+          break;
+        }
+        for (const edge of rows) versions.push(edge);
+      }
+    } else {
+      versions = await runner.edgeVersions(ns, L_ENTITY, L_ENTITY, ids);
+    }
+  }
   for (const currentOnly of [true, false]) {
     const pending = dedupList(keyed.filter(([rid]) => !found.has(rid)).map(([, rel]) => rel.from_entity));
     const filter = { from_label: L_ENTITY, to_label: L_ENTITY, current_only: currentOnly };

@@ -208,6 +208,37 @@ function suite(spec: StoreSpec) {
     },
   );
 
+  it.runIf(spec.name === "kuzu")("batches relation ID preflight reads", async () => {
+    const g = fresh();
+    await g.entities.create("Ada", "Person");
+    const runner = g.store as unknown as {
+      _run(query: string, params?: Record<string, unknown>): Promise<unknown>;
+    };
+    const execute = vi.spyOn(runner, "_run");
+    try {
+      const contacts = Array.from({ length: 257 }, (_, i) => i);
+      const result = await g.insert.facts({
+        entities: contacts.map((i) => ({ type: "Person", name: `Contact ${i}` })),
+        relations: contacts.map((i) => ({
+          from_entity: "person:ada",
+          type: "KNOWS",
+          to_entity: `person:contact-${i}`,
+        })),
+      });
+      expect(result.relations).toHaveLength(257);
+      expect(
+        execute.mock.calls
+          .filter(([query]) => query.includes("r.sid IN $ids"))
+          .map(([, params]) => (Array.isArray(params?.ids) ? params.ids.length : 0)),
+      ).toEqual([256, 1]);
+      expect(
+        execute.mock.calls.filter(([query]) => query.includes("r.sid = $sid") && query.includes("RETURN r.doc")),
+      ).toEqual([]);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   it("reports a bad stance or status with the Python text, after the id check", async () => {
     const g = fresh();
     await g.entities.create("X", "T", { id: "t:x" });

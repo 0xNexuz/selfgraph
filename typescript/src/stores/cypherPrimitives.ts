@@ -412,6 +412,34 @@ export abstract class CypherPrimitives extends CypherRunner implements GraphPrim
     return res.rows.map(edgeRow);
   }
 
+  /**
+   * Read edge versions for a bounded list of ids in one query.
+   *
+   * @param ns (string): namespace.
+   * @param fromLabel (string | null): source label, or null for any.
+   * @param toLabel (string | null): target label, or null for any.
+   * @param ids (readonly string[]): edge ids.
+   * @return (Promise<EdgeRow[] | null>): rows grouped by requested id, or null for more than 256 ids.
+   */
+  async edgeVersions(
+    ns: string,
+    fromLabel: string | null,
+    toLabel: string | null,
+    ids: readonly string[],
+  ): Promise<EdgeRow[] | null> {
+    if (ids.length > 256) return null;
+    if (!ids.length) return [];
+    const fromPattern = fromLabel === null ? "" : `:${quoteLabel(fromLabel)}`;
+    const toPattern = toLabel === null ? "" : `:${quoteLabel(toLabel)}`;
+    const result = await this._run(
+      `MATCH (a${fromPattern})-[r]->(b${toPattern}) WHERE r.ns = $ns AND r.id IN $ids ` +
+        "RETURN r, a.id AS from_e, b.id AS to_e, type(r) AS t",
+      { ns, ids },
+    );
+    const order = new Map(ids.map((id, i) => [id, i]));
+    return result.rows.map(edgeRow).sort((a, b) => order.get(a.props.id as string)! - order.get(b.props.id as string)!);
+  }
+
   async updateCurrentEdge(ns: string, id: string, props: Props): Promise<void> {
     for (const k of Object.keys(props)) requireIdentifier(k);
     await this._run("MATCH ()-[r {id:$id, ns:$ns}]->() WHERE r.is_current = true SET r += $props", { id, ns, props });

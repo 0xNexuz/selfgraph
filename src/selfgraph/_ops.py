@@ -103,6 +103,7 @@ DECISION_CLEARABLE = (
 _MAX_ID_BYTES = 1024
 _PAGE = 500
 _BATCH = 1000
+_RELATION_ID_BATCH = 256
 
 SchemaCheck = Callable[..., Awaitable[None]]
 
@@ -1733,7 +1734,19 @@ async def _current_relations(
     wanted = {rid for rid, _ in keyed}
     found: dict[str, dict] = {}
     by_id = getattr(runner, "edge_versions", None)
-    versions = None if by_id is None else await by_id(ns, L_ENTITY, L_ENTITY, _dedup_list(rid for rid, _ in keyed))
+    ids = _dedup_list(rid for rid, _ in keyed)
+    versions = None
+    if by_id is not None:
+        if all_ids:
+            versions = []
+            for batch in _batches(ids, _RELATION_ID_BATCH):
+                rows = await by_id(ns, L_ENTITY, L_ENTITY, batch)
+                if rows is None:
+                    versions = None
+                    break
+                versions.extend(rows)
+        else:
+            versions = await by_id(ns, L_ENTITY, L_ENTITY, ids)
     for current_only in (True, False):
         pending = _dedup_list(rel.from_entity for rid, rel in keyed if rid not in found)
         if versions is None:
