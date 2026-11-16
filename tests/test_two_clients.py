@@ -79,6 +79,15 @@ def test_a_second_store_must_pass_the_same_options():
         run(store.close())
     assert path not in _DATABASE_OPTIONS
 
+    path = a_path()
+    store = KuzuStore(path, max_num_threads=1)
+    try:
+        bare = KuzuStore(path)
+        assert bare._db is store._db
+        run(bare.close())
+    finally:
+        run(store.close())
+
 
 @pytest.mark.skipif(not KUZU, reason="anonymous stores each get their own cache key")
 def test_two_in_memory_stores_share_neither_data_nor_locks():

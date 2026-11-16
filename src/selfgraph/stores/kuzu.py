@@ -209,7 +209,7 @@ class KuzuStore(AutoCommitStore):
 
         @param path (str): the database directory or file.
         @param db_kwargs (Any): kuzu.Database options, applied when this process first opens the path;
-            a second store on the path must resolve to the same options.
+            a second store on the path must not pass different values.
         @return (None): nothing.
         """
         try:
@@ -224,7 +224,6 @@ class KuzuStore(AutoCommitStore):
             path = os.path.abspath(path)
         key = object() if path in ("", ":memory:") else path
         with _CACHE_LOCK:
-            options = _db_options(kuzu, db_kwargs)
             db = _DATABASES.get(key)
             if db is None:
                 os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -232,13 +231,13 @@ class KuzuStore(AutoCommitStore):
                     db = _DATABASES[key] = kuzu.Database(path, **db_kwargs)
                 except Exception as exc:  # noqa: BLE001
                     raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
-                _DATABASE_OPTIONS[key] = options
+                _DATABASE_OPTIONS[key] = _db_options(kuzu, db_kwargs)
             else:
                 open_options = _DATABASE_OPTIONS[key]
                 diffs = ", ".join(
-                    f"{k} {open_options.get(k)!r} vs {options.get(k)!r}"
-                    for k in sorted(set(options) | set(open_options))
-                    if options.get(k) != open_options.get(k)
+                    f"{k} {open_options.get(k)!r} vs {v!r}"
+                    for k, v in sorted(db_kwargs.items())
+                    if v != open_options.get(k)
                 )
                 if diffs:
                     raise ValidationError(f"KuzuStore({path!r}) is already open with different options: {diffs}")

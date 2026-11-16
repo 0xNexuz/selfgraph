@@ -253,8 +253,8 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     } else {
       const open = DATABASE_OPTIONS.get(this.cacheKey);
       const diffs = (Object.keys(options) as (keyof KuzuDatabaseOptions)[])
-        .filter((k) => open?.[k] !== options[k])
-        .map((k) => `${k} ${pyRepr(open?.[k])} vs ${pyRepr(options[k])}`)
+        .filter((k) => o[k] !== undefined && o[k] !== open?.[k])
+        .map((k) => `${k} ${pyRepr(open?.[k])} vs ${pyRepr(o[k])}`)
         .join(", ");
       if (diffs) {
         throw new ValidationError(`KuzuStore(${pyRepr(this.path)}) is already open with different options: ${diffs}`);
@@ -287,7 +287,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
    *
    * @param path (string): the database directory or file.
    * @param options (KuzuStoreOptions): Kuzu database settings, applied when this process first opens the path;
-   *     a second store on the path must pass the same options.
+   *     a second store on the path must not pass different values.
    */
   constructor(
     path = "selfgraph_kuzu",

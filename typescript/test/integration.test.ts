@@ -1401,6 +1401,14 @@ describe("store setup errors", () => {
       await same.initialize();
       await same.close();
       await first.close();
+
+      const sizedPath = join(dir, "sized.kuzu");
+      const sized = new KuzuStore(sizedPath, { max_db_size: 1 << 30 });
+      await sized.initialize();
+      const bare = new KuzuStore(sizedPath);
+      await bare.initialize();
+      await bare.close();
+      await sized.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
