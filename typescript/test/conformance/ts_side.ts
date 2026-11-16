@@ -363,7 +363,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }),
   );
   await graph.entities.create("Temp Thing", "Thing", { properties: { k: "v" } });
-  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme");
+  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme", {
+    id: "relation:touch-a",
+    properties: { active: 1, flags: [false], count: 1 },
+  });
+  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme", {
+    id: "relation:touch-b",
+    properties: { active: true, flags: [0], count: 1 },
+  });
+  out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);

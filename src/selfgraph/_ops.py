@@ -393,6 +393,30 @@ def _canon_props(props: Mapping[str, Any] | None) -> dict[str, Any]:
     return _loads(_dumps(dict(props)), {})
 
 
+def _json_equal(left: Any, right: Any) -> bool:
+    """Compare stored JSON values, keeping booleans distinct from numbers at every depth.
+
+    @param left (Any): the first JSON value.
+    @param right (Any): the second JSON value.
+    @return (bool): whether the two values are equal.
+    """
+    if left is right:
+        return True
+    if isinstance(left, dict):
+        return (
+            isinstance(right, dict)
+            and left.keys() == right.keys()
+            and all(_json_equal(v, right[k]) for k, v in left.items())
+        )
+    if isinstance(left, list):
+        return (
+            isinstance(right, list)
+            and len(left) == len(right)
+            and all(_json_equal(a, b) for a, b in zip(left, right, strict=True))
+        )
+    return isinstance(left, bool) == isinstance(right, bool) and left == right
+
+
 def _merge_props(
     base: Mapping[str, Any] | None, changes: Mapping[str, Any] | None, removed: Iterable[str] = ()
 ) -> dict[str, Any]:
@@ -987,7 +1011,7 @@ async def upsert_entities(
                 etype == prev.type
                 and merged_aliases == prev.aliases
                 and merged_external == prev.external_ids
-                and merged_properties == prev.properties
+                and _json_equal(merged_properties, prev.properties)
                 and sources == prev.source_count
             ):
                 out.append(prev)
@@ -1156,7 +1180,7 @@ async def update_entity(
         and new_name == existing.name
         and aliases == existing.aliases
         and external_ids == existing.external_ids
-        and properties == existing.properties
+        and _json_equal(properties, existing.properties)
     ):
         return existing
     props = encode_entity_props(
@@ -2161,7 +2185,9 @@ async def upsert_relations(
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
             reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
-            unchanged = prev.properties == merged_properties and to_iso(prev.event_time) == to_iso(event_time)
+            unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
+                event_time
+            )
             if unchanged and not reassert:
                 write = sources != prev.source_count
                 props = {**edge["props"], "source_count": sources}
@@ -2378,7 +2404,7 @@ async def update_relation(
     records, gained = await _plan_evidence(runner, ns, [(rid, ev) for ev in evidence or []], new_targets=set())
     sources = current.source_count + gained.get(rid, 0)
 
-    if new_props == current.properties and to_iso(new_event_time) == to_iso(current.event_time):
+    if _json_equal(new_props, current.properties) and to_iso(new_event_time) == to_iso(current.event_time):
         if sources != current.source_count:
             await runner.update_current_edge(ns, rid, {"source_count": sources})
             current.source_count = sources
@@ -2883,7 +2909,7 @@ async def upsert_preference(
         current is not None
         and current.strength == strength
         and current.about_entity == about_entity
-        and current.properties == merged_props
+        and _json_equal(current.properties, merged_props)
         and to_iso(current.event_time) == to_iso(event_time)
     ):
         return current
@@ -3003,7 +3029,7 @@ async def update_preference(
     if (
         new_strength == current.strength
         and new_about == current.about_entity
-        and new_props == current.properties
+        and _json_equal(new_props, current.properties)
         and to_iso(new_event_time) == to_iso(current.event_time)
     ):
         return current

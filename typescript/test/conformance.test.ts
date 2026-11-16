@@ -119,6 +119,7 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const pyOps = py("write", store, nsPy);
         const tsOps = await ts(store, nsTs, write);
+        expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
