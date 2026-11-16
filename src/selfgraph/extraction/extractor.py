@@ -49,13 +49,6 @@ class _EntityOut(BaseModel):
     name: str
     aliases: list[str] | None = None
 
-    def as_input(self) -> EntityInput:
-        """Build the insert entity; ids are always derived from type and name, and null aliases mean none.
-
-        @return (EntityInput): the entity without a caller- or model-chosen id.
-        """
-        return EntityInput(type=self.type, name=self.name, aliases=self.aliases or [])
-
 
 class _EntitiesOut(BaseModel):
     entities: list[_EntityOut] = Field(default_factory=list)
@@ -286,7 +279,7 @@ class LLMExtractor(_WarningSink):
                     result = await self._llm.generate(system=system, user=user, output=schema)
                     items = getattr(_checked_output(result, schema, kind), kind)
                     if kind == "entities":
-                        return [item.as_input() for item in items]
+                        return [EntityInput(type=e.type, name=e.name, aliases=e.aliases or []) for e in items]
                     return items
                 except ExtractionError:
                     raise

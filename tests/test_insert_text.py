@@ -159,7 +159,7 @@ def test_regex_extraction_keeps_names_that_start_with_a_non_ascii_capital():
 def test_llm_entity_ids_are_ignored_and_relation_endpoints_use_the_derived_ids():
     entities = [{"id": "1", "type": "Person", "name": "Ann Lee"}, {"id": "2", "type": "Company", "name": "Acme Inc."}]
     relations = _RelationsOut(relations=[_RelOut(from_name="Ann Lee", type="WORKS_AT", to_name="Acme Inc.")])
-    g = new_graph(llm=FakeLLM({"_EntitiesOut": {"entities": entities}, "_RelationsOut": relations}))
+    g = fresh_graph("llm-ids", llm=FakeLLM({"_EntitiesOut": {"entities": entities}, "_RelationsOut": relations}))
     res = run(g.insert.text("Ann Lee works at Acme Inc.", source_id="llm-ids"))
     assert {e.id for e in res.entities} == {"person:ann-lee", "company:acme"}
     assert [(r.from_entity, r.type, r.to_entity) for r in res.relations] == [
@@ -172,7 +172,7 @@ def test_llm_entity_with_null_aliases_is_stored_without_aliases():
         {"type": "Person", "name": "Ann Lee", "aliases": None},
         {"type": "Company", "name": "Acme", "aliases": ["Acme Corp"]},
     ]
-    g = new_graph(llm=FakeLLM({"_EntitiesOut": {"entities": entities}}))
+    g = fresh_graph("llm-null-aliases", llm=FakeLLM({"_EntitiesOut": {"entities": entities}}))
     res = run(g.insert.text("Ann Lee works at Acme.", source_id="llm-null-aliases"))
     assert res.warnings == []
     assert {e.id: e.aliases for e in res.entities} == {"person:ann-lee": [], "company:acme": ["Acme Corp"]}
