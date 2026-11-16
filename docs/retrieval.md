@@ -248,6 +248,8 @@ This scans the namespace's stored records, not an isolated snapshot or an audit
 log. Deletes and merges are not visible. The result includes
 `limitations: ["Deletes and merges are not visible."]`. Deleted records and
 overwritten retirement history cannot be recovered.
+A delete-triggered restoration is visible as a new relation revision, but the
+deleted record and the deletion event are not.
 Returned entity fields and relation metadata reflect stored values, not their
 historical values. Preferences, decisions, and entity edits are not included.
 TypeScript uses `await graph.diff(since, until)`. Both SDKs return the same fields.

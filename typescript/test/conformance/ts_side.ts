@@ -991,6 +991,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     relations: replayed.relations.map((r) => [r.id, r.revision, r.is_current]),
     warnings: replayed.warnings.map((w) => w.code),
   };
+  await graph.insert.text("Mira knows Niko.", { source_id: "diff-source" });
+  await graph.insert.text("Mira knows Omar.", { source_id: "diff-source", replace_source: true });
   const extraNs = `${graph.namespace}:extra`;
   await graph.store.upsertNodes(
     extraNs,
@@ -1016,8 +1018,6 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
     single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
   };
-  await graph.insert.text("Mira knows Niko.", { source_id: "diff-source" });
-  await graph.insert.text("Mira knows Omar.", { source_id: "diff-source", replace_source: true });
   return out;
 }
 

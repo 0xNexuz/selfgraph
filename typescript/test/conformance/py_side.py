@@ -965,6 +965,8 @@ async def write(graph):
         "relations": [(r.id, r.revision, r.is_current) for r in replayed.relations],
         "warnings": [w.code for w in replayed.warnings],
     }
+    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
+    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     extra_ns = f"{graph.namespace}:extra"
     await graph.store.upsert_nodes(
         extra_ns,
@@ -990,8 +992,6 @@ async def write(graph):
         "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
         "single_extra": extra_single_node["id"] if extra_single_node else None,
     }
-    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
-    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     return out
 
 

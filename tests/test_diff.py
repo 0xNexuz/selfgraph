@@ -79,10 +79,9 @@ def test_diff_boundaries_all_revisions_and_read_only():
     assert run(g.relations.versions(r1.id)) == before
 
 
-def test_diff_sync_cli_and_mcp(capsys):
+def test_diff_cli_and_mcp(capsys):
     from helpers import cli, mcp_session
 
-    from selfgraph import SyncSelfGraph
     from selfgraph.cli import build_parser, dispatch
     from selfgraph.mcp import server
     from selfgraph.runtime import to_jsonable
@@ -102,11 +101,21 @@ def test_diff_sync_cli_and_mcp(capsys):
         assert "1 entities created, 0 relations added, 0 revised, 0 retired" in summary
         assert run(server.graph_diff(start.isoformat(), end.isoformat())) == expected
         assert "graph_diff" in [tool.__name__ for tool in server.TOOLS]
-        sync = SyncSelfGraph._of(g)
-        try:
-            assert to_jsonable(sync.diff(start, end)) == expected
-        finally:
-            sync.close()
+
+
+def test_diff_sync():
+    from helpers import make_store, unique_ns
+
+    from selfgraph import SyncSelfGraph
+
+    with SyncSelfGraph(make_store(), namespace=unique_ns("diff-sync")) as g:
+        start = instant()
+        entity = g.entities.create("Ann", "Person")
+        end = instant()
+        d = g.diff(start, end)
+        assert d.entities_created == [entity]
+        assert d.relations_added == d.relations_revised == d.relations_retired == []
+        assert d.limitations == ["Deletes and merges are not visible."]
 
 
 def test_diff_pages_entities_and_skips_internal_edges():
@@ -216,7 +225,10 @@ def test_diff_retirement_boundaries_reassertion_and_delete_limit():
     before_delete = instant()
     run(g.relations.delete(acme.id))
     deleted = run(g.diff(before_delete))
-    assert deleted.relations_added == deleted.relations_revised == deleted.relations_retired == []
+    assert deleted.relations_added == deleted.relations_retired == []
+    assert [(r.id, r.revision) for r in deleted.relations_revised] == [(globex.id, 2)]
+    assert run(g.relations.get(acme.id)) is None
+    assert run(g.relations.get(globex.id)) is not None
 
 
 def test_bolt_edge_pages_order_revisions_within_each_relation(monkeypatch):
@@ -235,3 +247,90 @@ def test_bolt_edge_pages_order_revisions_within_each_relation(monkeypatch):
     query, params = queries[0]
     assert "ORDER BY r.id, r.revision SKIP $skip LIMIT $limit" in query
     assert params["skip"] == params["limit"] == 500
+
+
+def test_diff_late_fact_retirement_correction_and_quiet_restatement():
+    g = employment_graph("diff-late", contradiction="supersede")
+    create_entities(g, "Company:Initech")
+    acme = run(g.relations.create("person:ann", "WORKS_AT", "company:acme", event_time="2000-01-01"))
+    initech = run(g.relations.create("person:ann", "WORKS_AT", "company:initech", event_time="2004-01-01"))
+    before = instant()
+    globex = run(g.relations.create("person:ann", "WORKS_AT", "company:globex", event_time="2002-01-01"))
+    after = instant()
+    d = run(g.diff(before, after))
+    assert [r.id for r in d.relations_added] == [globex.id]
+    assert [(r.id, r.revision) for r in d.relations_revised] == [(acme.id, 2)]
+    assert {r.id: r.invalidated_by for r in d.relations_retired} == {acme.id: globex.id, globex.id: initech.id}
+    run(
+        g.insert.facts(
+            {"relations": [{"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:initech"}]}
+        )
+    )
+    quiet = run(g.diff(after))
+    assert quiet.relations_added == quiet.relations_revised == quiet.relations_retired == []
+    assert run(g.relations.get(initech.id)).event_time == initech.event_time
+
+
+@pytest.mark.parametrize("count", [499, 500, 501, 505, 1005])
+def test_diff_pages_every_revision_of_one_relation(count):
+    from selfgraph._serde import encode_relation_props
+
+    g = fresh_graph("diff-revision-pages")
+    create_entities(g, "T:A", "T:B")
+    stamp = instant()
+    rows = [
+        (
+            "KNOWS",
+            "t:a",
+            "t:b",
+            encode_relation_props(
+                ns=g.namespace,
+                id="relation:many",
+                revision=revision,
+                properties={},
+                event_time=None,
+                created_at=stamp,
+                is_current=revision == count,
+                source_count=0,
+            ),
+        )
+        for revision in range(count, 0, -1)
+    ]
+    run(g.store.create_edges(g.namespace, "Entity", "Entity", rows))
+    result = run(g.diff("1900-01-01", "2100-01-01"))
+    assert [(r.id, r.revision) for r in result.relations_added] == [("relation:many", 1)]
+    assert [(r.id, r.revision) for r in result.relations_revised] == [
+        ("relation:many", revision) for revision in range(2, count + 1)
+    ]
+    assert result.relations_retired == []
+
+
+@pytest.mark.parametrize("backend", ["kuzu", "hydradb"])
+def test_document_edge_pages_order_by_id_and_revision(backend, monkeypatch):
+    from selfgraph import HydraDBStore, KuzuStore
+    from selfgraph.models import CypherResult
+
+    if backend == "kuzu":
+        pytest.importorskip("kuzu")
+        store = KuzuStore(":memory:")
+    else:
+        store = HydraDBStore("bolt://localhost:17687", auth=("neo4j", "test"))
+    queries = []
+
+    async def capture(query, params):
+        queries.append(query)
+        return CypherResult(columns=[], rows=[])
+
+    monkeypatch.setattr(store, "_run", capture)
+    try:
+        run(store.match_edges("test", from_label="Entity", skip=500, limit=500))
+        if backend == "kuzu":
+            assert "ORDER BY r.sid, r.revision SKIP 500 LIMIT 500" in queries[-1]
+        else:
+            assert "r.revision AS __rev" in queries[-1]
+            assert "ORDER BY __ob, __rev SKIP $skip LIMIT $limit" in queries[-1]
+        run(store.match_edges("test", from_label="Entity", order_by="revision"))
+        assert "__rev" not in queries[-1]
+        assert "ORDER BY r.revision SKIP" in queries[-1] if backend == "kuzu" else "ORDER BY __ob SKIP" in queries[-1]
+    finally:
+        run(store.close())

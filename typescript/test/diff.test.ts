@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { StoreError, ValidationError } from "../src/index.js";
+import { HydraDBStore, KuzuStore, StoreError, ValidationError } from "../src/index.js";
+import { encodeRelationProps } from "../src/serde.js";
 import { CypherPrimitives } from "../src/stores/cypherPrimitives.js";
 import { forEachStore, freshGraphs, type StoreSpec } from "./helpers.js";
 
@@ -74,6 +75,80 @@ function suite(spec: StoreSpec): void {
     }
   });
 
+  it.each([499, 500, 501, 505, 1005])("pages every revision of one relation with %i revisions", async (count) => {
+    const g = open();
+    await g.entities.create("A", "T");
+    await g.entities.create("B", "T");
+    const stamp = new Date();
+    await g.store.createEdges(
+      g.namespace,
+      "Entity",
+      "Entity",
+      Array.from({ length: count }, (_, i) => [
+        "KNOWS",
+        "t:a",
+        "t:b",
+        encodeRelationProps({
+          ns: g.namespace,
+          id: "relation:many",
+          revision: count - i,
+          properties: {},
+          event_time: null,
+          created_at: stamp,
+          is_current: i === 0,
+          source_count: 0,
+        }),
+      ]),
+    );
+    const result = await g.diff("1900-01-01", "2100-01-01");
+    expect(result.relations_added.map((r) => [r.id, r.revision])).toEqual([["relation:many", 1]]);
+    expect(result.relations_revised.map((r) => [r.id, r.revision])).toEqual(
+      Array.from({ length: count - 1 }, (_, i) => ["relation:many", i + 2]),
+    );
+    expect(result.relations_retired).toEqual([]);
+  });
+
+  it("reports delete restorations, late corrections, and quiet restatements", async () => {
+    const g = open({
+      schema: {
+        entities: [{ name: "Person" }, { name: "Company" }],
+        relations: [{ type: "WORKS_AT", from: { max_count: 1 } }],
+      },
+      contradiction: "supersede",
+    });
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Ann" },
+        ...["Acme", "Globex", "Initech"].map((name) => ({ type: "Company", name })),
+      ],
+    });
+    const a = await g.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: "2000-01-01" });
+    const c = await g.relations.create("person:ann", "WORKS_AT", "company:initech", { event_time: "2004-01-01" });
+    const before = new Date();
+    const b = await g.relations.create("person:ann", "WORKS_AT", "company:globex", { event_time: "2002-01-01" });
+    const d = await g.diff(before);
+    expect(d.relations_added.map((r) => r.id)).toEqual([b.id]);
+    expect(d.relations_revised.map((r) => [r.id, r.revision])).toEqual([[a.id, 2]]);
+    expect(Object.fromEntries(d.relations_retired.map((r) => [r.id, r.invalidated_by]))).toEqual({
+      [a.id]: b.id,
+      [b.id]: c.id,
+    });
+    const quietStart = new Date();
+    await g.insert.facts({
+      relations: [{ from_entity: "person:ann", type: "WORKS_AT", to_entity: "company:initech" }],
+    });
+    const quiet = await g.diff(quietStart);
+    expect([quiet.relations_added, quiet.relations_revised, quiet.relations_retired]).toEqual([[], [], []]);
+    expect((await g.relations.get(c.id))?.event_time).toEqual(c.event_time);
+    const deleteStart = new Date();
+    await g.relations.delete(c.id);
+    const deleted = await g.diff(deleteStart);
+    expect(deleted.relations_added).toEqual([]);
+    expect(deleted.relations_retired).toEqual([]);
+    expect(deleted.relations_revised.map((r) => [r.id, r.revision])).toEqual([[b.id, 2]]);
+    expect(await g.relations.get(c.id)).toBeNull();
+  });
+
   it("reports supersede and source-replacement retirements", async () => {
     const g = open({
       schema: {
@@ -134,4 +209,25 @@ it("orders Bolt edge pages by relation id and revision", async () => {
   const store = new Capture();
   await store.matchEdges("test", { from_label: "Entity", current_only: false, skip: 500, limit: 500 });
   expect(store.query).toContain("ORDER BY r.id, r.revision SKIP $skip LIMIT $limit");
+});
+
+it("orders document-backed edge pages by id and revision", async () => {
+  const stores = [new KuzuStore(":memory:"), new HydraDBStore("bolt://localhost:17687", { auth: ["neo4j", "test"] })];
+  for (const store of stores) {
+    const capture = vi.spyOn(store as unknown as { _run: (query: string) => Promise<unknown> }, "_run");
+    capture.mockResolvedValue({ columns: [], rows: [], counters: {}, warnings: [] });
+    try {
+      await store.matchEdges("test", { from_label: "Entity", skip: 500, limit: 500 });
+      const query = capture.mock.calls[0]![0];
+      if (store instanceof KuzuStore) {
+        expect(query).toContain("ORDER BY r.sid, r.revision SKIP 500 LIMIT 500");
+      } else {
+        expect(query).toContain("r.revision AS __rev");
+        expect(query).toContain("ORDER BY __ob, __rev SKIP $skip LIMIT $limit");
+      }
+    } finally {
+      capture.mockRestore();
+      await store.close();
+    }
+  }
 });
