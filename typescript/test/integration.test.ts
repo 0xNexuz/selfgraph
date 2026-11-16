@@ -76,6 +76,47 @@ function suite(spec: StoreSpec) {
     await other?.close();
   });
 
+  it("undated preference restatement keeps strength and event_time", async () => {
+    const g = fresh();
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Soham" },
+        { type: "Company", name: "HydraDB" },
+        { type: "Company", name: "Neo4j" },
+      ],
+    });
+    await g.insert.facts(
+      {
+        preferences: [
+          {
+            subject_entity: "person:soham",
+            key: "database",
+            value_entity: "company:hydradb",
+            strength: 0.9,
+            about_entity: "company:neo4j",
+            event_time: "2020-01-01T00:00:00+00:00",
+          },
+        ],
+      },
+      { source_id: "a" },
+    );
+    await g.insert.facts(
+      {
+        preferences: [
+          {
+            subject_entity: "person:soham",
+            key: "database",
+            value_entity: "company:hydradb",
+          },
+        ],
+      },
+      { source_id: "b" },
+    );
+    const [pref] = (await g.preferences.list()).items;
+    expect([pref!.strength, pref!.about_entity, pref!.revision]).toEqual([0.9, "company:neo4j", 1]);
+    expect(pref!.event_time).toEqual(new Date("2020-01-01T00:00:00+00:00"));
+  });
+
   it("keeps the fields a restated decision leaves out", async () => {
     const g = fresh();
     await g.insert.facts({

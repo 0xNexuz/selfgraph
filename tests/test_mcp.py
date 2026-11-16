@@ -307,7 +307,8 @@ def test_facts_evidence_versions_dry_runs_and_decision_steps():
     with mcp_session():
         out = run(srv.insert_facts(AB_FACTS, source_id="s1", event_time="2020-05-01"))
         assert out["relations"][0]["event_time"] == "2020-05-01T00:00:00Z"
-        run(srv.insert_facts(AB_FACTS, source_id="s2"))
+        again = run(srv.insert_facts(AB_FACTS, source_id="s2"))
+        assert again["relations"][0]["event_time"] == "2020-05-01T00:00:00Z"
         assert run(srv.get_entity("t:a"))["source_count"] == 2
         first = run(srv.entity_evidence("t:a", limit=1))
         rest = run(srv.entity_evidence("t:a", limit=1, cursor=first["next_cursor"]))
@@ -320,7 +321,7 @@ def test_facts_evidence_versions_dry_runs_and_decision_steps():
         sources = sorted(e["source_id"] for e in run(srv.relation_evidence("relation:ab"))["items"])
         assert sources == ["doc-2", "s1", "s2"]
         assert run(srv.get_relation("relation:ab"))["type"] == "KNOWS"
-        assert [v["revision"] for v in run(srv.relation_versions("relation:ab"))] == [3, 2, 1]
+        assert [v["revision"] for v in run(srv.relation_versions("relation:ab"))] == [2, 1]
 
         assert "deleted" not in run(srv.maintenance_prune(min_relevance=0.5))
         assert "deleted" not in run(srv.maintenance_dedupe_relations())

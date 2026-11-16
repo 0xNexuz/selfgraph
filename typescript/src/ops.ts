@@ -1690,6 +1690,23 @@ export interface RelationCap {
 export const effectiveTime = (version: Relation | Preference | DecisionTrace): Date =>
   version.event_time ?? version.created_at;
 
+/**
+ * Pick the event_time for an upsert of an existing version.
+ *
+ * A write that does not name a time keeps the stored time when the version is still current, matching
+ * updateRelation. A reassertion of a retired version with no named time leaves event_time unset so the
+ * effective time is the write's creation time.
+ *
+ * @param named (Date | null): the time named on this write, after applying the insert default.
+ * @param stored (Date | null): the current version's event_time.
+ * @param keepStored (boolean): true when the stored version is current and should keep its time.
+ * @return (Date | null): the event_time to store.
+ */
+const restatedEventTime = (named: Date | null, stored: Date | null, keepStored: boolean): Date | null => {
+  if (named !== null) return named;
+  return keepStored ? stored : null;
+};
+
 type Slot = readonly [string, string, string];
 type Rank = readonly [number, number, number];
 
@@ -2209,12 +2226,13 @@ export async function upsertRelations(
   const retires = new Map<string, readonly [string, Props]>();
   const out: Array<readonly [string, number, Relation]> = [];
   for (const { rid, rtype, rel } of keyed) {
-    const eventTime = rel.event_time || defaultEventTime;
-    const effective = eventTime ?? createdAt;
+    const named = rel.event_time ?? defaultEventTime ?? null;
     let edge = current.get(rid);
     let props: Props;
     let write = true;
+    let eventTime: Date | null;
     if (edge === undefined) {
+      eventTime = named;
       props = encodeRelationProps({
         ns,
         id: rid,
@@ -2229,6 +2247,8 @@ export async function upsertRelations(
     } else {
       requireSameEnds(rid, [edge.from_id, edge.type, edge.to_id], [rel.from_entity, rtype, rel.to_entity]);
       const prev = relationOf(edge);
+      eventTime = restatedEventTime(named, prev.event_time, prev.is_current);
+      const effective = eventTime ?? createdAt;
       const sources = prev.source_count + takeGained(gained, rid);
       const mergedProperties = mergeProps(prev.properties, rel.properties);
       const reassert =
@@ -3013,7 +3033,7 @@ export async function upsertPreference(
   validateStrength(pref.strength);
   validateOwnId("preference", pref.id);
   const pid = pref.id || ids.preferenceId(pref.subject_entity, pref.stance, pref.key, pref.value_entity);
-  const eventTime = pref.event_time || defaultEventTime;
+  const named = pref.event_time ?? defaultEventTime ?? null;
   await requirePreferenceRefs(runner, ns, pref);
   const profileId = await ensureProfile(runner, ns, pref.subject_entity, createdAt);
 
@@ -3031,6 +3051,9 @@ export async function upsertPreference(
         "these identify the preference and are immutable; create a new preference to change them",
     );
   }
+  const eventTime = current === null ? named : restatedEventTime(named, current.event_time, true);
+  const strength = current === null || pref.strength != null ? pref.strength : current.strength;
+  const aboutEntity = current === null || pref.about_entity != null ? pref.about_entity : current.about_entity;
   const mergedProps = mergeProps(current?.properties ?? null, pref.properties);
   const props = encodePreferenceProps({
     ns,
@@ -3038,8 +3061,8 @@ export async function upsertPreference(
     revision: current === null ? 1 : current.revision + 1,
     subject_entity: pref.subject_entity,
     key: ids.normalizeText(pref.key),
-    about_entity: pref.about_entity,
-    strength: pref.strength,
+    about_entity: aboutEntity ?? null,
+    strength: strength ?? null,
     properties: mergedProps,
     event_time: eventTime,
     created_at: createdAt,
@@ -3048,8 +3071,8 @@ export async function upsertPreference(
 
   if (current !== null) {
     const unchanged =
-      current.strength === pref.strength &&
-      current.about_entity === pref.about_entity &&
+      current.strength === strength &&
+      current.about_entity === aboutEntity &&
       deepEqual(current.properties, mergedProps) &&
       toIso(current.event_time) === toIso(eventTime);
     if (unchanged) return current;
