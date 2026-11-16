@@ -2356,9 +2356,11 @@ export async function repointRetired(
  * A superseded relation is retired in place: its version keeps its revision and gains invalidated_at and
  * invalidated_by, so the version list shows exactly the writes that happened. In supersede mode each constrained
  * endpoint the batch touches is settled once after the whole batch (see Contradictions.settle): an input older than
- * the relations it conflicts with is written already invalidated. New versions are written before any retirement,
- * so a failed write never leaves an endpoint without its current relation. A new revision of a certified relation is
- * not certified, and a certified_dropped warning says so.
+ * the relations it conflicts with is written already invalidated. A stored relation restated with a new event_time
+ * has moved in time order, so its endpoints are then settled again by resettleEndpoints, which brings back a relation
+ * it retired and no longer displaces. New versions are written before any retirement, so a failed write never leaves
+ * an endpoint without its current relation. A new revision of a certified relation is not certified, and a
+ * certified_dropped warning says so.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
@@ -2406,6 +2408,7 @@ export async function upsertRelations(
   const writes = new Map<string, readonly [string, Props]>();
   const retires = new Map<string, readonly [string, Props]>();
   const out: Array<readonly [string, number, Relation]> = [];
+  const moved = new Set<string>();
   for (const { rid, rtype, rel } of keyed) {
     const named = rel.event_time ?? defaultEventTime ?? null;
     let edge = current.get(rid);
@@ -2436,6 +2439,7 @@ export async function upsertRelations(
         !prev.is_current &&
         (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
       const unchanged = deepEqual(prev.properties, mergedProperties) && toIso(prev.event_time) === toIso(eventTime);
+      if (eventTime != null && toIso(prev.event_time) !== toIso(eventTime)) moved.add(rid);
       if (unchanged && !reassert) {
         write = sources !== prev.source_count;
         props = { ...edge.props, source_count: sources };
@@ -2500,6 +2504,15 @@ export async function upsertRelations(
     if (rows.length) await runner.createEdges(ns, L_ENTITY, L_ENTITY, rows);
   }
   await writeEvidence(runner, ns, records, createdAt);
+  if (options.contradiction === "supersede" && moved.size) {
+    await resettleEndpoints(
+      runner,
+      ns,
+      [...moved].map((rid) => current.get(rid)!),
+      options.caps,
+      createdAt,
+    );
+  }
   return out.map(([rid, revision, rel]) => {
     const key = JSON.stringify([rid, revision]);
     const final = retires.get(key) ?? writes.get(key);
