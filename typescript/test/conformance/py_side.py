@@ -1130,6 +1130,35 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    undated = await graph.relations.create("person:frank", "WORKS_AT", "company:acme")
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:initech",
+                    "event_time": datetime(2999, 1, 1, tzinfo=timezone.utc),
+                }
+            ]
+        }
+    )
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:globex",
+                    "event_time": datetime(2998, 1, 1, tzinfo=timezone.utc),
+                }
+            ]
+        }
+    )
+    corrected = await graph.relations.versions(undated.id)
+    out["undated_correction"] = [
+        [v.revision, v.invalidated_by, v.event_time == corrected[-1].created_at] for v in corrected
+    ]
     return out
 
 

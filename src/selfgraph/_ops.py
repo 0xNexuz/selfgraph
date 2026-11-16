@@ -2056,7 +2056,11 @@ def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
         "invalidated_known_at": to_iso(known),
     }
     if not edge["props"]["is_current"]:
-        props.update(revision=int(edge["props"]["revision"]) + 1, created_at=to_iso(known))
+        props.update(
+            revision=int(edge["props"]["revision"]) + 1,
+            created_at=to_iso(known),
+            event_time=edge["props"].get("event_time") or edge["props"]["created_at"],
+        )
     return {**edge, "props": props}
 
 
