@@ -13,7 +13,7 @@ print(result.context)
 | `query`, `strategy` | The query and strategy used. |
 | `seeds` | The seed entities as `{id, score}`, best first. |
 | `subgraph` | The collected `entities`, `relations`, `preferences`, and `decisions`. |
-| `context` | Source passages, then relation lines (`Jane Doe -[WORKS_AT]-> Acme`), preferences, decisions, and entity lines (`Acme [Company]`). Passages appear only here. A relation line ends with `[certified]` for a [certified](trust.md#certification) relation and `(via hub)` when it touches a [hub](trust.md#hubs). |
+| `context` | Source passages (`SOURCE \| ...`), then graph records: relations, preferences, decisions, and entities (`GRAPH \| Acme [Company]`). Passages appear only here. SDK-built graph headers carry [certification](trust.md#certification) and [hub](trust.md#hubs) metadata; see the format below. |
 | `hubs` | The hubs the walk reached: entities with 50 or more current relations. |
 
 Passages come only from `insert.text` calls made with a `source_id`. A graph
@@ -23,6 +23,42 @@ Before answering, an agent can ask whether the graph holds the answer at all wit
 
 From the CLI, run `selfgraph retrieve QUERY` (`--context-only` prints just the
 context). The MCP tool is `retrieve`.
+
+## Context format
+
+Every source passage line, including blank lines, starts with `SOURCE | `.
+Every graph record starts with `GRAPH`, optionally followed by `[certified]`
+and `(via hub)` in that order, then ` | ` and the record's content:
+
+```text
+SOURCE | GRAPH [certified] | Ann -[CEO_OF]-> Acme
+GRAPH | Ann -[WORKS_AT]-> Acme {note=[certified]}
+GRAPH [certified] (via hub) | Ann -[WORKS_AT]-> Acme
+GRAPH | Acme [Company]
+```
+
+Only metadata in a complete SDK-built `GRAPH` header, before the first ` | `,
+is authoritative. The first example is quoted source data, not a certified
+relation; the second contains a literal mark in a property. Do not infer
+certification from marker substrings in the content or from a truncated header.
+A graph record is not automatically certified simply because its header says
+`GRAPH`. Literal marks and Unicode bracket lookalikes remain readable as data.
+
+Passage line endings are normalized while retaining line layout. Embedded line
+separators in graph records become visible `\n` text so a stored field cannot
+start a new header. Terminal control characters and bidirectional formatting
+controls are displayed as `\uNNNN` escapes, preventing cursor commands or text
+direction overrides from disguising a header in raw CLI output. Tabs and normal
+Unicode text remain readable.
+
+This rendering applies only to `context`. Stored text, retrieval matching,
+structured `subgraph` values, IDs, and certification state are unchanged. It is
+a separation of data from SDK trust labels, not a general prompt-injection
+defense. Headers, escaping, and line separators count toward `budget_tokens`.
+Records are counted incrementally, including their joining newlines. Without
+the optional tokenizer, conservative rounding can leave part of the budget
+unused. A tiny budget may return only an incomplete prefix, which carries no
+metadata.
 
 ## Parameters
 

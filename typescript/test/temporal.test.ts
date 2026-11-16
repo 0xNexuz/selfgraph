@@ -416,7 +416,7 @@ function suite(spec: StoreSpec): void {
     const rel = await g.relations.create("person:ann", "WORKS_AT", "company:acme", { properties: { role: "dev" } });
     const first = await instant();
     await g.relations.update(rel.id, { set_properties: { role: "cto" } });
-    expect((await g.retrieve("Ann", { as_of: first })).context).toContain("Ann -[WORKS_AT]-> Acme {role=dev}");
+    expect((await g.retrieve("Ann", { as_of: first })).context).toContain("GRAPH | Ann -[WORKS_AT]-> Acme {role=dev}");
     expect((await g.retrieve("Ann", { as_of: await instant() })).context).toContain("{role=cto}");
     await g.relations.create("person:ann", "WORKS_AT", "company:globex");
     const between = await instant();
@@ -438,9 +438,9 @@ function suite(spec: StoreSpec): void {
     });
     await g.relations.update(ACME, { set_properties: { role: "cto" }, event_time: "2022-01-01T00:00:00Z" });
     const asOf = async (year: number) => g.retrieve("Ann Acme", { as_of: new Date(Date.UTC(year, 5, 1)) });
-    expect((await asOf(2021)).context.split("\n")).toContain("Ann -[WORKS_AT]-> Acme {role=dev}");
+    expect((await asOf(2021)).context.split("\n")).toContain("GRAPH | Ann -[WORKS_AT]-> Acme {role=dev}");
     expect((await asOf(2021)).subgraph.entities.map((e) => e.id).sort()).toEqual(["company:acme", "person:ann"]);
-    expect((await asOf(2023)).context.split("\n")).toContain("Ann -[WORKS_AT]-> Acme {role=cto}");
+    expect((await asOf(2023)).context.split("\n")).toContain("GRAPH | Ann -[WORKS_AT]-> Acme {role=cto}");
     const early = await asOf(2019);
     expect([early.seeds, early.subgraph.entities, early.subgraph.relations, early.context]).toEqual([[], [], [], ""]);
 
@@ -454,7 +454,7 @@ function suite(spec: StoreSpec): void {
     await h.preferences.create("person:jane-q-doe", "tool", "tool:python", { event_time: t2020 });
     await h.decisions.create("Pick Rust", { steps: [rel.id], outcome_entity: "tool:rust", event_time: t2020 });
     const past = await h.retrieve("Jane", { as_of: "2021-01-01T00:00:00Z" });
-    expect(past.context.split("\n")).toContain("Jane Q Doe prefers Python (tool)");
+    expect(past.context.split("\n")).toContain("GRAPH | Jane Q Doe prefers Python (tool)");
     expect(past.context).not.toContain("tool:python");
     expect(past.subgraph.decisions).toEqual([]);
     expect((await h.retrieve("Jane")).subgraph.decisions.map((d) => d.title)).toEqual(["Pick Rust"]);
@@ -465,7 +465,7 @@ function suite(spec: StoreSpec): void {
     await k.relations.update(titled.id, { set_properties: { title: "Dev" }, event_time: at(2025) });
     for (const when of [await instant(), at(2099), new Date(Date.UTC(2025, 5, 1))]) {
       expect((await k.retrieve("Ann Acme", { as_of: when })).context.split("\n")).toContain(
-        "Ann -[WORKS_AT]-> Acme {title=Dev}",
+        "GRAPH | Ann -[WORKS_AT]-> Acme {title=Dev}",
       );
     }
     expect((await k.retrieve("Ann", { as_of: at(2024) })).subgraph.relations).toEqual([]);
@@ -474,7 +474,9 @@ function suite(spec: StoreSpec): void {
     await p.insert.facts({ entities: PEOPLE });
     await p.relations.create("person:ann", "WORKS_AT", "company:acme", { event_time: at(2020) });
     await p.insert.text("Ann works at Acme.", { source_id: "note", event_time: at(2020) });
-    expect((await p.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n")).toContain("Ann works at Acme.");
+    expect((await p.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n")).toContain(
+      "SOURCE | Ann works at Acme.",
+    );
     expect((await p.retrieve("Ann Acme", { as_of: at(2019) })).context).not.toContain("Ann works at Acme.");
   });
 
@@ -520,12 +522,12 @@ function suite(spec: StoreSpec): void {
     const [held] = then.subgraph.relations.filter((r) => r.id === rel.id);
     expect([held!.revision, held!.is_current, held!.certified_at]).toEqual([1, true, null]);
     expect(then.context).not.toContain("[certified]");
-    expect(then.context.split("\n")).toContain("Ann works at Acme in Berlin.");
+    expect(then.context.split("\n")).toContain("SOURCE | Ann works at Acme in Berlin.");
     expect(then.context).not.toContain("Ann works at Acme in Paris.");
     const later = await g.retrieve("Ann Acme Zed Berlin Paris", { as_of: at(2099) });
     expect(later.subgraph.entities.map((e) => e.id)).toContain("person:zed");
     expect(later.subgraph.decisions.map((d) => d.title)).toEqual(["Join Acme"]);
-    expect(later.context.split("\n")).toContain("Ann works at Acme in Paris.");
+    expect(later.context.split("\n")).toContain("SOURCE | Ann works at Acme in Paris.");
     expect(later.context).not.toContain("Ann works at Acme in Berlin.");
     expect((await g.checkAnswerable("Zed", { known_at: learned })).verdict).toBe("not_answerable");
     expect((await g.checkAnswerable("Zed", { known_at: await instant() })).verdict).toBe("answerable");
@@ -546,7 +548,7 @@ function suite(spec: StoreSpec): void {
       const lines = (await g.retrieve("Ann Acme Berlin Paris", { as_of: at(2099), known_at: known })).context.split(
         "\n",
       );
-      return [berlin, paris].filter((line) => lines.includes(line));
+      return [berlin, paris].filter((line) => lines.includes(`SOURCE | ${line}`));
     };
     expect(await quoted(first)).toEqual([berlin]);
     expect(await quoted(replaced)).toEqual([paris]);
@@ -628,7 +630,7 @@ function suite(spec: StoreSpec): void {
     await g.insert.text("Ann joined Acme.", { source_id: "dated", event_time: at(2020) });
     await g.insert.text("Ann joined Acme.", { source_id: "dated", event_time: at(2024) });
     const lines = (await g.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n");
-    expect(lines).toContain("Ann joined Acme.");
+    expect(lines).toContain("SOURCE | Ann joined Acme.");
   });
 
   it("known_at quotes a passage only once its evidence was recorded", async () => {
