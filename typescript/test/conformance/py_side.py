@@ -793,6 +793,70 @@ async def supersede(graph):
         [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
         for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
     ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Frank", "Grace", "Heidi", "Ivan")),
+                *({"type": "Company", "name": n} for n in ("Cyberdyne", "Tyrell", "Soylent", "Vandelay")),
+            ],
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:tyrell",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+                {
+                    "from_entity": "person:grace",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                },
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:ivan",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+            ],
+        }
+    )
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:vandelay",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                }
+            ]
+        }
+    )
+    out["subms"] = {}
+    for person, company in (("frank", "cyberdyne"), ("heidi", "soylent")):
+        rid = ids.relation_id(f"person:{person}", "WORKS_AT", f"company:{company}")
+        out["subms"][rid] = [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
     return out
 
 

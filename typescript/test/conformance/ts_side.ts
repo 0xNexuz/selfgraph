@@ -945,6 +945,67 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
   const delete_versions = (
     await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
   ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  await graph.insert.facts({
+    entities: [
+      ...["Frank", "Grace", "Heidi", "Ivan"].map((name) => ({ type: "Person", name })),
+      ...["Cyberdyne", "Tyrell", "Soylent", "Vandelay"].map((name) => ({ type: "Company", name })),
+    ],
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:tyrell",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+      {
+        from_entity: "person:grace",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:ivan",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+    ],
+  });
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:vandelay",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+    ],
+  });
+  const subms: Record<string, unknown> = {};
+  for (const [person, company] of [
+    ["frank", "cyberdyne"],
+    ["heidi", "soylent"],
+  ]) {
+    const rid = ids.relationId(`person:${person}`, "WORKS_AT", `company:${company}`);
+    subms[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
   return {
     warnings,
     versions,
@@ -952,5 +1013,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     withdrawn_versions,
     delete_restored: deleted.restored_relations,
     delete_versions,
+    subms,
   };
 }
