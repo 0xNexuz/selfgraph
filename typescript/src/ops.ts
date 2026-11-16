@@ -1996,7 +1996,16 @@ async function constrainedCurrent(
   const rows = [...found.values()];
   return [
     new Map(rows.filter((e) => e.props.is_current).map((e) => [idOf(e.props), e])),
-    new Map(rows.filter((e) => !e.props.is_current && e.props.invalidated_at).map((e) => [idOf(e.props), e])),
+    new Map(
+      rows
+        .filter(
+          (e) =>
+            !e.props.is_current &&
+            e.props.invalidated_at &&
+            !(typeof e.props.invalidated_by === "string" && e.props.invalidated_by.startsWith("sv:")),
+        )
+        .map((e) => [idOf(e.props), e]),
+    ),
   ];
 }
 

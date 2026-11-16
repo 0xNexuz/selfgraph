@@ -925,6 +925,61 @@ describe("store setup errors", () => {
       /pass a smaller max_db_size$/,
     );
   });
+
+  it("reopens the Kuzu connection without changing results", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-reconnect-"));
+    const store = new KuzuStore(join(dir, "r.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "reconnect" });
+    try {
+      await g.initialize();
+      const first = await conn();
+      const people = Array.from({ length: 30 }, (_, i) => ({
+        id: `person:p${i}`,
+        type: "Person",
+        name: `Person ${i}`,
+      }));
+      const knows = people
+        .slice(1)
+        .map((_, i) => ({ from_entity: `person:p${i + 1}`, type: "KNOWS", to_entity: `person:p${i}` }));
+      await g.insert.facts({ entities: people, relations: knows });
+      for (let i = 0; i < 600; i++) expect((await g.runCypher("RETURN $i AS i", { i })).rows).toEqual([{ i }]);
+      await g.insert.facts({ relations: knows.map((r) => ({ ...r, properties: { since: 2020 } })) });
+      const rels = (await g.relations.list({ type: "KNOWS", limit: 100 })).items;
+      expect(await conn()).not.toBe(first);
+      expect((await g.entities.list({ limit: 100 })).items).toHaveLength(30);
+      expect(rels.map((r) => [r.revision, r.is_current, r.properties.since])).toEqual(Array(29).fill([2, true, 2020]));
+      expect((await g.retrieve("Person 7")).subgraph.entities.map((e) => e.id)).toContain("person:p7");
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the Kuzu connection while a raw transaction is open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-tx-"));
+    const store = new KuzuStore(join(dir, "t.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "tx" });
+    try {
+      await g.initialize();
+      const held = await conn();
+      await g.runCypher("BEGIN /* keep */ TRANSACTION");
+      for (let i = 0; i < 300; i++) await g.runCypher("CREATE (:N {pk: $pk, ns: 'tx'})", { pk: `p${i}` });
+      await g.entities.create("Jane", "Person");
+      for (let i = 0; i < 600; i++) await g.entities.get("person:jane");
+      await g.runCypher("ROLLBACK");
+      expect(await conn()).toBe(held);
+      const count = await g.runCypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n");
+      expect(count.rows).toEqual([{ n: 0 }]);
+      expect(await g.entities.get("person:jane")).toBeNull();
+      for (let i = 0; i < 600; i++) await g.runCypher("RETURN $i AS i", { i });
+      expect(await conn()).not.toBe(held);
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("property values", () => {

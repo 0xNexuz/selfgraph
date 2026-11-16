@@ -2029,7 +2029,11 @@ async def _contradiction_check(
                     _keep_newest(found, edge)
     current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
     history = [
-        _relation_of(e) for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")
+        _relation_of(e)
+        for e in found.values()
+        if not e["props"]["is_current"]
+        and e["props"].get("invalidated_at")
+        and not (e["props"].get("invalidated_by") or "").startswith("sv:")
     ]
     return Contradictions(caps, contradiction, current, history), found
 

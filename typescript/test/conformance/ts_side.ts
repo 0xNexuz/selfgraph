@@ -161,6 +161,10 @@ const SCHEMA_CASES = [
       { from_entity: "company:stored", type: "KNOWS", to_entity: "manager:z" },
     ],
   },
+  {
+    entities: [{ id: "person:n", type: "Person", name: "N", properties: { age: null } }],
+    relations: [],
+  },
 ];
 
 const GRAPH_TYPES = new Map([
@@ -462,6 +466,28 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.unsafe_integer = exc.message;
   }
+  const restateSchema: Schema = {
+    entities: [{ name: "Thing", properties: [{ name: "k", type: "string", required: true }] }, { name: "Company" }],
+    relations: [{ type: "TOUCHES", from: { types: ["Thing"] }, to: { types: ["Company"] } }],
+  };
+  out.schema_restate = toJsonable(
+    (
+      await graph.insert.facts(
+        { entities: [{ type: "Thing", name: "Temp Thing", properties: { extra: "ok" } }] },
+        { schema: restateSchema, schema_mode: "strict" },
+      )
+    ).entities[0]?.properties,
+  );
+  try {
+    await graph.insert.facts(
+      { entities: [{ type: "Thing", name: "Temp Thing", properties: { k: null } }] },
+      { schema: restateSchema, schema_mode: "strict" },
+    );
+    out.schema_null_required = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.schema_null_required = exc.message;
+  }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
   const repeatedMerges: Record<string, unknown> = {};
@@ -667,5 +693,19 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
-  return { warnings, versions };
+  await graph.insert.facts({ entities: [{ type: "Person", name: "Cid" }] });
+  await graph.insert.facts({ relations: [link("cid", "acme", 2020)] }, { source_id: "cid-withdrawn" });
+  await graph.insert.text("nothing happened.", { source_id: "cid-withdrawn", replace_source: true });
+  const cidOlder = await graph.insert.facts({ relations: [link("cid", "globex", 2019)] }, { source_id: "cid-globex" });
+  const withdrawn_versions: Record<string, unknown> = {};
+  for (const company of ["acme", "globex"]) {
+    const rid = ids.relationId("person:cid", "WORKS_AT", `company:${company}`);
+    withdrawn_versions[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
+  return { warnings, versions, withdrawn_warnings: cidOlder.warnings.map((w) => w.code), withdrawn_versions };
 }

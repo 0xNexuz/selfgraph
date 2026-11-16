@@ -1,5 +1,6 @@
 import json
 import sys
+import weakref
 from types import SimpleNamespace
 
 import pytest
@@ -258,6 +259,59 @@ def test_kuzu_relative_path_uses_each_stores_working_directory(tmp_path, monkeyp
         with SyncSelfGraph(KuzuStore("graph.kuzu")) as second:
             assert second.entities.get(entity.id) is None
         assert first.entities.get(entity.id) == entity
+
+
+def test_kuzu_reopens_its_connection_without_changing_results(tmp_path):
+    pytest.importorskip("kuzu")
+    store = KuzuStore(str(tmp_path / "r.kuzu"))
+    g = SelfGraph(store, namespace="reconnect")
+    run(g.initialize())
+    first = weakref.ref(store._conn)
+    people = [{"id": f"person:p{i}", "type": "Person", "name": f"Person {i}"} for i in range(30)]
+    knows = [{"from_entity": f"person:p{i}", "type": "KNOWS", "to_entity": f"person:p{i - 1}"} for i in range(1, 30)]
+    run(g.insert.facts({"entities": people, "relations": knows}))
+
+    async def reads():
+        return [(await g.run_cypher("RETURN $i AS i", {"i": i})).rows for i in range(600)]
+
+    assert run(reads()) == [[{"i": i}] for i in range(600)]
+    run(g.insert.facts({"relations": [{**r, "properties": {"since": 2020}} for r in knows]}))
+    rels = run(g.relations.list(type="KNOWS", limit=100)).items
+    assert first() is None
+    assert len(run(g.entities.list(limit=100)).items) == 30
+    assert sorted((r.revision, r.is_current, r.properties["since"]) for r in rels) == [(2, True, 2020)] * 29
+    assert "person:p7" in {e.id for e in run(g.retrieve("Person 7")).subgraph.entities}
+    run(g.close())
+
+
+def test_kuzu_keeps_its_connection_while_a_raw_transaction_is_open(tmp_path):
+    pytest.importorskip("kuzu")
+    store = KuzuStore(str(tmp_path / "t.kuzu"))
+    g = SelfGraph(store, namespace="tx")
+    run(g.initialize())
+    held = store._conn
+
+    async def session():
+        await g.run_cypher("BEGIN /* keep */ TRANSACTION")
+        for i in range(300):
+            await g.run_cypher("CREATE (:N {pk: $pk, ns: 'tx'})", {"pk": f"p{i}"})
+        await g.entities.create("Jane", "Person")
+        for _ in range(600):
+            await g.entities.get("person:jane")
+        await g.run_cypher("ROLLBACK")
+
+    run(session())
+    assert store._conn is held
+    assert run(g.run_cypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n")).rows == [{"n": 0}]
+    assert run(g.entities.get("person:jane")) is None
+
+    async def reads():
+        for i in range(600):
+            await g.run_cypher("RETURN $i AS i", {"i": i})
+
+    run(reads())
+    assert store._conn is not held
+    run(g.close())
 
 
 def test_bind_params_checks_references_and_drops_unused():
