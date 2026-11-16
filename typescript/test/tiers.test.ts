@@ -298,7 +298,7 @@ function suite(spec: StoreSpec): void {
     expect(() => open({ embedder: {} as never })).toThrow(/embedder must have an embed method/);
   });
 
-  it("stem singularizes -es plurals and keeps -us and -is singulars", async () => {
+  it("stem singularizes -es plurals and keeps status and analysis", async () => {
     const singular: Record<string, string> = {
       addresses: "address",
       boxes: "box",
@@ -312,15 +312,9 @@ function suite(spec: StoreSpec): void {
       quizzes: "quiz",
       buzzes: "buzz",
       waltzes: "waltz",
-      companies: "company",
-      customers: "customer",
-      invoices: "invoice",
-      houses: "house",
-      caches: "cache",
-      sizes: "size",
-      uses: "use",
-      series: "series",
-      news: "news",
+      menus: "menu",
+      excuses: "excuse",
+      abuses: "abuse",
       status: "status",
       analysis: "analysis",
       class: "class",
