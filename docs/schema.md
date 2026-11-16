@@ -92,6 +92,8 @@ first problem by its path:
 | `max_count` below 1 | `relations[0].from.max_count: must be >= 1` |
 | `min_count` below 0 | `relations[0].to.min_count: must be >= 0` |
 | `min_count` above `max_count` | `relations[0].from.min_count: min_count 2 is greater than max_count 1` |
+| A `min_count` or `max_count` with a fractional part (`2.0` is read as `2`) | `relations[0].from.max_count: expected integer` |
+| A `min_count` or `max_count` that is not a number, such as `true` or `"1"` | `relations[0].from.max_count: expected number` |
 
 Constructing `Schema(...)` or `Extraction(...)` directly raises the same
 `ValidationError`, never a raw pydantic error.

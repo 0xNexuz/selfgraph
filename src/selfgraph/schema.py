@@ -1,8 +1,9 @@
 import logging
+import math
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, ClassVar, Literal, get_args
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from . import _ops
 from .errors import ValidationError
@@ -86,6 +87,22 @@ class RelationEndpoint(InputModel):
     types: list[str] = Field(default_factory=list)
     min_count: int | None = None
     max_count: int | None = None
+
+    @field_validator("min_count", "max_count", mode="before")
+    @classmethod
+    def _whole_count(cls, value: Any) -> Any:
+        """Accept a count that is an integer or a float with no fractional part, with the TypeScript error text.
+
+        @param value (Any): the raw count.
+        @return (Any): the count as an int, or None.
+        """
+        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+            return value
+        if not isinstance(value, float) or not math.isfinite(value):
+            raise ValueError("expected number")
+        if not value.is_integer():
+            raise ValueError("expected integer")
+        return int(value)
 
 
 class RelationType(InputModel):

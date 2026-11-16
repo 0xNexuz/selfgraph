@@ -10,7 +10,7 @@ import {
   type InsertWarning,
   insertWarning,
   type JsonObject,
-  optNumber,
+  optInt,
   optString,
   type ParsedExtraction,
 } from "./models.js";
@@ -60,8 +60,8 @@ export const EntityType = z.strictObject({
 
 export const RelationEndpoint = z.strictObject({
   types: z.array(z.string()).default([]),
-  min_count: optNumber,
-  max_count: optNumber,
+  min_count: optInt,
+  max_count: optInt,
 });
 
 export const RelationType = z.strictObject({

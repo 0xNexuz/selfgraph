@@ -217,6 +217,9 @@ def test_invalid_schema_and_mode_raise_validation_error():
         ),
         ({"relations": [{"type": "R", "from": {"max_count": 0}}]}, "relations[0].from.max_count: must be >= 1"),
         ({"relations": [{"type": "R", "to": {"min_count": -1}}]}, "relations[0].to.min_count: must be >= 0"),
+        ({"relations": [{"type": "R", "from": {"max_count": 1.5}}]}, "relations[0].from.max_count: expected integer"),
+        ({"relations": [{"type": "R", "to": {"min_count": True}}]}, "relations[0].to.min_count: expected number"),
+        ({"relations": [{"type": "R", "from": {"max_count": "1"}}]}, "relations[0].from.max_count: expected number"),
         (
             {"relations": [{"type": "R", "from": {"min_count": 2, "max_count": 1}}]},
             "relations[0].from.min_count: min_count 2 is greater than max_count 1",
@@ -230,6 +233,12 @@ def test_inconsistent_schemas_are_rejected_with_a_path(spec, message):
     with pytest.raises(ValidationError) as direct:
         Schema(**spec)
     assert str(direct.value) == f"invalid schema: {message}"
+
+
+def test_endpoint_counts_accept_integral_floats_as_integers():
+    end = as_schema({"relations": [{"type": "R", "from": {"min_count": 1.0, "max_count": 2.0}}]}).relations[0].from_
+    assert (end.min_count, end.max_count) == (1, 2)
+    assert type(end.min_count) is int and type(end.max_count) is int
 
 
 def test_models_built_directly_raise_the_sdk_validation_error():

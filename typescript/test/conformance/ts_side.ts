@@ -135,6 +135,10 @@ const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["schema", { entities: [{ name: "A", properties: [{ name: "x", requird: true }] }] }],
   ["schema", { relations: [{ type: "X", from: { type: ["A"] } }] }],
   ["schema", { relations: [{ type: "X", to: { max: 1 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 1.5 } }] }],
+  ["schema", { relations: [{ type: "X", from: { min_count: true } }] }],
+  ["schema", { relations: [{ type: "X", to: { max_count: "1" } }] }],
+  ["schema", { relations: [{ type: "X", to: { min_count: 1.0, max_count: 2.0 } }] }],
 ];
 
 /**
