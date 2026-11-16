@@ -1994,18 +1994,18 @@ async function constrainedCurrent(
     }
   }
   const rows = [...found.values()];
-  const retired = rows.filter((e) => !e.props.is_current && e.props.invalidated_at);
-  const svIds = dedupList(
-    retired
-      .map((e) => e.props.invalidated_by)
-      .filter((inv): inv is string => typeof inv === "string" && inv.startsWith("sv:")),
-  );
-  const withdrawn = svIds.length
-    ? new Set((await nodesById(runner, ns, L_SOURCE_VERSION, svIds)).keys())
-    : new Set<string>();
   return [
     new Map(rows.filter((e) => e.props.is_current).map((e) => [idOf(e.props), e])),
-    new Map(retired.filter((e) => !withdrawn.has(e.props.invalidated_by as string)).map((e) => [idOf(e.props), e])),
+    new Map(
+      rows
+        .filter(
+          (e) =>
+            !e.props.is_current &&
+            e.props.invalidated_at &&
+            !(typeof e.props.invalidated_by === "string" && e.props.invalidated_by.startsWith("sv:")),
+        )
+        .map((e) => [idOf(e.props), e]),
+    ),
   ];
 }
 
