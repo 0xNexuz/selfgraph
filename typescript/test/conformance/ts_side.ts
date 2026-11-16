@@ -1264,6 +1264,29 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
   }
+  const boundary = new SelfGraph(graph.store, { namespace: `${graph.namespace}_boundary` });
+  await boundary.insert.facts({
+    entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      ["ada", "bob"],
+      ["ada", "cy"],
+      ["bob", "cy"],
+    ].map(([a, b]) => ({
+      id: `relation:${a}${b}`,
+      from_entity: `thing:${a}`,
+      type: "LINKS",
+      to_entity: `thing:${b}`,
+    })),
+    decisions: [{ title: "Choose Cy", steps: ["relation:bobcy"] }],
+  });
+  const boundaryResults: Record<string, { relations: string[]; decisions: string[] }> = {};
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    const result = await boundary.retrieve("Ada", { k: 1, depth: 1, strategy });
+    boundaryResults[strategy] = {
+      relations: result.subgraph.relations.map((r) => r.id).sort(),
+      decisions: result.subgraph.decisions.map((d) => d.title),
+    };
+  }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
@@ -1283,6 +1306,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
     },
     retrieval_seeded: seeded,
+    retrieval_boundary: boundaryResults,
     tiers: termed.tiers,
     entities,
     relations,

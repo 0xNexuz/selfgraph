@@ -1414,6 +1414,24 @@ async def dump(graph, ns):
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
     }
+    boundary = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_boundary")
+    await boundary.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Bob", "Cy")],
+            "relations": [
+                {"id": f"relation:{a}{b}", "from_entity": f"thing:{a}", "type": "LINKS", "to_entity": f"thing:{b}"}
+                for a, b in (("ada", "bob"), ("ada", "cy"), ("bob", "cy"))
+            ],
+            "decisions": [{"title": "Choose Cy", "steps": ["relation:bobcy"]}],
+        }
+    )
+    boundary_results = {}
+    for walk in ("bfs", "dfs", "ppr"):
+        result = await boundary.retrieve("Ada", k=1, depth=1, strategy=walk)
+        boundary_results[walk] = {
+            "relations": sorted(r.id for r in result.subgraph.relations),
+            "decisions": [d.title for d in result.subgraph.decisions],
+        }
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1426,6 +1444,7 @@ async def dump(graph, ns):
                 "counts": {e.id: e.source_count for e in historical.subgraph.entities},
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
+            "retrieval_boundary": boundary_results,
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
