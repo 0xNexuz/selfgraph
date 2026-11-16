@@ -748,9 +748,6 @@ describe("property values", () => {
     await expect(g.entities.create("Bob", "Person", { properties: { n: 2 ** 53 } })).rejects.toThrow(
       "properties integer 9007199254740992 is outside the safe range; store it as a string",
     );
-    await expect(g.entities.create("Bob", "Person", { properties: { n: 2 ** 53 + 1 } })).rejects.toThrow(
-      "outside the safe range",
-    );
     await expect(g.entities.update(e.id, { properties: { at: new Date() } } as never)).rejects.toThrow(
       "properties cannot hold Date values; use an ISO 8601 string",
     );

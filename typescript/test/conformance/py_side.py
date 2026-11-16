@@ -250,6 +250,19 @@ FACTS = {
 TEXT = "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京."
 
 
+async def refusal(fn):
+    """Run a write that should be refused and report what happened, so the two SDKs must agree on the refusal.
+
+    @param fn (Callable): the write to attempt.
+    @return (str): "accepted" when it went through, otherwise the error message.
+    """
+    try:
+        await fn()
+        return "accepted"
+    except Exception as exc:  # noqa: BLE001
+        return f"refused: {exc}"
+
+
 async def write(graph):
     out = {}
     out["facts"] = to_jsonable(await graph.insert.facts(FACTS, source_id="spec"))
@@ -290,6 +303,7 @@ async def write(graph):
     await graph.entities.create("Temp Thing", "Thing", properties={"k": "v"})
     await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme")
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
+    out["unsafe_integer"] = await refusal(lambda: graph.entities.create("Unsafe", "Thing", properties={"n": 2**53}))
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
     return out
