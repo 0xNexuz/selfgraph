@@ -63,7 +63,7 @@ function mask(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
-        if (k === "created_at" || k === "updated_at") return [k, "<ts>"];
+        if (k === "created_at" || k === "updated_at" || k === "invalidated_known_at") return [k, "<ts>"];
         if (k === "ns") return [k, "<ns>"];
         if (k === "message") return [k, "<message>"];
         if (k === "evidence_json" && typeof v === "string") return [k, mask(v)];
@@ -120,9 +120,13 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
         const pyOps = py("write", store, nsPy);
         const tsOps = await ts(store, nsTs, write);
         expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
+        expect(tsOps.facts_none).toBe("invalid facts: expected object");
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
+        expect(pyReadsPy).toMatchObject({
+          known_at_sources: { seeds: ["database:hydradb"], counts: { "database:hydradb": 1, "company:acme": 1 } },
+        });
 
         const tsReadsTs = await ts(store, nsTs, (g) => dump(g, nsTs));
         const pyReadsTs = py("dump", store, nsTs);

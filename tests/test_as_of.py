@@ -310,6 +310,26 @@ def test_known_at_counts_only_the_sources_recorded_by_then():
     assert [r.source_count for r in run(g.retrieve("Ann", known_at=learned)).subgraph.relations] == [1]
 
 
+def test_known_at_uses_historical_entity_source_counts_for_scoring_and_results():
+    g = fresh_graph("asof")
+    east, west = ({"type": "Project", "name": name} for name in ("Orchid East", "Orchid West"))
+    run(g.insert.facts({"entities": [east, west]}, source_id="initial"))
+    run(g.relations.create("project:orchid-east", "NEIGHBOR", "project:orchid-west"))
+    cutoff = instant()
+    before = run(g.retrieve("Orchid", known_at=cutoff, k=1))
+    assert [seed.id for seed in before.seeds] == ["project:orchid-east"]
+    run(g.insert.facts({"entities": [east, west]}, source_id="second"))
+    run(g.insert.facts({"entities": [east]}, source_id="third"))
+
+    assert run(g.retrieve("Orchid", k=1)).seeds[0].id == "project:orchid-west"
+    replay = run(g.retrieve("Orchid", known_at=cutoff, k=1))
+    assert replay.seeds == before.seeds
+    assert {e.id: e.source_count for e in replay.subgraph.entities} == {
+        "project:orchid-east": 1,
+        "project:orchid-west": 1,
+    }
+
+
 def test_reinserting_the_same_text_keeps_the_version_as_first_stored():
     g = graph()
     run(g.relations.create("person:ann", "WORKS_AT", "company:acme", event_time=utc(2020)))

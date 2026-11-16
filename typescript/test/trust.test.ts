@@ -284,6 +284,17 @@ function suite(spec: StoreSpec): void {
     expect((await g.relations.get(acme.id))!.is_current).toBe(true);
   });
 
+  it("leaves what the LLM judge retired retired when the judged relation is deleted", async () => {
+    const g = open({ llm: judge, extraction: "regex", contradiction: "llm" });
+    const acme = (
+      await g.insert.facts({ entities: ANN_AT_ACME.entities, relations: [worksAt("person:ann", "company:acme", 2020)] })
+    ).relations[0]!;
+    const globex = (await g.insert.facts({ relations: [worksAt("person:ann", "company:globex", 2022)] })).relations[0]!;
+    expect((await g.relations.versions(acme.id))[0]!.invalidated_by).toBe(globex.id);
+    expect((await g.relations.delete(globex.id)).restored_relations).toBe(0);
+    expect((await g.relations.versions(acme.id))[0]!.is_current).toBe(false);
+  });
+
   it("warns when a write changes a certified relation", async () => {
     const g = await employment();
     const rel = (await g.insert.facts({ relations: [worksAt("person:ann", "company:acme", 2024)] })).relations[0]!;

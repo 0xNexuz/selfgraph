@@ -214,7 +214,7 @@ export class Maintenance extends Resource {
     ];
     for (const [op, oids] of deletes) {
       for (const batch of ops.batches(oids)) {
-        ops.addCounts(deleted, await this.graph.write((tx, n) => op(tx, n, batch)));
+        ops.addCounts(deleted, await this.graph.write((tx, n) => op(tx, n, batch, this.graph.caps())));
       }
     }
     log(`pruned ${doomed.length} entities and ${relationIds.length} relations in namespace '${ns}'`, "info");

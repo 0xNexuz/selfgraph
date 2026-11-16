@@ -11,7 +11,7 @@ from typing import Any
 from .._ops import _batches
 from .._serde import L_ENTITY, L_EVIDENCE, L_MERGE, decode_entity
 from ..errors import OTHER_ENGINE_HINT, TOKEN_HINT, StoreError
-from ..ids import quote_label
+from ..ids import quote_label, require_identifier
 from ..models import CypherResult
 from ..resolution import match_keys
 from ._cypher import (
@@ -110,7 +110,7 @@ def _unset(props: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _removes(alias: str, keys: tuple[str, ...]) -> str:
-    return ", ".join(f"{alias}.`{k}`" for k in keys)
+    return ", ".join(f"{alias}.`{require_identifier(k)}`" for k in keys)
 
 
 def _doc(props: Mapping[str, Any]) -> str:
@@ -125,7 +125,7 @@ def _same(alias: str, key: str, param: str) -> str:
     @param param (str): the parameter name.
     @return (str): the predicate.
     """
-    return f"NOT {alias}.`{key}` <> ${param}"
+    return f"NOT {alias}.`{require_identifier(key)}` <> ${param}"
 
 
 _BY_SID = f"MATCH ()-[r:{_EDGE} {{sid: $sid}}]->() WHERE {_same('r', 'ns', 'ns')}"
@@ -142,7 +142,7 @@ def _keyed(alias: str, label: str, equals: dict | None, params: dict) -> str:
     """
     entries = []
     for i, (key, value) in enumerate(sorted((equals or {}).items())):
-        entries.append(f"`{key}`: $eq{i}")
+        entries.append(f"`{require_identifier(key)}`: $eq{i}")
         params[f"eq{i}"] = value
     return f"{alias}:{label} {{{', '.join(entries)}}}" if entries else f"{alias}:{label}"
 
@@ -160,7 +160,8 @@ def _by_columns(rows: list[dict]) -> list[list[dict]]:
 
 
 def _sets(alias: str, row: dict, skip: tuple[str, ...]) -> str:
-    return ", ".join(f"{alias}.`{k}` = row.`{k}`" for k in sorted(row) if k not in skip)
+    cols = (require_identifier(k) for k in sorted(row) if k not in skip)
+    return ", ".join(f"{alias}.`{c}` = row.`{c}`" for c in cols)
 
 
 def _keys_of(props: Mapping[str, Any]) -> frozenset[str]:
@@ -407,6 +408,8 @@ class HydraDBStore(AutoCommitStore):
         cleared: dict[tuple[str, ...], list[int]] = {}
         key = _sort_key(ns, label)
         for id, props in rows:
+            for prop_key in props:
+                require_identifier(prop_key)
             row = {
                 "id": _sk(ns, id),
                 "sid": id,
@@ -424,9 +427,9 @@ class HydraDBStore(AutoCommitStore):
         for keys, iids in cleared.items():
             for batch in _batches(iids, _DELETE_BATCH):
                 params = {"iids": batch}
+                have = " OR ".join(f"n.`{require_identifier(k)}` IS NOT NULL" for k in keys)
                 found = await self._run(
-                    f"MATCH (n:{label}) WHERE n.id IN $iids AND ({' OR '.join(f'n.`{k}` IS NOT NULL' for k in keys)}) "
-                    "RETURN n.sid AS sid",
+                    f"MATCH (n:{label}) WHERE n.id IN $iids AND ({have}) RETURN n.sid AS sid",
                     params,
                     reads=batch,
                 )
@@ -546,10 +549,10 @@ class HydraDBStore(AutoCommitStore):
             where = [_same("n", "ns", "ns")]
         for i, (key, values) in enumerate(sorted((any_of or {}).items())):
             if key != "id":
-                where.append(f"n.`{key}` IN $in{i}")
+                where.append(f"n.`{require_identifier(key)}` IN $in{i}")
                 params[f"in{i}"] = list(values)
         where_after("n.sid", id_gt, where, params)
-        ob = "sid" if order_by == "id" else order_by
+        ob = "sid" if order_by == "id" else require_identifier(order_by, "order_by")
         res = await self._run(
             f"MATCH ({pattern}) WHERE {' AND '.join(where)} "
             f"RETURN n.doc AS doc, n.`{ob}` AS __ob ORDER BY __ob SKIP $skip LIMIT $limit",
@@ -609,6 +612,8 @@ class HydraDBStore(AutoCommitStore):
     ) -> None:
         out = []
         for type, from_id, to_id, props in rows:
+            for key in props:
+                require_identifier(key)
             sid = props.get("id")
             row: dict[str, Any] = {
                 "f": _sk(ns, from_id),
@@ -680,13 +685,15 @@ class HydraDBStore(AutoCommitStore):
         return out
 
     async def update_current_edge(self, ns: str, id: str, props: dict) -> None:
+        for key in props:
+            require_identifier(key)
         merged = await merged_current_edge(self, ns, id, props)
         if merged is None:
             return
         sets = ["r.doc = $doc"]
         params: dict[str, Any] = {"ns": ns, "sid": id, "doc": _doc(merged)}
         for k, v in _scalars(merged).items():
-            sets.append(f"r.`{k}` = $s_{k}")
+            sets.append(f"r.`{require_identifier(k)}` = $s_{k}")
             params[f"s_{k}"] = v
         _guard_sizes(params)
         await self._run(
@@ -752,12 +759,12 @@ class HydraDBStore(AutoCommitStore):
             apat = ""
             filters["fl"] = from_label
         for i, (key, value) in enumerate(filters.items()):
-            where.append(_same("r", key, f"eq{i}") if anchored else f"r.`{key}` = $eq{i}")
+            where.append(_same("r", key, f"eq{i}") if anchored else f"r.`{require_identifier(key)}` = $eq{i}")
             params[f"eq{i}"] = value
         if current_only:
             where.append("NOT r.is_current <> true" if anchored else "r.is_current = true")
         where_after("r.sid", id_gt, where, params)
-        ob = "sid" if order_by == "id" else order_by
+        ob = "sid" if order_by == "id" else require_identifier(order_by, "order_by")
         res = await self._run(
             f"MATCH ({apat})-[r:{_EDGE}]->({bpat}) WHERE {' AND '.join(where)} "
             f"RETURN r.doc AS doc, r.fa AS fa, r.tb AS tb, r.etype AS et, r.`{ob}` AS __ob "
@@ -776,7 +783,7 @@ class HydraDBStore(AutoCommitStore):
         *,
         order_by: str | None = None,
     ) -> list[dict]:
-        ob = "" if order_by is None else f", c.`{order_by}` AS __ob"
+        ob = "" if order_by is None else f", c.`{require_identifier(order_by, 'order_by')}` AS __ob"
         order = "" if order_by is None else " ORDER BY __ob"
         res = await self._run(
             f"MATCH (p:{parent_label} {{id: $iid}})-[r:{_EDGE}]->(c:{child_label}) "

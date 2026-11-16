@@ -200,8 +200,11 @@ class Relations(Resource):
     async def delete(self, id: str) -> DeleteResult:
         """Delete a relation, all its versions, and any decision trace that uses it as a step.
 
+        A relation it had retired comes back as current when the schema's max_count leaves room, else it is
+        re-pointed to the relation that displaces it.
+
         @param id (str): the relation id.
-        @return (DeleteResult): counts of relation versions and decisions removed.
+        @return (DeleteResult): counts of relation versions and decisions removed, and relations restored.
         """
         _ops._validate_own_id("relation", id)
-        return DeleteResult(**await self._c._write(_ops.delete_relation, id))
+        return DeleteResult(**await self._c._write(_ops.delete_relation, id, self._c._caps()))
