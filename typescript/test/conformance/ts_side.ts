@@ -879,6 +879,37 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     returned_after_bb: afterBbMerge.decisions[0]!.steps.map((s) => s.relation_id),
     returned_after_bob: afterBobMerge.decisions[0]!.steps.map((s) => s.relation_id),
   };
+  const editedGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:edited-steps`,
+    resolver: "default",
+  });
+  await editedGraph.insert.facts({
+    entities: [
+      { type: "Person", name: "Robert", aliases: ["Bob"] },
+      { type: "Person", name: "Ada" },
+      { type: "Tool", name: "Hammer" },
+    ],
+  });
+  const originalStep = ids.relationId("person:bob", "USES", "tool:hammer");
+  const editedMerge = await editedGraph.insert.facts({
+    entities: [{ type: "Person", name: "Bob" }],
+    relations: [
+      { from_entity: "person:bob", type: "USES", to_entity: "tool:hammer" },
+      { from_entity: "person:ada", type: "CHECKED", to_entity: "tool:hammer" },
+    ],
+    decisions: [{ title: "Pick", actor_entity: "person:bob", steps: [originalStep] }],
+  });
+  const editedSteps = [
+    ids.relationId("person:ada", "CHECKED", "tool:hammer"),
+    ids.relationId("person:robert", "USES", "tool:hammer"),
+  ];
+  await editedGraph.decisions.update(editedMerge.decisions[0]!.id, { steps: editedSteps });
+  const editedUndo = await editedGraph.entities.unmerge(editedMerge.merges[0]!.id);
+  const editedRead = (await editedGraph.decisions.get(ids.decisionId("person:bob", "Pick")))!;
+  out.unmerge_edited_steps = {
+    returned: editedUndo.decisions[0]!.steps.map((s) => s.relation_id),
+    stored: editedRead.steps.map((s) => s.relation_id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",
