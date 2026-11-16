@@ -1,5 +1,15 @@
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
-import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable, ValidationError } from "../../src/index.js";
+import {
+  FalkorDBStore,
+  fromTables,
+  ids,
+  KuzuStore,
+  SelfGraph,
+  toJsonable,
+  toNeo4jOntology,
+  ValidationError,
+} from "../../src/index.js";
+import { setLogger } from "../../src/internal/log.js";
 import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
@@ -56,6 +66,25 @@ const TABLES = [
   { name: "order_statuses" },
   { name: "Companies", columns: [{ name: "customer_id", references: "Customers" }] },
 ];
+
+const NEO4J_LOSS_SPEC = {
+  name: "conformance",
+  entities: [
+    {
+      name: "Person",
+      aliases: ["Human"],
+      synonyms: ["individual"],
+      certified: true,
+      mappings: [{ source: "crm", table: "users" }],
+      definitions: [{ name: "seniority", expression: "count(Job)" }],
+    },
+    { name: "Org" },
+    { name: "Company", parent: "Org" },
+  ],
+  relations: [
+    { type: "OWNS", synonyms: ["holds"], certified: true, from: { types: ["Person"] }, to: { types: ["Company"] } },
+  ],
+};
 
 const SCHEMA_SPEC = {
   name: "conformance",
@@ -157,12 +186,29 @@ function unknownKeyError(kind: "facts" | "schema", value: unknown): string {
  *
  * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[] }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, and the expanded tokens per question.
  */
+/**
+ * Export a schema holding every field the Neo4j ontology cannot carry, and return what it logs.
+ *
+ * @return (string): the logged warning lines joined by newlines, empty when the export logs nothing.
+ */
+export function neo4jExportWarnings(): string {
+  const lines: string[] = [];
+  const previous = setLogger((message) => lines.push(message));
+  try {
+    toNeo4jOntology(Schema.parse(NEO4J_LOSS_SPEC));
+  } finally {
+    setLogger(previous);
+  }
+  return lines.join("\n");
+}
+
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  neo4j_dropped: string;
 } {
   const terms = Schema.parse(TERMS_SPEC);
   const schema = Schema.parse(SCHEMA_SPEC);
@@ -175,6 +221,7 @@ export function schemaWarnings(): {
     ),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
+    neo4j_dropped: neo4jExportWarnings(),
     term_forms: Object.fromEntries(
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
