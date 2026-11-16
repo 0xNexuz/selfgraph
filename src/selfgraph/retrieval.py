@@ -1062,14 +1062,33 @@ async def retrieve(
     decisions = await _collect_decisions(graph, ns, {r.id for r in relations}, as_of)
     preferences = await _collect_preferences(graph, ns, dist, valid)
     if as_of is not None and decisions:
-        refs = {r for d in decisions for r in (d.actor_entity, d.outcome_entity, *d.alternative_entities) if r}
+        refs = {
+            r
+            for d in decisions
+            for r in (
+                d.actor_entity,
+                d.outcome_entity,
+                *d.alternative_entities,
+                *(eid for step in d.steps for eid in (step.from_entity, step.to_entity)),
+            )
+            if r
+        }
         await _load(graph, ns, known, sorted(refs))
         found = [known[eid] for eid in sorted(refs) if eid in known]
         visible = await _visible_at(graph, ns, found, as_of, valid)
         decisions = [
             d
             for d in decisions
-            if all(r in visible for r in (d.actor_entity, d.outcome_entity, *d.alternative_entities) if r)
+            if all(
+                r in visible
+                for r in (
+                    d.actor_entity,
+                    d.outcome_entity,
+                    *d.alternative_entities,
+                    *(eid for step in d.steps for eid in (step.from_entity, step.to_entity)),
+                )
+                if r
+            )
         ]
     passages = await _collect_passages(graph, ns, entities, dist, query_tokens, as_of)
     names = {e.id: e.name for e in entities}
