@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { type GraphStore, HydraDBStore, SelfGraph, StoreError } from "../src/index.js";
-import { forEachStore, type StoreSpec, uniqueNs } from "./helpers.js";
+import { encodeRelationProps } from "../src/serde.js";
+import { forEachStore, freshGraphs, type StoreSpec, uniqueNs } from "./helpers.js";
 
 const props = (ns: string, id: string) => ({ id, ns, name: id });
 
@@ -104,6 +105,55 @@ function suite(spec: StoreSpec) {
       await graph.close();
     }
   });
+
+  it.runIf(spec.name === "hydradb")(
+    "scans edges by the endpoint labels each edge stores, not by labelling both ends",
+    async () => {
+      const g = freshGraphs(spec, "scan")();
+      await g.entities.create("A", "T");
+      await g.entities.create("B", "T");
+      const preference = await g.preferences.create("t:a", "drink", "t:b");
+      const stamp = new Date();
+      await g.store.createEdges(
+        g.namespace,
+        "Entity",
+        "Entity",
+        Array.from({ length: 300 }, (_, i) => [
+          "KNOWS",
+          "t:a",
+          "t:b",
+          encodeRelationProps({
+            ns: g.namespace,
+            id: "relation:many",
+            revision: 300 - i,
+            properties: {},
+            event_time: null,
+            created_at: stamp,
+            is_current: i === 0,
+            source_count: 0,
+          }),
+        ]),
+      );
+      const run = vi.spyOn(g.store as unknown as { _run: (q: string, p?: unknown) => Promise<unknown> }, "_run");
+      try {
+        const between = await g.store.matchEdges(g.namespace, {
+          from_label: "Entity",
+          to_label: "Entity",
+          limit: 1000,
+        });
+        const fromProfiles = await g.store.matchEdges(g.namespace, { from_label: "Profile", limit: 1000 });
+        expect(new Set(between.map((e) => e.props.id))).toEqual(new Set(["relation:many"]));
+        expect(between.map((e) => e.props.revision)).toEqual(Array.from({ length: 300 }, (_, i) => i + 1));
+        expect(fromProfiles.map((e) => e.props.id)).toEqual([preference.id]);
+        const queries = run.mock.calls.map(([q]) => q);
+        expect(queries.length).toBeGreaterThan(0);
+        expect(queries.every((q) => !q.includes("(a:") && !q.includes("(b:"))).toBe(true);
+      } finally {
+        run.mockRestore();
+        await g.close();
+      }
+    },
+  );
 }
 
 await forEachStore("HydraDB write queue", suite);

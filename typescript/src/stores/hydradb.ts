@@ -1077,6 +1077,11 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     } else if (toAnchored && !fromAnchored) {
       apat = "";
       filters.push(["fl", from_label]);
+    } else if (!anchored) {
+      apat = "";
+      bpat = "";
+      filters.push(["fl", from_label]);
+      if (to_label) filters.push(["tl", to_label]);
     }
     filters.forEach(([key, value], i) => {
       where.push(anchored ? same("r", key, `eq${i}`) : `r.\`${requireIdentifier(key)}\` = $eq${i}`);

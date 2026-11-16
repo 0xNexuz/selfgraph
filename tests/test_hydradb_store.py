@@ -1,5 +1,5 @@
 import pytest
-from helpers import HYDRADB, make_store, run, unique_ns
+from helpers import HYDRADB, create_entities, fresh_graph, instant, make_store, run, unique_ns
 
 from selfgraph import SelfGraph, StoreError
 
@@ -100,3 +100,46 @@ def test_entity_types_that_are_not_hydradb_labels_still_write():
     types, labelled = run(go())
     assert types == {"big-co:acme": "Big Co", "शहर:delhi": "शहर", "person:ada": "Person", "big-co.v2:bot": "Big-Co.v2"}
     assert labelled
+
+
+def test_an_unanchored_edge_scan_filters_endpoint_labels_without_matching_them():
+    from selfgraph._serde import encode_relation_props
+
+    g = fresh_graph("scan-labels")
+    create_entities(g, "T:A", "T:B")
+    preference = run(g.preferences.create("t:a", "drink", "t:b"))
+    stamp = instant()
+    revisions = [
+        (
+            "KNOWS",
+            "t:a",
+            "t:b",
+            encode_relation_props(
+                ns=g.namespace,
+                id="relation:many",
+                revision=revision,
+                properties={},
+                event_time=None,
+                created_at=stamp,
+                is_current=revision == 300,
+                source_count=0,
+            ),
+        )
+        for revision in range(300, 0, -1)
+    ]
+    run(g.store.create_edges(g.namespace, "Entity", "Entity", revisions))
+    queries = []
+    real = g.store._run
+
+    async def spy(query, params=None, **kw):
+        queries.append(query)
+        return await real(query, params, **kw)
+
+    g.store._run = spy
+    between = run(g.store.match_edges(g.namespace, from_label="Entity", to_label="Entity", limit=1000))
+    from_profiles = run(g.store.match_edges(g.namespace, from_label="Profile", limit=1000))
+    g.store._run = real
+    assert {e["props"]["id"] for e in between} == {"relation:many"}
+    assert [e["props"]["revision"] for e in between] == list(range(1, 301))
+    assert [e["props"]["id"] for e in from_profiles] == [preference.id]
+    assert queries and all("(a:" not in q and "(b:" not in q for q in queries)

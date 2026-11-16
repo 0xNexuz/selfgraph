@@ -845,6 +845,11 @@ class HydraDBStore(AutoCommitStore):
         elif to_anchored and not from_anchored:
             apat = ""
             filters["fl"] = from_label
+        elif not anchored:
+            apat = bpat = ""
+            filters["fl"] = from_label
+            if to_label:
+                filters["tl"] = to_label
         for i, (key, value) in enumerate(filters.items()):
             where.append(_same("r", key, f"eq{i}") if anchored else f"r.`{require_identifier(key)}` = $eq{i}")
             params[f"eq{i}"] = value
