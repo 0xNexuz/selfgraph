@@ -347,6 +347,11 @@ async def dump(graph, ns):
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
     }
+    schemed = SelfGraph(store=store, namespace=ns, schema=SCHEMA_SPEC)
+    relations_alias = {
+        alias: [r.id for r in (await schemed.relations.list(type=alias)).items]
+        for alias in ("employed by", "EMPLOYED_BY", "WORKS_AT", "is friends with")
+    }
     return to_jsonable(
         {
             "answerable": answerable,
@@ -354,6 +359,7 @@ async def dump(graph, ns):
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
+            "relations_alias": relations_alias,
             "preferences": preferences,
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),

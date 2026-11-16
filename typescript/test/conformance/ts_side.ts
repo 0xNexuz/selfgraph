@@ -3,7 +3,7 @@ import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable } from
 import { comparePy } from "../../src/internal/py.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
-import { Schema, validateAgainstSchema } from "../../src/schema.js";
+import { Schema, type Schema as SchemaType, validateAgainstSchema } from "../../src/schema.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
 
@@ -54,7 +54,7 @@ const TABLES = [
   { name: "Companies", columns: [{ name: "customer_id", references: "Customers" }] },
 ];
 
-const SCHEMA_SPEC = {
+const SCHEMA_SPEC: SchemaType = {
   name: "conformance",
   entities: [
     {
@@ -364,12 +364,18 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
   }
+  const schemed = new SelfGraph(store, { namespace: ns, schema: SCHEMA_SPEC });
+  const relationsAlias: Record<string, string[]> = {};
+  for (const alias of ["employed by", "EMPLOYED_BY", "WORKS_AT", "is friends with"]) {
+    relationsAlias[alias] = (await schemed.relations.list({ type: alias })).items.map((r) => r.id);
+  }
   return toJsonable({
     answerable,
     retrieval_seeded: seeded,
     tiers: termed.tiers,
     entities,
     relations,
+    relations_alias: relationsAlias,
     preferences,
     preference_versions: preferenceVersions,
     sources,
