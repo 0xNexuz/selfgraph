@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from helpers import KUZU, run
 
-from selfgraph import KuzuStore, SelfGraph, SyncSelfGraph
-from selfgraph.stores.kuzu import _DATABASES, _LOCKS, _OPEN_STORES, _WRITE_LOCKS
+from selfgraph import KuzuStore, SelfGraph, SyncSelfGraph, ValidationError
+from selfgraph.stores.kuzu import _DATABASE_OPTIONS, _DATABASES, _LOCKS, _OPEN_STORES, _WRITE_LOCKS
 
 MAX_ONE = {
     "entities": [{"name": "Person"}, {"name": "Company"}],
@@ -56,10 +56,28 @@ def test_the_shared_locks_are_dropped_with_the_database():
     path = a_path()
     store = KuzuStore(path)
     assert store._cache_key == path
-    assert path in _LOCKS and path in _WRITE_LOCKS
+    assert path in _LOCKS and path in _WRITE_LOCKS and path in _DATABASE_OPTIONS
     run(store.close())
     assert path not in _LOCKS, "the lock outlived the database"
     assert path not in _WRITE_LOCKS, "the write lock outlived the database"
+    assert path not in _DATABASE_OPTIONS, "the open options outlived the database"
+
+
+@pytest.mark.skipif(not KUZU, reason="the database cache is Kuzu's")
+def test_a_second_store_must_pass_the_same_options():
+    path = a_path()
+    store = KuzuStore(path, compression=True)
+    try:
+        with pytest.raises(ValidationError, match="read_only False vs True"):
+            KuzuStore(path, read_only=True)
+        with pytest.raises(ValidationError, match="max_db_size"):
+            KuzuStore(path, max_db_size=1024)
+        same = KuzuStore(path, read_only=False)
+        assert same._db is store._db
+        run(same.close())
+    finally:
+        run(store.close())
+    assert path not in _DATABASE_OPTIONS
 
 
 @pytest.mark.skipif(not KUZU, reason="anonymous stores each get their own cache key")
@@ -81,6 +99,7 @@ def test_two_in_memory_stores_share_neither_data_nor_locks():
         assert key not in _LOCKS
         assert key not in _WRITE_LOCKS
         assert key not in _DATABASES
+        assert key not in _DATABASE_OPTIONS
         assert key not in _OPEN_STORES
 
 

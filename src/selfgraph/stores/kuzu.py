@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import threading
@@ -11,7 +12,7 @@ from contextvars import ContextVar
 from functools import partial
 from typing import Any
 
-from ..errors import StoreError, ValidationError
+from ..errors import SelfGraphError, StoreError, ValidationError
 from ..ids import quote_label, require_identifier
 from ..models import CypherResult, JsonValue
 from ._cypher import AutoCommitStore, count_of, where_after, write_batches
@@ -46,6 +47,7 @@ _SCHEMA = (
     "is_current BOOLEAN, revision INT64, doc STRING)",
 )
 _DATABASES: dict[object, Any] = {}
+_DATABASE_OPTIONS: dict[object, dict[str, Any]] = {}
 
 
 _PENDING: ContextVar[tuple[Future[None], ...]] = ContextVar("selfgraph_kuzu_locks", default=())
@@ -122,6 +124,18 @@ def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
     return StoreError(message)
 
 
+def _db_options(kuzu: Any, db_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Resolve Kuzu database kwargs against the kuzu.Database defaults.
+
+    @param kuzu (Any): the lazily imported kuzu module.
+    @param db_kwargs (dict[str, Any]): options a store was constructed with.
+    @return (dict[str, Any]): every kuzu.Database option resolved to its effective value.
+    """
+    params = inspect.signature(kuzu.Database.__init__).parameters
+    defaults = {n: p.default for n, p in params.items() if p.default is not inspect.Parameter.empty}
+    return {**defaults, **db_kwargs}
+
+
 def _pk(ns: str, id: str) -> str:
     return f"{ns}\x00{id}"
 
@@ -191,6 +205,13 @@ class KuzuStore(AutoCommitStore):
     query_labels = ("N", "R")
 
     def __init__(self, path: str = "selfgraph_kuzu", **db_kwargs: Any) -> None:
+        """Open a Kuzu store on a path, sharing one cached database per path in this process.
+
+        @param path (str): the database directory or file.
+        @param db_kwargs (Any): kuzu.Database options, applied when this process first opens the path;
+            a second store on the path must resolve to the same options.
+        @return (None): nothing.
+        """
         try:
             import kuzu
         except ImportError as exc:  # pragma: no cover
@@ -203,6 +224,7 @@ class KuzuStore(AutoCommitStore):
             path = os.path.abspath(path)
         key = object() if path in ("", ":memory:") else path
         with _CACHE_LOCK:
+            options = _db_options(kuzu, db_kwargs)
             db = _DATABASES.get(key)
             if db is None:
                 os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -210,6 +232,16 @@ class KuzuStore(AutoCommitStore):
                     db = _DATABASES[key] = kuzu.Database(path, **db_kwargs)
                 except Exception as exc:  # noqa: BLE001
                     raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
+                _DATABASE_OPTIONS[key] = options
+            else:
+                open_options = _DATABASE_OPTIONS[key]
+                diffs = ", ".join(
+                    f"{k} {open_options.get(k)!r} vs {options.get(k)!r}"
+                    for k in sorted(set(options) | set(open_options))
+                    if options.get(k) != open_options.get(k)
+                )
+                if diffs:
+                    raise ValidationError(f"KuzuStore({path!r}) is already open with different options: {diffs}")
             _OPEN_STORES[key] = _OPEN_STORES.get(key, 0) + 1
             self._lock = _LOCKS.setdefault(key, _PathLock())
             self._write_lock = _WRITE_LOCKS.setdefault(key, _PathLock())
@@ -243,7 +275,7 @@ class KuzuStore(AutoCommitStore):
                 self._raw = self._raw or raw
                 columns, rows = await asyncio.to_thread(_exec)
                 return CypherResult(columns=columns, rows=rows)
-            except StoreError:
+            except SelfGraphError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 raise _kuzu_error(exc, "Kuzu query failed") from exc
@@ -283,6 +315,7 @@ class KuzuStore(AutoCommitStore):
                 if _OPEN_STORES[self._cache_key] == 0:
                     del _OPEN_STORES[self._cache_key]
                     _DATABASES.pop(self._cache_key).close()
+                    _DATABASE_OPTIONS.pop(self._cache_key, None)
                     _LOCKS.pop(self._cache_key, None)
                     _WRITE_LOCKS.pop(self._cache_key, None)
 
