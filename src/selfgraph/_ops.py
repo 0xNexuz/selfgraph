@@ -1727,11 +1727,14 @@ class Contradictions:
         self._mode = mode
         self._groups: dict[tuple[str, str, str], dict[str, tuple]] = {}
         self._past: dict[tuple[str, str, str], dict[str, tuple]] = {}
+        self._ended: dict[str, tuple[str, datetime]] = {}
         self._where: dict[str, dict[tuple[str, str, str], None]] = {}
         self._order: dict[str, int] = {}
         self._dirty: dict[tuple[str, str, str], int] = {}
         self._certified = {rel.id for rel in current if rel.certified_at is not None}
         for rel in history:
+            if rel.invalidated_by is not None and rel.invalidated_at is not None:
+                self._ended[rel.id] = (rel.invalidated_by, rel.invalidated_at)
             for key, _ in self._slots(rel.type, rel.from_entity, rel.to_entity):
                 self._past.setdefault(key, {})[rel.id] = _rank(rel)
         for rel in current:
@@ -1757,6 +1760,11 @@ class Contradictions:
         self._groups.setdefault(key, {})[rid] = rank
         self._past.get(key, {}).pop(rid, None)
         self._where.setdefault(rid, {})[key] = None
+
+    @staticmethod
+    def _newer(facts: dict[str, tuple], rid: str) -> list[tuple[tuple, str]]:
+        mine = (facts[rid], rid)
+        return sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
 
     def _drop(self, rid: str) -> None:
         for key in self._where.pop(rid, {}):
@@ -1820,20 +1828,27 @@ class Contradictions:
         displaced it in time order, the max_count-th newer fact at the endpoint with retired history counted, at
         that fact's effective time. Each retired relation gets one warning:
         "contradiction_out_of_order" when it was written by this write after that fact was current, else
-        "relation_superseded".
+        "relation_superseded". A relation retired by an earlier write whose invalidating fact is no longer the
+        max_count-th newer one, because this write added a fact in between, is returned with its corrected
+        invalidation and no warning; the caller writes that as a new revision of it.
 
         @return (tuple[dict[str, tuple[str, datetime]], list[InsertWarning]]): each retired relation id with the
             id that invalidated it and when, and the warnings.
         """
         retired: dict[str, tuple[str, datetime]] = {}
-        warnings: list[InsertWarning] = []
+        why: dict[str, tuple[tuple[str, str, str], int, str]] = {}
+        slots: list[InsertWarning | str] = []
         for key, limit in self._dirty.items():
             group = self._groups.get(key, {})
+            facts = {**self._past.get(key, {}), **group}
             ranked = sorted(group, key=lambda o: (group[o], o), reverse=True)
             canonical, side, endpoint = key
-            for old in ranked[limit:]:
+            for old in ranked:
+                newer = self._newer(facts, old)
+                if len(newer) < limit:
+                    continue
                 if old in self._certified:
-                    warnings.append(
+                    slots.append(
                         InsertWarning(
                             code="certified_kept",
                             message=f"relation {old} is certified, so it stays current beside newer {canonical} "
@@ -1841,29 +1856,44 @@ class Contradictions:
                         )
                     )
                     continue
-                facts = {**self._past.get(key, {}), **group}
-                mine = (facts[old], old)
-                newer = sorted((facts[o], o) for o in facts if (facts[o], o) > mine)
                 (at, _, _), by = newer[limit - 1]
-                retired[old] = (by, at)
-                self._drop(old)
-                if self._order.get(by, 0) < self._order.get(old, 0):
-                    keeper = ranked[limit - 1]
-                    warnings.append(
-                        InsertWarning(
-                            code="contradiction_out_of_order",
-                            message=f"relation {old} is older than current {canonical} relation {keeper} "
-                            f"at {side} entity {endpoint}, so {keeper} stays current",
-                        )
+                if old not in retired:
+                    slots.append(old)
+                if old not in retired or at < retired[old][1]:
+                    retired[old] = (by, at)
+                    why[old] = (key, limit, ranked[limit - 1] if len(ranked) >= limit else by)
+            for rid in self._past.get(key, {}):
+                newer = self._newer(facts, rid)
+                ended = retired.get(rid, self._ended.get(rid))
+                if ended is None or len(newer) < limit:
+                    continue
+                (at, _, _), by = newer[limit - 1]
+                if (by, at) != ended and (ended[0] in facts or at < ended[1]):
+                    retired[rid] = self._ended[rid] = (by, at)
+        warnings: list[InsertWarning] = []
+        for slot in slots:
+            if not isinstance(slot, str):
+                warnings.append(slot)
+                continue
+            by = retired[slot][0]
+            (canonical, side, endpoint), limit, keeper = why[slot]
+            self._drop(slot)
+            if self._order.get(by, 0) < self._order.get(slot, 0):
+                warnings.append(
+                    InsertWarning(
+                        code="contradiction_out_of_order",
+                        message=f"relation {slot} is older than current {canonical} relation {keeper} "
+                        f"at {side} entity {endpoint}, so {keeper} stays current",
                     )
-                else:
-                    warnings.append(
-                        InsertWarning(
-                            code="relation_superseded",
-                            message=f"relation {old} was superseded by {by}, a newer {canonical} relation "
-                            f"at {side} entity {endpoint} (max_count {limit})",
-                        )
+                )
+            else:
+                warnings.append(
+                    InsertWarning(
+                        code="relation_superseded",
+                        message=f"relation {slot} was superseded by {by}, a newer {canonical} relation "
+                        f"at {side} entity {endpoint} (max_count {limit})",
                     )
+                )
         self._dirty.clear()
         return retired, warnings
 
@@ -1896,7 +1926,10 @@ async def require_max_count(
 def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
     """Mark a relation version as no longer current because a newer relation superseded it.
 
-    @param edge (dict): the current edge row.
+    A version that was already retired takes a new revision instead, copying its content, so a known_at read from
+    before this write still sees the earlier retirement.
+
+    @param edge (dict): the edge row, current or already retired.
     @param by (str): the id of the relation that superseded it.
     @param at (datetime): the superseding relation's effective time.
     @param known (datetime): when the retirement is written, for reads with known_at.
@@ -1909,6 +1942,8 @@ def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
         "invalidated_by": by,
         "invalidated_known_at": to_iso(known),
     }
+    if not edge["props"]["is_current"]:
+        props.update(revision=int(edge["props"]["revision"]) + 1, created_at=to_iso(known))
     return {**edge, "props": props}
 
 
@@ -1926,8 +1961,8 @@ async def _contradiction_check(
     @param contradiction (str): "off", "warn", "supersede", or "strict".
     @param caps (Mapping[str, RelationCap] | None): the max_count limits, or None without a schema.
     @param ends (Iterable[tuple[str, str, str]]): (normalized type, source id, destination id) of each write.
-    @return (tuple[Contradictions | None, dict[str, dict]]): the tracker, or None when off, and each current
-        relation's edge row at the constrained endpoints by id, in read order.
+    @return (tuple[Contradictions | None, dict[str, dict]]): the tracker, or None when off, and each relation's
+        newest edge row at the constrained endpoints by id, current or retired, in read order.
     """
     if contradiction == "off" or not caps:
         return None, {}
@@ -1945,11 +1980,11 @@ async def _contradiction_check(
                 fetch = partial(runner.match_edges, ns, from_label=L_ENTITY, to_label=L_ENTITY, type=stored)
                 for edge in await _paged(partial(fetch, **anchor), page=_BATCH):
                     _keep_newest(found, edge)
-    existing = {rid: e for rid, e in found.items() if e["props"]["is_current"]}
+    current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
     history = [
         _relation_of(e) for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")
     ]
-    return Contradictions(caps, contradiction, [_relation_of(e) for e in existing.values()], history), existing
+    return Contradictions(caps, contradiction, current, history), found
 
 
 async def rival_relations(
