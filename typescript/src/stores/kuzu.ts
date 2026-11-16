@@ -46,6 +46,7 @@ interface KuzuPreparedStatement {
 }
 
 interface KuzuConnection {
+  init(): Promise<void>;
   query(statement: string): Promise<KuzuQueryResult | KuzuQueryResult[]>;
   prepare(statement: string): Promise<KuzuPreparedStatement>;
   execute(
@@ -239,7 +240,9 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     OPEN_STORES.set(this.cacheKey, (OPEN_STORES.get(this.cacheKey) ?? 0) + 1);
     this.connect = () => new kuzu.Connection(db);
     try {
-      return this.connect();
+      const conn = this.connect();
+      await conn.init();
+      return conn;
     } catch (exc) {
       await KuzuStore.releaseStore(this.cacheKey);
       throw exc;

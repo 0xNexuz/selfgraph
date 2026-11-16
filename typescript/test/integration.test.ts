@@ -1409,7 +1409,7 @@ describe("store setup errors", () => {
       },
     });
     const refuse = class {
-      constructor() {
+      async init() {
         throw new Error("connection refused");
       }
     };
