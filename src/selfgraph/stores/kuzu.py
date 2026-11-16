@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from ..errors import StoreError, TransientError, ValidationError
+from ..errors import StoreError, ValidationError
 from ..ids import quote_label
 from ..models import CypherResult
 from ._cypher import AutoCommitStore, count_of, where_after, write_batches
@@ -69,8 +69,6 @@ def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
     @return (StoreError): the error to raise.
     """
     message = f"{prefix}: {exc}"
-    if "Only one write transaction at a time" in str(exc):
-        return TransientError(f"{message}; another writer is using this Kuzu database, retry the write")
     if "Could not set lock on file" in str(exc):
         message += (
             "; another process (an MCP server or script) has this Kuzu database open; Kuzu allows one process at a time"
@@ -166,7 +164,6 @@ class KuzuStore(AutoCommitStore):
         self._db = _DATABASES[path]
         self._conn = kuzu.Connection(self._db)
         _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
-        # every store on one path shares one database, so they share its locks too
         self._lock = _LOCKS.setdefault(path, asyncio.Lock())
         self._write_lock = _WRITE_LOCKS.setdefault(path, asyncio.Lock())
 
@@ -210,6 +207,8 @@ class KuzuStore(AutoCommitStore):
             if _OPEN_STORES[self._path] == 0:
                 del _OPEN_STORES[self._path]
                 _DATABASES.pop(self._path).close()
+                _LOCKS.pop(self._path, None)
+                _WRITE_LOCKS.pop(self._path, None)
 
     async def get_node(self, ns: str, label: str, id: str) -> dict | None:
         res = await self._run(

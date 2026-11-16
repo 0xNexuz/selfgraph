@@ -80,6 +80,7 @@ interface KuzuModule {
 
 const DATABASES = new Map<string, KuzuDatabase>();
 const OPEN_STORES = new Map<string, number>();
+const WRITE_QUEUES = new Map<string, object>();
 const MAX_SKIP = 10_000_000;
 
 function normalize(value: unknown): unknown {
@@ -224,6 +225,16 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   });
   private queue: Promise<unknown> = Promise.resolve();
 
+  /** Share one write queue with every store on this path, since they share one database. */
+  override writeQueueKey(): object {
+    let key = WRITE_QUEUES.get(this.path);
+    if (key === undefined) {
+      key = {};
+      WRITE_QUEUES.set(this.path, key);
+    }
+    return key;
+  }
+
   /**
    * An embedded, in-process Kuzu graph over a generic single-table schema.
    *
@@ -288,6 +299,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     const key = databasePath(path);
     const db = DATABASES.get(key);
     DATABASES.delete(key);
+    WRITE_QUEUES.delete(key);
     await db?.close?.();
   }
 
