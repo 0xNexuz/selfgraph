@@ -254,7 +254,7 @@ function schemaProblem(schema: z.output<typeof SchemaObject>): [Array<string | n
       current = current.parent == null ? undefined : index.get(current.parent);
     }
   }
-  const types = new Set<string>();
+  const types = new Map<string, number>();
   for (const [i, relation] of schema.relations.entries()) {
     let rtype: string | null = null;
     try {
@@ -265,7 +265,7 @@ function schemaProblem(schema: z.output<typeof SchemaObject>): [Array<string | n
     if (rtype !== null && types.has(rtype)) {
       return [["relations", i, "type"], `duplicate relation type ${pyRepr(relation.type)}`];
     }
-    if (rtype !== null) types.add(rtype);
+    if (rtype !== null) types.set(rtype, i);
     for (const side of ["from", "to"] as const) {
       for (const [j, name] of (schema.entities.length ? relation[side].types : []).entries()) {
         if (!names.has(casefold(canonicalEntityType(name, schema)))) {
@@ -277,6 +277,25 @@ function schemaProblem(schema: z.output<typeof SchemaObject>): [Array<string | n
       if (min != null && min < 0) return [["relations", i, side, "min_count"], "must be >= 0"];
       if (min != null && max != null && min > max) {
         return [["relations", i, side, "min_count"], `min_count ${min} is greater than max_count ${max}`];
+      }
+    }
+  }
+  for (const [i, relation] of schema.relations.entries()) {
+    for (const [j, alias] of relation.aliases.entries()) {
+      let key: string;
+      try {
+        key = normalizeRelType(alias);
+      } catch (err) {
+        if (!(err instanceof ValidationError)) throw err;
+        continue;
+      }
+      if (!types.has(key)) types.set(key, i);
+      const owner = types.get(key) as number;
+      if (owner !== i) {
+        return [
+          ["relations", i, "aliases", j],
+          `${pyRepr(alias)} is already a name or alias of relation type ${pyRepr(schema.relations[owner]?.type)}`,
+        ];
       }
     }
   }

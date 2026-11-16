@@ -152,7 +152,7 @@ class Schema(TopInputModel):
                     break
                 seen.add(current.name)
                 current = index.get(current.parent) if current.parent is not None else None
-        types: set[str] = set()
+        types: dict[str, int] = {}
         for i, relation in enumerate(self.relations):
             try:
                 rtype = normalize_rel_type(relation.type)
@@ -161,7 +161,7 @@ class Schema(TopInputModel):
             if rtype in types:
                 raise ValueError(f"relations[{i}].type: duplicate relation type {relation.type!r}")
             if rtype is not None:
-                types.add(rtype)
+                types[rtype] = i
             for side, end in (("from", relation.from_), ("to", relation.to)):
                 at = f"relations[{i}].{side}"
                 for j, name in enumerate(end.types if self.entities else ()):
@@ -174,6 +174,18 @@ class Schema(TopInputModel):
                 if end.min_count is not None and end.max_count is not None and end.min_count > end.max_count:
                     raise ValueError(
                         f"{at}.min_count: min_count {end.min_count} is greater than max_count {end.max_count}"
+                    )
+        for i, relation in enumerate(self.relations):
+            for j, alias in enumerate(relation.aliases):
+                try:
+                    key = normalize_rel_type(alias)
+                except ValidationError:
+                    continue
+                owner = types.setdefault(key, i)
+                if owner != i:
+                    raise ValueError(
+                        f"relations[{i}].aliases[{j}]: {alias!r} is already a name or alias of relation type "
+                        f"{self.relations[owner].type!r}"
                     )
         return self
 

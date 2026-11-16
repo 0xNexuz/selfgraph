@@ -87,6 +87,9 @@ describe("endpoint types", () => {
     const swapped = { ...facts, relations: [{ ...facts.relations[0]!, from_entity: "company:acme" }] };
     expect(check(schema, swapped).map((w) => w.code)).toEqual(["endpoint_type_violation"]);
     expect(Schema.parse({ relations: [{ type: "R", to: { types: ["Anything"] } }] }).entities).toEqual([]);
+    expect(() => asSchema({ ...schema, entities: [...schema.entities, { name: "Team", aliases: ["org"] }] })).toThrow(
+      "entities[2].aliases[0]",
+    );
   });
 });
 
@@ -136,6 +139,27 @@ describe("Schema.parse and asSchema", () => {
       },
       "entities[1].aliases[0]: 'Org' is already a name or alias of entity type 'Company'",
     ],
+    [
+      { entities: [{ name: "Straße" }, { name: "Company", aliases: ["STRASSE"] }] },
+      "entities[1].aliases[0]: 'STRASSE' is already a name or alias of entity type 'Straße'",
+    ],
+    [
+      { relations: [{ type: "WORKS_AT" }, { type: "OWNS", aliases: ["works at"] }] },
+      "relations[1].aliases[0]: 'works at' is already a name or alias of relation type 'WORKS_AT'",
+    ],
+    [
+      { relations: [{ type: "OWNS", aliases: ["works-at"] }, { type: "WORKS_AT" }] },
+      "relations[0].aliases[0]: 'works-at' is already a name or alias of relation type 'WORKS_AT'",
+    ],
+    [
+      {
+        relations: [
+          { type: "OWNS", aliases: ["employed by"] },
+          { type: "WORKS_AT", aliases: ["employed-by"] },
+        ],
+      },
+      "relations[1].aliases[0]: 'employed-by' is already a name or alias of relation type 'OWNS'",
+    ],
     [{ entities: [{ name: "A" }, { name: "B", parent: "X" }] }, "entities[1].parent: unknown type 'X'"],
     [
       { entities: [{ name: "A" }], relations: [{ type: "R", to: { types: ["A", "B"] } }] },
@@ -168,11 +192,13 @@ describe("Schema.parse and asSchema", () => {
   it("lets an alias repeat its own type name", () => {
     const schema = asSchema({
       entities: [
-        { name: "Person", aliases: ["person", "Human"] },
+        { name: "Person", aliases: ["person", "Human", "human"] },
         { name: "Company", aliases: ["org"] },
       ],
     });
-    expect(schema?.entities.map((e) => e.aliases)).toEqual([["person", "Human"], ["org"]]);
+    expect(schema?.entities.map((e) => e.aliases)).toEqual([["person", "Human", "human"], ["org"]]);
+    const relation = asSchema({ relations: [{ type: "WORKS_AT", aliases: ["works at", "works-at"] }] });
+    expect(relation?.relations[0]?.aliases).toEqual(["works at", "works-at"]);
   });
 });
 

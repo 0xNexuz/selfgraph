@@ -217,6 +217,21 @@ def schema_warnings():
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
+    alias_errors = []
+    for spec in [
+        {"entities": [{"name": "Person"}, {"name": "Company", "aliases": ["Person"]}]},
+        {"entities": [{"name": "Company", "aliases": ["org"]}, {"name": "Team", "aliases": ["Org"]}]},
+        {"entities": [{"name": "Straße"}, {"name": "Company", "aliases": ["STRASSE"]}]},
+        {"relations": [{"type": "WORKS_AT"}, {"type": "OWNS", "aliases": ["works at"]}]},
+        {"relations": [{"type": "OWNS", "aliases": ["works-at"]}, {"type": "WORKS_AT"}]},
+        {"relations": [{"type": "OWNS", "aliases": ["employed by"]}, {"type": "WORKS_AT", "aliases": ["employed-by"]}]},
+    ]:
+        try:
+            Schema.model_validate(spec)
+        except ValidationError as exc:
+            alias_errors.append(str(exc))
+        else:
+            alias_errors.append("no error")
     return {
         "warnings": [
             [
@@ -225,6 +240,7 @@ def schema_warnings():
             ]
             for facts in cases
         ],
+        "alias_errors": alias_errors,
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),

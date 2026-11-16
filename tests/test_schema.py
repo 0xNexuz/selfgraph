@@ -233,6 +233,27 @@ def test_invalid_schema_and_mode_raise_validation_error():
             {"entities": [{"name": "Company", "aliases": ["org"]}, {"name": "Team", "aliases": ["Org"]}]},
             "entities[1].aliases[0]: 'Org' is already a name or alias of entity type 'Company'",
         ),
+        (
+            {"entities": [{"name": "Straße"}, {"name": "Company", "aliases": ["STRASSE"]}]},
+            "entities[1].aliases[0]: 'STRASSE' is already a name or alias of entity type 'Straße'",
+        ),
+        (
+            {"relations": [{"type": "WORKS_AT"}, {"type": "OWNS", "aliases": ["works at"]}]},
+            "relations[1].aliases[0]: 'works at' is already a name or alias of relation type 'WORKS_AT'",
+        ),
+        (
+            {"relations": [{"type": "OWNS", "aliases": ["works-at"]}, {"type": "WORKS_AT"}]},
+            "relations[0].aliases[0]: 'works-at' is already a name or alias of relation type 'WORKS_AT'",
+        ),
+        (
+            {
+                "relations": [
+                    {"type": "OWNS", "aliases": ["employed by"]},
+                    {"type": "WORKS_AT", "aliases": ["employed-by"]},
+                ]
+            },
+            "relations[1].aliases[0]: 'employed-by' is already a name or alias of relation type 'OWNS'",
+        ),
         ({"entities": [{"name": "A"}, {"name": "B", "parent": "X"}]}, "entities[1].parent: unknown type 'X'"),
         (
             {"entities": [{"name": "A", "parent": "B"}, {"name": "B", "parent": "A"}]},
@@ -267,10 +288,15 @@ def test_inconsistent_schemas_are_rejected_with_a_path(spec, message):
 def test_an_alias_may_repeat_its_own_type_name():
     schema = as_schema(
         {
-            "entities": [{"name": "Person", "aliases": ["person", "Human"]}, {"name": "Company", "aliases": ["org"]}],
+            "entities": [
+                {"name": "Person", "aliases": ["person", "Human", "human"]},
+                {"name": "Company", "aliases": ["org"]},
+            ],
         }
     )
-    assert [e.aliases for e in schema.entities] == [["person", "Human"], ["org"]]
+    assert [e.aliases for e in schema.entities] == [["person", "Human", "human"], ["org"]]
+    relation = as_schema({"relations": [{"type": "WORKS_AT", "aliases": ["works at", "works-at"]}]})
+    assert relation.relations[0].aliases == ["works at", "works-at"]
 
 
 def test_models_built_directly_raise_the_sdk_validation_error():
@@ -613,3 +639,5 @@ def test_endpoint_types_resolve_like_entity_types_and_are_only_checked_with_enti
     )
     assert [w.code for w in validate_against_schema(swapped, as_schema(schema))] == ["endpoint_type_violation"]
     assert as_schema({"relations": [{"type": "R", "to": {"types": ["Anything"]}}]}).entities == []
+    with pytest.raises(ValidationError, match="entities\\[2\\].aliases\\[0\\]"):
+        as_schema({**schema, "entities": [*schema["entities"], {"name": "Team", "aliases": ["org"]}]})
