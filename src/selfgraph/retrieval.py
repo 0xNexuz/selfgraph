@@ -610,7 +610,8 @@ async def _neighbors(
             for rel in out:
                 outgoing[rel.from_entity].append(rel)
             for rel in inc:
-                incoming[rel.to_entity].append(rel)
+                if rel.from_entity != rel.to_entity:
+                    incoming[rel.to_entity].append(rel)
     return {n: outgoing[n] + incoming[n] for n in nodes}
 
 
@@ -1256,7 +1257,7 @@ def answerability(
     for r in relations:
         adjacency.setdefault(r.from_entity, set()).add(r.to_entity)
         adjacency.setdefault(r.to_entity, set()).add(r.from_entity)
-        for eid in (r.from_entity, r.to_entity):
+        for eid in {r.from_entity, r.to_entity}:
             degree[eid] = degree.get(eid, 0) + 1
     hubs = {eid for eid, n in degree.items() if n >= HUB_DEGREE}
     pairs = [(a, b) for i, a in enumerate(linked) for b in list(linked)[i + 1 :]]

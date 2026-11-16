@@ -79,6 +79,44 @@ def test_retrieve_strategies_and_depth_bound_traversal():
         run(g.retrieve("team", strategy="sideways"))
 
 
+@pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
+def test_self_relations_count_once_toward_hub_threshold(strategy):
+    for loops in (24, 48):
+        g = fresh_graph("self-loop-hub")
+        run(
+            g.insert.facts(
+                {
+                    "entities": [{"type": "Thing", "name": n} for n in ["Ada", "Middle", "Bob"]],
+                    "relations": [
+                        {"id": "relation:am", "from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                        {"id": "relation:mb", "from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                        *[
+                            {
+                                "id": f"relation:self{i}",
+                                "from_entity": "thing:middle",
+                                "type": "SELF",
+                                "to_entity": "thing:middle",
+                            }
+                            for i in range(loops)
+                        ],
+                    ],
+                }
+            )
+        )
+        assert len(run(g.relations.list()).items) == loops + 2
+        is_hub = loops + 2 >= 50
+        result = run(g.retrieve("Ada", k=1, depth=3, skip_hubs=True, strategy=strategy))
+        assert result.hubs == (["thing:middle"] if is_hub else [])
+        assert {e.id for e in result.subgraph.entities} == (
+            {"thing:ada", "thing:middle"} if is_hub else {"thing:ada", "thing:middle", "thing:bob"}
+        )
+        assert ("(via hub)" in result.context) == is_hub
+        report = run(g.check_answerable("Ada Bob"))
+        assert report.connected
+        assert report.verdict == ("uncertain" if is_hub else "answerable")
+        assert report.hub_only == ([["ada", "bob"]] if is_hub else [])
+
+
 def test_retrieve_includes_source_passage():
     llm = extracting_llm([("Person", "Soham"), ("Company", "HydraDB")])
     g = new_graph(llm=llm)

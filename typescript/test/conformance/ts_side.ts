@@ -1222,6 +1222,22 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
   }
+  const loops = new SelfGraph(store, { namespace: `${ns}_loops` });
+  await loops.insert.facts({
+    entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      { from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+      { from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+      ...Array.from({ length: 24 }, (_, i) => ({
+        id: `relation:self${i}`,
+        from_entity: "thing:middle",
+        type: "SELF",
+        to_entity: "thing:middle",
+      })),
+    ],
+  });
+  const loopResult = await loops.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true });
+  const loopReport = await loops.checkAnswerable("Ada Bob");
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
@@ -1241,6 +1257,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
     },
     retrieval_seeded: seeded,
+    self_loop_hubs: {
+      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
+      hubs: loopResult.hubs,
+      verdict: loopReport.verdict,
+      hub_only: loopReport.hub_only,
+    },
     tiers: termed.tiers,
     entities,
     relations,

@@ -1362,6 +1362,27 @@ async def dump(graph, ns):
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
     }
+    loops = SelfGraph(store=store, namespace=f"{ns}_loops")
+    await loops.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Middle", "Bob")],
+            "relations": [
+                {"from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                {"from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                *[
+                    {
+                        "id": f"relation:self{i}",
+                        "from_entity": "thing:middle",
+                        "type": "SELF",
+                        "to_entity": "thing:middle",
+                    }
+                    for i in range(24)
+                ],
+            ],
+        }
+    )
+    loop_result = await loops.retrieve("Ada", k=1, depth=3, skip_hubs=True)
+    loop_report = await loops.check_answerable("Ada Bob")
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1374,6 +1395,12 @@ async def dump(graph, ns):
                 "counts": {e.id: e.source_count for e in historical.subgraph.entities},
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
+            "self_loop_hubs": {
+                "entities": sorted(e.id for e in loop_result.subgraph.entities),
+                "hubs": loop_result.hubs,
+                "verdict": loop_report.verdict,
+                "hub_only": loop_report.hub_only,
+            },
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),

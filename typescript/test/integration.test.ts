@@ -647,6 +647,39 @@ function suite(spec: StoreSpec) {
     await expect(graph.insert.text("bad\u0000text")).rejects.toBeInstanceOf(ValidationError);
   });
 
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    it(`counts self relations once toward hub threshold: ${strategy}`, async () => {
+      for (const loops of [24, 48]) {
+        const g = fresh();
+        await g.insert.facts({
+          entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+          relations: [
+            { id: "relation:am", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+            { id: "relation:mb", from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+            ...Array.from({ length: loops }, (_, i) => ({
+              id: `relation:self${i}`,
+              from_entity: "thing:middle",
+              type: "SELF",
+              to_entity: "thing:middle",
+            })),
+          ],
+        });
+        expect((await g.relations.list()).items.length).toBe(loops + 2);
+        const isHub = loops + 2 >= 50;
+        const result = await g.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true, strategy });
+        expect(result.hubs).toEqual(isHub ? ["thing:middle"] : []);
+        expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(
+          isHub ? ["thing:ada", "thing:middle"] : ["thing:ada", "thing:bob", "thing:middle"],
+        );
+        expect(result.context.includes("(via hub)")).toBe(isHub);
+        const report = await g.checkAnswerable("Ada Bob");
+        expect(report.connected).toBe(true);
+        expect(report.verdict).toBe(isHub ? "uncertain" : "answerable");
+        expect(report.hub_only).toEqual(isHub ? [["ada", "bob"]] : []);
+      }
+    });
+  }
+
   describe("retrieval context", () => {
     const ENTITIES = [
       { type: "Person", name: "Ann" },
