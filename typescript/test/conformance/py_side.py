@@ -7,12 +7,25 @@ from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
+from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
+from selfgraph.extraction.extractor import _lenient_event_time
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
 from selfgraph.terms import expand_tokens, schema_forms
+
+LENIENT_EVENT_TIMES = [
+    "2021",
+    "0000",
+    "0001",
+    "9999",
+    "March 2021",
+    "",
+    "2021-06-15T12:00:00Z",
+    None,
+]
 
 TERMS_SPEC = {
     "entities": [
@@ -334,6 +347,7 @@ def schema_warnings():
             ]
             for q in ("Employees", "staff", "personnel")
         ],
+        "lenient_event_times": [json_iso(_lenient_event_time(value)) for value in LENIENT_EVENT_TIMES],
     }
 
 

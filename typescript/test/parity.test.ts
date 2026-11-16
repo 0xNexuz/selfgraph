@@ -175,7 +175,8 @@ describe("extraction, chunking, and retrieval helpers match Python", () => {
 
   it("lenientTime accepts a bare year and drops unparseable text", () => {
     expect(toIso(lenientTime("2021"))).toBe("2021-01-01T00:00:00+00:00");
-    expect(toIso(lenientTime(2021))).toBe("2021-01-01T00:00:00+00:00");
+    expect(toIso(lenientTime("0001"))).toBe("0001-01-01T00:00:00+00:00");
+    expect(lenientTime("0000")).toBeNull();
     expect(lenientTime("March 2021")).toBeNull();
     const facts = assembleExtraction(
       [

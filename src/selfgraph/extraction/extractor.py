@@ -4,7 +4,6 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 from pydantic import ValidationError as PydanticValidationError
@@ -58,31 +57,26 @@ class _RelOut(BaseModel):
     _evidence: EvidenceInput | None = PrivateAttr(default=None)
 
 
-def _lenient_event_time(value: Any) -> datetime | None:
-    """Parse an extracted event_time; a bare year becomes Jan 1 UTC, and unparseable values become None.
+def _lenient_event_time(value: str | None) -> datetime | None:
+    """Parse an extracted event_time; a bare year 0001-9999 becomes Jan 1 UTC, and unparseable values become None.
 
-    @param value (Any): a datetime, ISO text, a four-digit year, or None.
+    @param value (str | None): ISO text, a four-digit year, or None.
     @return (datetime | None): the time, or None when absent or not parseable.
     """
     if value is None:
         return None
-    if isinstance(value, datetime):
-        return aware(value)
-    if isinstance(value, bool):
+    text = value.strip()
+    if not text:
         return None
-    if isinstance(value, int) and 1000 <= value <= 9999:
-        return aware(datetime(value, 1, 1, tzinfo=timezone.utc))
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        if len(text) == 4 and text.isdigit():
-            return aware(datetime(int(text), 1, 1, tzinfo=timezone.utc))
-        try:
-            return parse_time(text, "event_time")
-        except ValidationError:
-            return None
-    return None
+    if len(text) == 4 and text.isdigit():
+        year = int(text)
+        if 1 <= year <= 9999:
+            return aware(datetime(year, 1, 1, tzinfo=timezone.utc))
+        return None
+    try:
+        return parse_time(text, "event_time")
+    except ValidationError:
+        return None
 
 
 class _RelationsOut(BaseModel):

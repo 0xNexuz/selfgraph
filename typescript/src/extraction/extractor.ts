@@ -81,7 +81,7 @@ export interface RawRelation {
   type: string;
   to_name: string;
   properties?: Record<string, unknown> | null;
-  event_time?: string | Date | null;
+  event_time?: string | null;
   evidence?: ChunkEvidence | null;
 }
 
@@ -163,28 +163,25 @@ function admitted(warnings: InsertWarning[], kind: string, check: () => void, rt
 }
 
 /**
- * Parse an extracted event_time; a bare year becomes Jan 1 UTC, and unparseable values become null.
+ * Parse an extracted event_time; a bare year 0001-9999 becomes Jan 1 UTC, and unparseable values become null.
  *
- * @param value (string | Date | number | null | undefined): a Date, ISO text, a four-digit year, or null.
+ * @param value (string | null | undefined): ISO text, a four-digit year, or null.
  * @return (Date | null): the time, or null when absent or not parseable.
  */
-export function lenientTime(value: string | Date | number | null | undefined): Date | null {
+export function lenientTime(value: string | null | undefined): Date | null {
   if (value == null) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1000 && value <= 9999) {
-    return parseIso(`${value}-01-01`);
+  const text = pyStrip(value);
+  if (!text) return null;
+  if (/^\d{4}$/.test(text)) {
+    const year = Number(text);
+    if (year >= 1 && year <= 9999) return parseIso(`${text}-01-01`);
+    return null;
   }
-  if (typeof value === "string") {
-    const text = pyStrip(value);
-    if (!text) return null;
-    if (/^\d{4}$/.test(text)) return parseIso(`${text}-01-01`);
-    try {
-      return parseIso(text);
-    } catch {
-      return null;
-    }
+  try {
+    return parseIso(text);
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**

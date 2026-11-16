@@ -5,7 +5,8 @@ from selfgraph.extraction.extractor import _lenient_event_time, _RelationsOut, _
 
 def test_lenient_event_time_accepts_year_and_iso_and_drops_noise():
     assert _lenient_event_time("2021") == utc(2021)
-    assert _lenient_event_time(2021) == utc(2021)
+    assert _lenient_event_time("0001") == utc(1)
+    assert _lenient_event_time("0000") is None
     assert _lenient_event_time("2021-06-15T12:00:00Z") == utc(2021, 6, 15).replace(hour=12)
     assert _lenient_event_time("March 2021") is None
     assert _lenient_event_time("") is None
