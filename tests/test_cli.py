@@ -23,6 +23,7 @@ from helpers import (
 
 import selfgraph
 from selfgraph.cli import _metadata, build_parser, main
+from selfgraph._serde import from_iso
 from selfgraph.errors import ValidationError
 from selfgraph.runtime import parse_time, read_json
 
@@ -211,6 +212,7 @@ def test_global_flags_after_the_subcommand(capsys, tmp_path):
 def test_time_flags_share_one_parser(capsys):
     for text in ("2024-01-02T00:00:00Z", "2024-01-02", "2024-01-02T00:00:00", "2024-01-02T01:00:00+01:00"):
         assert parse_time(text, "event_time") == utc(2024, 1, 2)
+        assert from_iso(text) == utc(2024, 1, 2)
     with pytest.raises(ValidationError, match="invalid now: 'soon' is not an ISO 8601 date or time"):
         parse_time("soon", "now")
     g = fresh_graph("cli-time")

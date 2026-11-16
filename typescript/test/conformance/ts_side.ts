@@ -352,6 +352,7 @@ export const FACTS = {
       value_entity: "database:hydradb",
       strength: 0.9,
       about_entity: "company:acme",
+      event_time: "2024-06-15T10:30:00Z",
     },
     {
       subject_entity: "person:jane-doe",

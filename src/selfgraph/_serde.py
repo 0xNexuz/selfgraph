@@ -115,19 +115,30 @@ def json_iso(dt: datetime | None) -> str | None:
     return None if iso is None else f"{iso.removesuffix('+00:00')}Z"
 
 
-def from_iso(value: Any) -> datetime | None:
-    """Parse an ISO 8601 datetime, honoring a trailing ``Z``/``z`` as UTC.
+def _iso_text(value: Any) -> Any:
+    """Rewrite a trailing Z/z in an ISO 8601 string to +00:00 so fromisoformat accepts it.
 
-    ``datetime.fromisoformat`` rejects a trailing ``Z`` before Python 3.11, and this
-    project supports Python 3.10+, so rewrite ``Z``/``z`` to an explicit offset first.
-    This mirrors the handling in :func:`selfgraph._ops.parse_time`.
+    Shared by from_iso and parse_time.
+
+    @param value (Any): the value, typically a string.
+    @return (Any): the value with Z/z replaced by +00:00, or the value unchanged.
+    """
+    if isinstance(value, str) and value[-1:] in ("Z", "z"):
+        return f"{value[:-1]}+00:00"
+    return value
+
+
+def from_iso(value: Any) -> datetime | None:
+    """Parse an ISO 8601 datetime, honoring a trailing Z/z as UTC.
+
+    @param value (Any): the value to parse.
+    @return (datetime | None): the parsed datetime, or None.
     """
     if value is None:
         return None
     if isinstance(value, datetime):
         return value
-    text = f"{value[:-1]}+00:00" if isinstance(value, str) and value[-1:] in ("Z", "z") else value
-    return datetime.fromisoformat(text)
+    return datetime.fromisoformat(_iso_text(value))
 
 
 def _dumps(value: Any) -> str:

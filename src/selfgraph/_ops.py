@@ -42,6 +42,7 @@ from ._serde import (
     encode_relation_props,
     encode_trace_props,
     from_iso,
+    _iso_text,
     json_iso,
     now,
     preference_edge_type,
@@ -248,7 +249,7 @@ def parse_time(value: Any, field: str) -> datetime | None:
     if not isinstance(value, str):
         _require_datetime(field, value)
         return value
-    text = f"{value[:-1]}+00:00" if value[-1:] in ("Z", "z") else value
+    text = _iso_text(value)
     try:
         parsed = aware(datetime.fromisoformat(text))
     except (TypeError, ValueError) as exc:
