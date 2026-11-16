@@ -164,7 +164,9 @@ TEXTS = [
     "The rain fell. A Storm hit Paris; Berlin, Rome: Madrid! Done?",
     "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.",
     "Jane Doe met\nBob Smith at Acme.",
-    unicodedata.normalize("NFD", "Zoë met José García at Café Société in São Paulo. Émile Zola met Bo\u0302b Lee."),
+    unicodedata.normalize(
+        "NFD", "Zoë met José García at Café Société in São Paulo. Émile Zola met Bo\u0302b Lee. Q\u1acfing Fox."
+    ),
     "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing",
     "Acme Report\u2028Ann works at Acme\x85Bob Lee\u2029Initech Inc\x1cGlobex\x1dHooli\x1eSoylent\rUmbrella\vStark\n",
 ]

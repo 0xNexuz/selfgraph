@@ -1,11 +1,12 @@
 import { LLM_HINT } from "../errors.js";
 import { log } from "../internal/log.js";
+import { MARK_CLASS } from "../internal/marks.js";
 import { PY_WS_CLASS, pySplit, pySplitLines, pyStrip } from "../internal/py.js";
 import { insertWarning, type ParsedDocument, type ParsedExtraction } from "../models.js";
 import type { Extractor } from "../protocols.js";
 import { assembleExtraction, FALLBACK_TYPE, type RawEntity, type RawRelation, WarningSink } from "./extractor.js";
 
-const WORD = "[\\p{L}\\p{N}\\p{M}_&.'\\-]";
+const WORD = `[\\p{L}\\p{N}${MARK_CLASS}_&.'\\-]`;
 const CAP = new RegExp(`[A-Z]${WORD}*(?:[${PY_WS_CLASS}]+[A-Z]${WORD}*)*`, "gu");
 const SENT = new RegExp(`(?<=[.!?])[${PY_WS_CLASS}]+`, "u");
 const STOPNAMES = new Set(
