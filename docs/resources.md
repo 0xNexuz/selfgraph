@@ -50,10 +50,14 @@ A derived id is `type:name`, both slugged:
 
 - NFC-normalized, lowercased, and stripped;
 - whitespace runs turned into one hyphen;
-- punctuation, symbols, and emoji dropped from the name.
+- punctuation, symbols, and emoji dropped from the name. Combining marks, such
+  as the vowel signs of Devanagari or Thai, are part of the word and stay. Both
+  SDKs take them from one fixed list, the marks of Unicode 15.0, so an id does
+  not depend on the Python or Node version.
 
 So `Acme` and `ACME` share an id, `Bob 😀` and `Bob` both become `person:bob`,
-and type `Per son` gives `per-son:bob`. A name with nothing else left keeps its
+type `Per son` gives `per-son:bob`, and `राम` and `रीमा` stay apart as
+`person:राम` and `person:रीमा`. A name with nothing else left keeps its
 symbols (`person:😀`).
 
 **Organization names.** For organization-like types, the name also drops a
@@ -87,12 +91,12 @@ join them, reference the explicit id or set `resolver="default"` (see
 [Entity resolution](resolution.md)).
 
 **Allowed and reserved types.** An entity type may contain only letters (any
-script), digits, spaces, `_`, `-`, and `.`. These are reserved in any case and
-raise `ValidationError`:
+script, with their combining marks), digits, spaces, `_`, `-`, and `.`. These
+are reserved in any case and raise `ValidationError`:
 
 - entity types `Entity`, `Profile`, `DecisionTrace`, `DecisionStep`, `Source`,
   `SourceVersion`, `Chunk`, `Evidence`, `EntityMerge`, and `EntityMergeEntry`;
-- entity id prefixes `relation:`, `preference:`, `decision:`, `profile:`,
+- entity id prefixes `relation:`, `preference:`, `decision:`, `decisionstep:`, `profile:`,
   `source:`, `sv:`, `evidence:`, and `entitymerge:`.
 
 ### Updating and deleting
@@ -119,6 +123,26 @@ and any decision trace that references it. Two exceptions:
 
 - A decision that only considered it as an alternative drops that alternative.
 - A preference only about it gets a new version without `about_entity`.
+
+Deleting a relation at an endpoint the schema's `max_count` constrains settles
+that endpoint again, as [`supersede`](schema.md#contradictions) would have
+settled it without the deleted relation. This covers `relations.delete`, a
+relation removed with an entity, and `maintenance.prune`.
+
+- Every relation `supersede` retired there is ranked again with the current ones,
+  and the newest `max_count` stay current. Each one is settled at both of its
+  endpoints, with retired relations counted, as an insert settles it, so a
+  relation still displaced at its other endpoint stays retired.
+- A retired relation that makes the cut comes back as a new current revision
+  with its old properties and its original effective time, so `as_of` reads show
+  it valid from its start. `restored_relations` in the delete result counts them.
+- A retired relation that does not make the cut stays retired. It takes a new
+  revision whose `invalidated_by` and `invalidated_at` name the relation that now
+  displaces it, so they never name a deleted relation.
+- A retirement by the [LLM judge](schema.md#llm-judged-contradictions) or by
+  [`replace_source`](inserting.md#replacing-a-source) is left as it is.
+- Older versions are not changed. A `known_at` read from before the delete still
+  shows the relation retired.
 
 ## Evidence
 
@@ -214,8 +238,12 @@ await graph.decisions.create(
   retired. They are kept in order and not checked to form a path.
 - `status` defaults to `"completed"`.
 - The derived id hashes the actor and title. A second `create` with both equal
-  raises `ConflictError`, while `insert.facts` updates the stored decision.
-  Use distinct titles or an explicit `id` for distinct decisions.
+  raises `ConflictError`, while `insert.facts` and `insert.text` update the
+  stored decision. Use distinct titles or an explicit `id` for distinct decisions.
+- An insert that restates a stored decision keeps every field it leaves out. A
+  missing field or an empty `steps` or `alternative_entities` keeps the stored
+  value, and a given one replaces it. A new decision without a `status` is
+  `"completed"`. To clear a field, use `decisions.update(clear=[...])`.
 
 ## Listing and iterating
 

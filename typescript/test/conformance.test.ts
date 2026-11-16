@@ -6,21 +6,27 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { KuzuStore, SelfGraph } from "../src/index.js";
-import { conformanceStore, dump, schemaWarnings, write } from "./conformance/ts_side.js";
+import { ids, KuzuStore, SelfGraph } from "../src/index.js";
+import type { Schema } from "../src/schema.js";
+import { conformanceStore, dump, SUPERSEDE_SCHEMA, schemaWarnings, supersede, write } from "./conformance/ts_side.js";
 import { reachable, selectedStores, tempKuzu, uniqueNs } from "./helpers.js";
 
 const PY = process.env.SELFGRAPH_PY;
 const SCRIPT = fileURLToPath(new URL("./conformance/py_side.py", import.meta.url));
 const KUZU = tempKuzu("selfgraph-conf-");
 
-function py(cmd: "write" | "dump" | "schema", store: string, ns: string): unknown {
+function py(cmd: "write" | "dump" | "schema" | "supersede", store: string, ns: string): unknown {
   const out = execFileSync(PY!, [SCRIPT, cmd, store, ns, KUZU], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(out);
 }
 
-async function ts<T>(store: string, ns: string, fn: (g: SelfGraph) => Promise<T>): Promise<T> {
-  const graph = new SelfGraph(conformanceStore(store, KUZU), { namespace: ns });
+async function ts<T>(
+  store: string,
+  ns: string,
+  fn: (g: SelfGraph) => Promise<T>,
+  options: { schema?: Schema; contradiction?: "supersede" } = {},
+): Promise<T> {
+  const graph = new SelfGraph(conformanceStore(store, KUZU), { namespace: ns, ...options });
   try {
     await graph.initialize();
     return await fn(graph);
@@ -57,7 +63,7 @@ function mask(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
-        if (k === "created_at" || k === "updated_at") return [k, "<ts>"];
+        if (k === "created_at" || k === "updated_at" || k === "invalidated_known_at") return [k, "<ts>"];
         if (k === "ns") return [k, "<ns>"];
         if (k === "message") return [k, "<message>"];
         if (k === "evidence_json" && typeof v === "string") return [k, mask(v)];
@@ -94,6 +100,17 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
   });
 
   for (const { name: store } of specs) {
+    it.skipIf(!live.get(store))(`${store}: superseding at both endpoints agrees in both languages`, async () => {
+      const fromPy = py("supersede", store, uniqueNs("conf_sup_py"));
+      const fromTs = await ts(store, uniqueNs("conf_sup_ts"), supersede, {
+        schema: SUPERSEDE_SCHEMA,
+        contradiction: "supersede",
+      });
+      expect(mask(fromTs)).toEqual(mask(fromPy));
+      const ended = Object.values((fromTs as { versions: Record<string, unknown[][]> }).versions).map((v) => v[0]![3]);
+      expect(ended.filter((at) => at !== null).sort()).toEqual(["2022-01-01T00:00:00Z", "2026-01-01T00:00:00Z"]);
+    });
+
     it.skipIf(!live.get(store))(
       `${store}: Python and TypeScript read, write, and agree on the same graph`,
       async () => {
@@ -102,9 +119,14 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const pyOps = py("write", store, nsPy);
         const tsOps = await ts(store, nsTs, write);
+        expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
+        expect(tsOps.facts_none).toBe("invalid facts: expected object");
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
+        expect(pyReadsPy).toMatchObject({
+          known_at_sources: { seeds: ["database:hydradb"], counts: { "database:hydradb": 1, "company:acme": 1 } },
+        });
 
         const tsReadsTs = await ts(store, nsTs, (g) => dump(g, nsTs));
         const pyReadsTs = py("dump", store, nsTs);
@@ -125,6 +147,20 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
           mask(roundFloats(bySource(pyReadsPy))),
         );
         expect(mask(tsOps), `both libraries return the same results ${where}`).toEqual(mask(pyOps));
+        const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
+        const step = ids.stepId(dec, 0);
+        for (const ops of [pyOps, tsOps]) {
+          expect((ops as { dec_retry: unknown }).dec_retry).toEqual({
+            links: [
+              ["CONSIDERED", dec, "database:postgres"],
+              ["FROM", step, "company:acme"],
+              ["MADE_DECISION", "person:jane-doe", dec],
+              ["RESULTED_IN", dec, "database:hydradb"],
+              ["TO", step, "database:hydradb"],
+            ],
+            unchanged: true,
+          });
+        }
         rmSync(evidence, { recursive: true, force: true });
       },
     );

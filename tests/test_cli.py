@@ -24,7 +24,7 @@ from helpers import (
 import selfgraph
 from selfgraph.cli import _metadata, build_parser, main
 from selfgraph.errors import ValidationError
-from selfgraph.runtime import parse_time
+from selfgraph.runtime import parse_time, read_json
 
 
 def test_insert_facts_then_read(capsys, tmp_path):
@@ -48,6 +48,20 @@ def test_entity_create_parses_props_and_aliases(capsys):
     assert out["id"] == "t:a"
     assert out["aliases"] == ["Ay"]
     assert out["properties"] == {"score": 1, "tag": "x"}
+
+
+def test_nan_and_infinity_are_text_in_flags_and_invalid_json_in_files(capsys, tmp_path):
+    g = new_graph()
+    argv = ["entity", "create", "--name", "A", "--type", "T", "--id", "t:a"]
+    out = cli(g, [*argv, "--prop", "a=NaN", "--prop", "b=Infinity", "--prop", "c=-Infinity"], capsys)
+    assert out["properties"] == {"a": "NaN", "b": "Infinity", "c": "-Infinity"}
+    assert _metadata(["n=NaN"]) == {"n": "NaN"}
+    with pytest.raises(ValidationError, match="^invalid JSON in --metadata: Infinity is not a JSON value$"):
+        _metadata(['{"n": Infinity}'])
+    path = tmp_path / "facts.json"
+    path.write_text('{"entities": [{"type": "T", "name": "W", "properties": {"x": NaN}}]}', encoding="utf-8")
+    with pytest.raises(ValidationError, match="^invalid JSON in '.*facts.json': NaN is not a JSON value$"):
+        read_json(str(path))
 
 
 def test_relation_create_update_versions(capsys):
@@ -284,6 +298,12 @@ def test_bad_facts_and_schema_files_fail_cleanly_and_warnings_reach_stderr(capsy
     captured = capsys.readouterr()
     assert "selfgraph: unknown_entity_type: entity company:b has unknown type 'Company'\n" in captured.err
     assert json.loads(captured.out)["warnings"][0]["code"] == "unknown_entity_type"
+
+
+def test_null_facts_file_fails_cleanly(capsys, tmp_path):
+    null = json_file(tmp_path, "null.json", None)
+    assert kuzu_main(tmp_path, "insert", "facts", null) == 2
+    assert capsys.readouterr().err == "error: invalid facts: expected object\n"
 
 
 def test_relation_update_aliases_and_dry_run_plans_omit_deleted(capsys):

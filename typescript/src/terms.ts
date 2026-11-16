@@ -6,14 +6,57 @@ export type Tokenize = (text: string) => Set<string>;
 
 export type SchemaTermKind = "type" | "definition" | "relation";
 
+const SINGULARS = new Map([
+  ["calories", "calorie"],
+  ["cookies", "cookie"],
+  ["hoodies", "hoodie"],
+  ["movies", "movie"],
+  ["rookies", "rookie"],
+  ["selfies", "selfie"],
+  ["zombies", "zombie"],
+  ["quizzes", "quiz"],
+  ["buses", "bus"],
+  ["statuses", "status"],
+  ["status", "status"],
+  ["analysis", "analysis"],
+  ["news", "news"],
+  ["series", "series"],
+  ["species", "species"],
+]);
+const ES_AFTER = ["ss", "sh", "x", "zz", "tz"];
+const VOWELS = "aeiou";
+
+const endsWithAny = (word: string, endings: readonly string[]) => endings.some((end) => word.endsWith(end));
+
 /**
- * Strip a plain plural ending so "customers" and "customer" compare equal.
+ * Report whether a singular forms its plural with "es", so the plural loses both letters.
+ *
+ * @param base (string): a plural without its final "es".
+ * @return (boolean): true after ss, sh, x, zz, or tz, and after a consonant followed by ch.
+ */
+function takesEs(base: string): boolean {
+  if (endsWithAny(base, ES_AFTER)) return true;
+  const before = Array.from(base).at(-3);
+  return base.endsWith("ch") && before !== undefined && !VOWELS.includes(before);
+}
+
+/**
+ * Strip a plural ending so "customers" and "customer", or "addresses" and "address", compare equal.
+ *
+ * The suffix rules run in order: -ies becomes -y, -es is dropped where takesEs says the singular takes it, and
+ * any other final s is dropped unless the word ends in -ss. SINGULARS holds the common words those rules get
+ * wrong: -ie nouns that would read as -y plurals, quizzes and buses (doubled or -us stems), status and analysis
+ * (singulars that end in s), and nouns that are the same in both numbers. A blanket -us / -is keep would leave
+ * menus unchanged and would turn excuses into excus.
  *
  * @param token (string): a casefolded token.
- * @return (string): the token without a trailing plural s.
+ * @return (string): the token in its singular form.
  */
 export function stem(token: string): string {
+  const known = SINGULARS.get(token);
+  if (known !== undefined) return known;
   if (token.endsWith("ies") && cpLen(token) > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("es") && cpLen(token) > 4 && takesEs(token.slice(0, -2))) return token.slice(0, -2);
   if (token.endsWith("s") && !token.endsWith("ss") && cpLen(token) > 3) return token.slice(0, -1);
   return token;
 }
@@ -106,14 +149,14 @@ export function schemaForms(
 }
 
 /**
- * Add the words of each entity type a question names by alias or synonym, so seeding finds entities of that type.
+ * Add the words of each entity type and its subtypes when a question names the type or a definition.
  *
- * A definition adds the words of the entity type it belongs to.
+ * A definition adds the words of the entity type it belongs to and that type's subtypes.
  *
  * @param tokens (ReadonlySet<string>): the question's content tokens.
  * @param schema (ParsedSchema | null): the schema, or null for no expansion.
  * @param tokenize (Tokenize): splits text into content tokens.
- * @return (Set<string>): the tokens with the matched type names added.
+ * @return (Set<string>): the tokens with the matched type and subtype names added.
  */
 export function expandTokens(
   tokens: ReadonlySet<string>,
@@ -122,6 +165,7 @@ export function expandTokens(
 ): Set<string> {
   const out = new Set(tokens);
   if (schema === null) return out;
+  const index = entityIndex(schema);
   const owner = new Map(schema.entities.flatMap((e) => e.definitions.map((d) => [d.name, e.name] as const)));
   const stems = new Set([...tokens].map(stem));
   const found = schemaForms(schema);
@@ -129,8 +173,12 @@ export function expandTokens(
     for (const [form, [term]] of found[kind]) {
       const words = [...tokenize(form)].map(stem);
       if (!words.length || !words.every((w) => stems.has(w))) continue;
-      const name = kind === "type" ? term : owner.get(term)!;
-      for (const token of tokenize(name)) out.add(token);
+      const root = kind === "type" ? term : owner.get(term)!;
+      for (const entity of schema.entities) {
+        if ([...lineage(entity, index)].some((t) => t.name === root)) {
+          for (const token of tokenize(entity.name)) out.add(token);
+        }
+      }
     }
   }
   return out;

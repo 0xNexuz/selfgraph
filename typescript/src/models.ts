@@ -266,6 +266,7 @@ export interface DeleteResult {
   deleted_relation_versions: number;
   deleted_decisions: number;
   deleted_preference_versions: number;
+  restored_relations: number;
 }
 
 export interface DecayResult {
@@ -386,7 +387,7 @@ export const DecisionTraceInput = z.strictObject({
   rationale: optString,
   outcome_entity: optString,
   alternative_entities: z.array(z.string()).default([]),
-  status: Status.default(DEFAULT_STATUS),
+  status: nullable(Status),
   event_time: optDate,
 });
 export type DecisionTraceInput = DeepReadonly<z.input<typeof DecisionTraceInput>>;

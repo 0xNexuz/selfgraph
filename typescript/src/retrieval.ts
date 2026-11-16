@@ -1,7 +1,7 @@
 import { type GraphAccess, seedTier } from "./access.js";
 import { loadTokenizer } from "./chunking.js";
 import { ValidationError } from "./errors.js";
-import { normalizeText, profileId } from "./ids.js";
+import { normalizeText, profileId, wordRuns } from "./ids.js";
 import { casefold } from "./internal/casefold.js";
 import { loads } from "./internal/json.js";
 import { comparePy, cpLen, NON_ASCII, pyFloatRepr, pyRepr, pyStr, pyStrip } from "./internal/py.js";
@@ -43,6 +43,9 @@ const STOPWORDS = new Set(
   ).split(" "),
 );
 
+const IRREGULAR = /(?<![\p{L}\p{N}_])(?:won|can)['’ʼ]t(?![\p{L}\p{N}_])/giu;
+const CLITIC =
+  /(?<=[\p{L}\p{N}_])n['’ʼ]t(?![\p{L}\p{N}_])|(?<=[\p{L}\p{N}_])['’ʼ](?:s|ll|re|ve|d|m)(?![\p{L}\p{N}_])/giu;
 const FILLER = new Set(
   (
     "about all any can could describe does explain find give i know list many me much my our please should show " +
@@ -75,8 +78,6 @@ export const STRATEGIES = ["bfs", "dfs", "ppr"] as const;
 
 export const RETRIEVE_DEFAULTS = { strategy: "bfs", depth: 3, k: 20, max_nodes: 200, budget_tokens: 3000 } as const;
 
-const TOKEN = /[\p{L}\p{N}]+/gu;
-
 /**
  * NFC-normalize and casefold text, so query and stored text compare in one form.
  *
@@ -94,7 +95,7 @@ export function fold(text: string): string {
  * @return (string[]): the content tokens, repeats kept.
  */
 export function tokenList(text: string): string[] {
-  return [...fold(text).matchAll(TOKEN)].map((m) => m[0]).filter((t) => !STOPWORDS.has(t));
+  return wordRuns(fold(text)).filter((t) => !STOPWORDS.has(t));
 }
 
 /**
@@ -115,7 +116,7 @@ export function tokens(text: string): Set<string> {
  */
 function shortTokens(text: string): Set<string> {
   const out = new Set<string>();
-  for (const m of fold(text).matchAll(TOKEN)) if ([...m[0]].length === 1) out.add(m[0]);
+  for (const t of wordRuns(fold(text))) if (cpLen(t) === 1) out.add(t);
   return out;
 }
 
@@ -287,7 +288,10 @@ async function scanSeeds(
     else yield* entityPages(store, ns, asOf, valid);
   }
   let best: Array<[Entity, number]> = [];
-  for await (const page of scored()) best = bestSeeds([...best, ...seedScores(page, queryTokens, exact, stats!)], k);
+  for await (const page of scored()) {
+    const visible = asOf?.known ? await ops.withKnownSources(store, ns, page, asOf.known) : page;
+    best = bestSeeds([...best, ...seedScores(visible, queryTokens, exact, stats!)], k);
+  }
   return best;
 }
 
@@ -841,7 +845,7 @@ async function collectPreferences(
  * @param subgraph (Subgraph): the collected entities, relations, preferences, and decisions.
  * @param names (Map<string, string>): entity id to display name.
  * @param dist (Map<string, number>): entity id to hop distance from the seeds.
- * @param budgetTokens (number): the token budget; when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
+ * @param budgetTokens (number): the token budget; the first line that does not fit ends the context, so a farther line never takes the place of a nearer one, and when even the first line does not fit, that line is cut to the budget, so a non-empty subgraph never yields an empty context.
  * @param countTokens ((text: string) => number): the token counter.
  * @param hubs (ReadonlySet<string>): hub entity ids; a relation line through one is marked "(via hub)".
  * @return (string): the context text. Certified relations come first among equally close ones and are marked "[certified]".
@@ -860,10 +864,15 @@ function assemble(
   const lines: string[] = [];
   let first: string | null = null;
   let used = 0;
+  let full = false;
   const add = (line: string, cap: number): boolean => {
     first ??= line;
+    if (full) return false;
     const cost = countTokens(line);
-    if (used + cost > cap) return false;
+    if (used + cost > cap) {
+      full = cap >= budgetTokens;
+      return false;
+    }
     lines.push(line);
     used += cost;
     return true;
@@ -1070,7 +1079,8 @@ async function run(
   }
 
   await load(store, ns, known, dist.keys());
-  const entities = [...dist.keys()].flatMap((eid) => known.get(eid) ?? []);
+  let entities = [...dist.keys()].flatMap((eid) => known.get(eid) ?? []);
+  if (asOf?.known) entities = await ops.withKnownSources(store, ns, entities, asOf.known);
 
   let decisions = await collectDecisions(store, ns, new Set(relations.map((r) => r.id)), asOf);
   let preferences = await collectPreferences(store, ns, dist.keys(), valid);
@@ -1122,19 +1132,40 @@ async function run(
 }
 
 /**
+ * Split text into content tokens like tokenList, with possessive and contraction endings dropped.
+ *
+ * "Ann's" is "ann" and "Doesn't" is "does", so a name, a synonym, and a question spell the same words. "won't" and "can't" are irregular and stay whole.
+ *
+ * @param text (string): the question, name, or synonym.
+ * @return (string[]): the content tokens, repeats kept.
+ */
+function termWords(text: string): string[] {
+  const words: string[] = [];
+  let last = 0;
+  for (const m of text.matchAll(IRREGULAR)) {
+    words.push(...tokenList(text.slice(last, m.index).replace(CLITIC, "")));
+    words.push(m[0].toLowerCase().replace(/[’ʼ]/g, "'"));
+    last = m.index + m[0].length;
+  }
+  return [...words, ...tokenList(text.slice(last).replace(CLITIC, ""))];
+}
+
+/**
  * Split a question into terms: each longest run of its content tokens that spells a multi-word name or alias, and every other content token on its own, except filler words such as "where", "tell", and "me".
+ *
+ * A possessive or contraction ending is dropped from the question and from the names, so "Ann's Bakery" is one term whichever way it is written; "won't" and "can't" stay whole.
  *
  * @param question (string): the question.
  * @param names (Iterable<string>): the entity names, aliases, and schema term forms a run may spell, ignoring a plain plural ending.
  * @return (string[]): the distinct terms, in question order.
  */
 function questionTerms(question: string, names: Iterable<string>): string[] {
-  const words = tokenList(question).filter((w) => !FILLER.has(w));
+  const words = termWords(question).filter((w) => !FILLER.has(w));
   const stems = words.map(stem);
   const spelled = new Set<string>();
   let longest = 1;
   for (const name of names) {
-    const phrase = tokenList(name).map(stem);
+    const phrase = termWords(name).map(stem);
     if (phrase.length > 1) {
       spelled.add(JSON.stringify(phrase));
       longest = Math.max(longest, phrase.length);

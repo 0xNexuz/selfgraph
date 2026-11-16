@@ -149,6 +149,26 @@ def test_render_catalog():
     assert render_schema_catalog(Schema.model_validate({})) == ("", "")
 
 
+@pytest.mark.parametrize(
+    ("relation_ids", "count"),
+    [(["relation:a", "relation:a"], 1), (["relation:a", "relation:b"], 2)],
+    ids=["repeated-id-counts-once", "different-ids-count-twice"],
+)
+def test_cardinality_counts_distinct_relation_ids(relation_ids, count):
+    spec = {"relations": [{"type": "WORKS_AT", "from": {"max_count": 1}, "to": {"max_count": 1}}]}
+    facts = _o(rels=[("person:p", "WORKS_AT", "company:c", rid) for rid in relation_ids])
+    found = warnings(spec, facts)
+    assert [w.code for w in found] == ([] if count == 1 else ["cardinality_violation"] * 2)
+    assert [w.message for w in found] == (
+        []
+        if count == 1
+        else [
+            "person:p has 2 WORKS_AT (from) in this insert, above max 1",
+            "company:c has 2 WORKS_AT (to) in this insert, above max 1",
+        ]
+    )
+
+
 def test_insert_schema_modes_per_graph_and_per_call():
     g = new_graph()
     schema = {
@@ -201,6 +221,39 @@ def test_invalid_schema_and_mode_raise_validation_error():
     ("spec", "message"),
     [
         ({"entities": [{"name": "Person"}, {"name": "person"}]}, "entities[1].name: duplicate entity type 'person'"),
+        (
+            {"entities": [{"name": "Person"}, {"name": "Company", "aliases": ["Person"]}]},
+            "entities[1].aliases[0]: 'Person' is already a name or alias of entity type 'Person'",
+        ),
+        (
+            {"entities": [{"name": "Company", "aliases": ["person"]}, {"name": "Person"}]},
+            "entities[0].aliases[0]: 'person' is already a name or alias of entity type 'Person'",
+        ),
+        (
+            {"entities": [{"name": "Company", "aliases": ["org"]}, {"name": "Team", "aliases": ["Org"]}]},
+            "entities[1].aliases[0]: 'Org' is already a name or alias of entity type 'Company'",
+        ),
+        (
+            {"entities": [{"name": "Straße"}, {"name": "Company", "aliases": ["STRASSE"]}]},
+            "entities[1].aliases[0]: 'STRASSE' is already a name or alias of entity type 'Straße'",
+        ),
+        (
+            {"relations": [{"type": "WORKS_AT"}, {"type": "OWNS", "aliases": ["works at"]}]},
+            "relations[1].aliases[0]: 'works at' is already a name or alias of relation type 'WORKS_AT'",
+        ),
+        (
+            {"relations": [{"type": "OWNS", "aliases": ["works-at"]}, {"type": "WORKS_AT"}]},
+            "relations[0].aliases[0]: 'works-at' is already a name or alias of relation type 'WORKS_AT'",
+        ),
+        (
+            {
+                "relations": [
+                    {"type": "OWNS", "aliases": ["employed by"]},
+                    {"type": "WORKS_AT", "aliases": ["employed-by"]},
+                ]
+            },
+            "relations[1].aliases[0]: 'employed-by' is already a name or alias of relation type 'OWNS'",
+        ),
         ({"entities": [{"name": "A"}, {"name": "B", "parent": "X"}]}, "entities[1].parent: unknown type 'X'"),
         (
             {"entities": [{"name": "A", "parent": "B"}, {"name": "B", "parent": "A"}]},
@@ -210,6 +263,10 @@ def test_invalid_schema_and_mode_raise_validation_error():
         (
             {"relations": [{"type": "WORKS_AT"}, {"type": "works at"}]},
             "relations[1].type: duplicate relation type 'works at'",
+        ),
+        (
+            {"entities": [{"name": "A"}], "relations": [{"type": "R", "to": {"types": ["A", "B"]}}]},
+            "relations[0].to.types[1]: unknown type 'B'",
         ),
         ({"relations": [{"type": "R", "from": {"max_count": 0}}]}, "relations[0].from.max_count: must be >= 1"),
         ({"relations": [{"type": "R", "to": {"min_count": -1}}]}, "relations[0].to.min_count: must be >= 0"),
@@ -228,6 +285,60 @@ def test_inconsistent_schemas_are_rejected_with_a_path(spec, message):
     assert str(direct.value) == f"invalid schema: {message}"
 
 
+def test_an_alias_may_repeat_its_own_type_name():
+    schema = as_schema(
+        {
+            "entities": [
+                {"name": "Person", "aliases": ["person", "Human", "human"]},
+                {"name": "Company", "aliases": ["org"]},
+            ],
+        }
+    )
+    assert [e.aliases for e in schema.entities] == [["person", "Human", "human"], ["org"]]
+    relation = as_schema({"relations": [{"type": "WORKS_AT", "aliases": ["works at", "works-at"]}]})
+    assert relation.relations[0].aliases == ["works at", "works-at"]
+
+
+def test_a_parent_is_stored_as_the_schema_type_name():
+    def parents(spec):
+        return [entity.parent for entity in as_schema(spec).entities]
+
+    person = {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "person"}]}
+    human = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "human"}]}
+    shouted = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "HUMAN"}]}
+    exact = {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "Person"}]}
+    exact_alias = {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "Human"}]}
+    assert (
+        parents(person)
+        == parents(human)
+        == parents(shouted)
+        == parents(exact)
+        == parents(exact_alias)
+        == [
+            None,
+            "Person",
+        ]
+    )
+    with pytest.raises(ValidationError, match="entities\\[1\\].parent: unknown type 'X'"):
+        as_schema({"entities": [{"name": "Person"}, {"name": "Manager", "parent": "X"}]})
+    with pytest.raises(ValidationError, match="entities\\[0\\].parent: parent cycle 'A' -> 'B' -> 'A'"):
+        as_schema({"entities": [{"name": "A", "parent": "b"}, {"name": "B", "parent": "a"}]})
+    with pytest.raises(ValidationError, match="entities\\[0\\].parent: parent cycle 'A' -> 'A'"):
+        as_schema({"entities": [{"name": "A", "parent": "a"}]})
+    spec = {
+        "entities": [
+            {"name": "Person", "properties": [{"name": "age", "type": "integer", "required": True}]},
+            {"name": "Manager", "parent": "person"},
+        ]
+    }
+    schema = as_schema(spec)
+    assert schema.to_ossie()["ontology"][1]["extends"] == ["Person"]
+    facts = Extraction.model_validate({"entities": [{"type": "Manager", "name": "M"}]})
+    assert [w.message for w in validate_against_schema(facts, schema)] == [
+        "entity manager:m is missing required property 'age'"
+    ]
+
+
 def test_models_built_directly_raise_the_sdk_validation_error():
     with pytest.raises(ValidationError) as err:
         Extraction(entities=[{"type": "Person"}])
@@ -242,7 +353,10 @@ def test_settings_load_schema_from_file_or_object(tmp_path, monkeypatch):
     assert g.schema == Schema.model_validate(SPEC)
     with pytest.raises(ValidationError):
         run(g.insert.facts({"entities": [{"type": "Robot", "name": "R2"}]}))
-    assert build_graph(store_settings(schema=SPEC)).schema == Schema.model_validate(SPEC)
+    run(g.close())
+    other = build_graph(store_settings(schema=SPEC))
+    assert other.schema == Schema.model_validate(SPEC)
+    run(other.close())
     with pytest.raises(ValidationError, match="cannot read"):
         build_graph(store_settings(schema=str(tmp_path / "missing.json")))
 
@@ -419,6 +533,154 @@ def test_an_update_fails_or_warns_only_for_violations_it_introduces(caplog):
     ]
 
 
+def test_insert_checks_merged_properties_and_treats_none_as_missing_for_required_specs():
+    spec = {
+        "entities": [
+            {"name": "Person", "properties": [{"name": "age", "type": "integer", "required": True}]},
+            {"name": "Company", "properties": [{"name": "note", "type": "string"}]},
+        ],
+        "relations": [
+            {
+                "type": "WORKS_AT",
+                "from": {"types": ["Person"]},
+                "to": {"types": ["Company"]},
+                "properties": [{"name": "since", "type": "integer", "required": True}],
+            },
+            {
+                "type": "KNOWS",
+                "from": {"types": ["Person"]},
+                "to": {"types": ["Person"]},
+                "properties": [{"name": "since", "type": "integer", "required": True}],
+            },
+        ],
+    }
+    assert [
+        w.code for w in warnings(spec, {"entities": [{"type": "Person", "name": "Jane", "properties": {"age": None}}]})
+    ] == ["missing_required_property"]
+    assert warnings(spec, {"entities": [{"type": "Company", "name": "Acme", "properties": {"note": None}}]}) == []
+
+    strict = fresh_graph("schema-upsert-strict", schema=spec, schema_mode="strict")
+    with pytest.raises(ValidationError, match=r"^entity person:ghost is missing required property 'age'$"):
+        run(strict.insert.facts({"entities": [{"type": "Person", "name": "Ghost", "properties": {"age": None}}]}))
+    assert run(strict.entities.get("person:ghost")) is None
+
+    seeded = run(
+        strict.insert.facts(
+            {
+                "entities": [
+                    {"type": "Person", "name": "Jane", "properties": {"city": "NYC"}},
+                    {"type": "Person", "name": "Jane", "properties": {"age": 30}},
+                    {"type": "Company", "name": "Acme"},
+                ],
+                "relations": [
+                    {
+                        "from_entity": "person:jane",
+                        "type": "WORKS_AT",
+                        "to_entity": "company:acme",
+                        "properties": {"since": 2020},
+                    }
+                ],
+            }
+        )
+    )
+    assert seeded.warnings == []
+
+    extended = run(
+        strict.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Jane", "properties": {"city": "SF"}}],
+                "relations": [
+                    {
+                        "from_entity": "person:jane",
+                        "type": "WORKS_AT",
+                        "to_entity": "company:acme",
+                        "properties": {"role": "CTO"},
+                    }
+                ],
+            }
+        )
+    )
+    assert extended.warnings == []
+    assert run(strict.entities.get("person:jane")).properties == {"age": 30, "city": "SF"}
+    rel = run(strict.relations.list(from_entity="person:jane")).items[0]
+    assert rel.properties == {"since": 2020, "role": "CTO"}
+
+    warn = new_graph(namespace=strict.namespace, schema=spec, schema_mode="warn")
+    assert (
+        run(
+            warn.insert.facts(
+                {
+                    "entities": [{"type": "Person", "name": "Jane"}],
+                    "relations": [{"from_entity": "person:jane", "type": "WORKS_AT", "to_entity": "company:acme"}],
+                }
+            )
+        ).warnings
+        == []
+    )
+
+    with pytest.raises(ValidationError, match=r"^entity person:jane is missing required property 'age'$"):
+        run(strict.insert.facts({"entities": [{"type": "Person", "name": "Jane", "properties": {"age": None}}]}))
+    with pytest.raises(ValidationError, match="missing required property 'since'"):
+        run(
+            strict.insert.facts(
+                {
+                    "relations": [
+                        {
+                            "from_entity": "person:jane",
+                            "type": "WORKS_AT",
+                            "to_entity": "company:acme",
+                            "properties": {"since": None},
+                        }
+                    ]
+                }
+            )
+        )
+    assert run(strict.entities.get("person:jane")).properties == {"age": 30, "city": "SF"}
+    assert run(strict.relations.get(rel.id)).properties == {"since": 2020, "role": "CTO"}
+
+    folded_rel = run(
+        strict.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Jane Doe", "aliases": ["Janie"], "properties": {"age": 35}}],
+                "relations": [
+                    {
+                        "from_entity": "person:jane",
+                        "type": "KNOWS",
+                        "to_entity": "person:jane-doe",
+                        "properties": {"role": "mentor"},
+                    },
+                    {
+                        "from_entity": "person:jane",
+                        "type": "KNOWS",
+                        "to_entity": "person:jane-doe",
+                        "properties": {"since": 2021},
+                    },
+                ],
+            }
+        )
+    )
+    assert folded_rel.warnings == []
+    assert folded_rel.relations[0].properties == {"role": "mentor", "since": 2021}
+
+    resolved_res = run(
+        strict.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Janie"}],
+                "relations": [
+                    {
+                        "from_entity": "person:janie",
+                        "type": "WORKS_AT",
+                        "to_entity": "company:acme",
+                        "properties": {"since": 2022},
+                    }
+                ],
+            }
+        )
+    )
+    assert [m.survivor_id for m in resolved_res.merges] == ["person:jane-doe"]
+    assert [r.from_entity for r in resolved_res.relations] == ["person:jane-doe"]
+
+
 def test_strict_mode_needs_a_schema(tmp_path, capsys):
     g = new_graph()
     for call in (
@@ -546,3 +808,24 @@ def test_schema_aliases_and_case_canonicalize_types_before_ids_are_derived():
     )
     assert [e.id for e in res.entities] == ["company:acme", "company:globex"]
     assert [(r.from_entity, r.to_entity) for r in res.relations] == [("company:acme", "company:globex")] * 2
+
+
+def test_endpoint_types_resolve_like_entity_types_and_are_only_checked_with_entities():
+    schema = {
+        "entities": [{"name": "Person"}, {"name": "Company", "aliases": ["Org"]}],
+        "relations": [{"type": "WORKS_AT", "from": {"types": ["person"]}, "to": {"types": ["Org"]}}],
+    }
+    facts = Extraction.model_validate(
+        {
+            "entities": [{"type": "Person", "name": "Ann"}, {"type": "Company", "name": "Acme"}],
+            "relations": [{"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme"}],
+        }
+    )
+    assert validate_against_schema(facts, as_schema(schema)) == []
+    swapped = facts.model_copy(
+        update={"relations": [facts.relations[0].model_copy(update={"from_entity": "company:acme"})]}
+    )
+    assert [w.code for w in validate_against_schema(swapped, as_schema(schema))] == ["endpoint_type_violation"]
+    assert as_schema({"relations": [{"type": "R", "to": {"types": ["Anything"]}}]}).entities == []
+    with pytest.raises(ValidationError, match="entities\\[2\\].aliases\\[0\\]"):
+        as_schema({**schema, "entities": [*schema["entities"], {"name": "Team", "aliases": ["org"]}]})

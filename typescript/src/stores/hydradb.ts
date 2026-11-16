@@ -31,7 +31,14 @@ import {
   recordsToResult,
   toBoltParams,
 } from "./bolt.js";
-import { AutoCommitStore, quoteLabel, sortedEntries, toCount, whereAfter } from "./cypherPrimitives.js";
+import {
+  AutoCommitStore,
+  quoteLabel,
+  requireIdentifier,
+  sortedEntries,
+  toCount,
+  whereAfter,
+} from "./cypherPrimitives.js";
 import { docs, edgeRow, firstDoc, mergedCurrentEdge } from "./docRows.js";
 
 const EDGE = "RELATES";
@@ -146,7 +153,8 @@ function unset(props: Props): string[] {
     .sort();
 }
 
-const removes = (alias: string, keys: readonly string[]): string => keys.map((k) => `${alias}.\`${k}\``).join(", ");
+const removes = (alias: string, keys: readonly string[]): string =>
+  keys.map((k) => `${alias}.\`${requireIdentifier(k)}\``).join(", ");
 
 const docOf = (value: unknown): string => pyJsonDumps(value, { default: pyStr });
 
@@ -158,7 +166,8 @@ const docOf = (value: unknown): string => pyJsonDumps(value, { default: pyStr })
  * @param param (string): the parameter name.
  * @return (string): the predicate.
  */
-const same = (alias: string, key: string, param: string): string => `NOT ${alias}.\`${key}\` <> $${param}`;
+const same = (alias: string, key: string, param: string): string =>
+  `NOT ${alias}.\`${requireIdentifier(key)}\` <> $${param}`;
 
 const BY_SID = `MATCH ()-[r:${EDGE} {sid: $sid}]->() WHERE ${same("r", "ns", "ns")}`;
 
@@ -174,7 +183,7 @@ const BY_SID = `MATCH ()-[r:${EDGE} {sid: $sid}]->() WHERE ${same("r", "ns", "ns
 function keyed(alias: string, label: string, equals: Props | null | undefined, params: Props): string {
   const entries = sortedEntries(equals).map(([key, value], i) => {
     params[`eq${i}`] = value;
-    return `\`${key}\`: $eq${i}`;
+    return `\`${requireIdentifier(key)}\`: $eq${i}`;
   });
   return entries.length ? `${alias}:${label} {${entries.join(", ")}}` : `${alias}:${label}`;
 }
@@ -204,7 +213,10 @@ const sets = (alias: string, row: Props, skip: readonly string[]): string =>
   Object.keys(row)
     .sort()
     .filter((k) => !skip.includes(k))
-    .map((k) => `${alias}.\`${k}\` = row.\`${k}\``)
+    .map((k) => {
+      const c = requireIdentifier(k);
+      return `${alias}.\`${c}\` = row.\`${c}\``;
+    })
     .join(", ");
 
 /**
@@ -364,16 +376,18 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
    * @return (void): nothing; throws the first error of the first wave that fails, skipping later waves.
    */
   private async drain(): Promise<void> {
-    while (this.draining) await this.draining.catch(() => undefined);
+    while (this.draining) await this.draining;
     if (!this.queued.length) return;
     const queued = this.queued;
     this.queued = [];
     this.dirty.clear();
     this.pendingNodes.clear();
     const run = this.runWaves(queued);
-    this.draining = run.finally(() => {
-      this.draining = null;
-    });
+    this.draining = run
+      .catch(() => undefined)
+      .finally(() => {
+        this.draining = null;
+      });
     await run;
   }
 
@@ -539,6 +553,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     if (options.extra_label != null) quoteLabel(options.extra_label);
+    for (const [, props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const cleared = new Map<string, [string[], bigint[]]>();
     const key = sortKey(ns, label);
     const out = rows.map(([id, props]) => {
@@ -566,7 +581,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
       for (const batch of batches(iids, DELETE_BATCH)) {
         const params = { iids: batch };
         const found = await this._run(
-          `MATCH (n:${label}) WHERE n.id IN $iids AND (${keys.map((k) => `n.\`${k}\` IS NOT NULL`).join(" OR ")}) RETURN n.sid AS sid`,
+          `MATCH (n:${label}) WHERE n.id IN $iids AND (${keys.map((k) => `n.\`${requireIdentifier(k)}\` IS NOT NULL`).join(" OR ")}) RETURN n.sid AS sid`,
           params,
           batch,
         );
@@ -704,7 +719,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     }
     sortedEntries(any_of).forEach(([key, values], i) => {
       if (key === "id") return;
-      where.push(`n.\`${key}\` IN $in${i}`);
+      where.push(`n.\`${requireIdentifier(key)}\` IN $in${i}`);
       params[`in${i}`] = [...(values as unknown[])];
     });
     whereAfter("n.sid", id_gt, where, params);
@@ -786,6 +801,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     toLabel: string,
     rows: readonly EdgeWrite[],
   ): Promise<void> {
+    for (const [, , , props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const out = rows.map(([type, fromId, toId, props]) => {
       const sid = props.id;
       const row: Props = {
@@ -874,12 +890,13 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
   }
 
   async updateCurrentEdge(ns: string, id: string, props: Props): Promise<void> {
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const merged = await mergedCurrentEdge(this, ns, id, props);
     if (merged === null) return;
     const assignments = ["r.doc = $doc"];
     const params: Props = { ns, sid: id, doc: docOf(merged) };
     for (const [k, v] of Object.entries(scalars(merged))) {
-      assignments.push(`r.\`${k}\` = $s_${k}`);
+      assignments.push(`r.\`${requireIdentifier(k)}\` = $s_${k}`);
       params[`s_${k}`] = v;
     }
     guardSizes(params);
@@ -950,7 +967,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
       filters.push(["fl", from_label]);
     }
     filters.forEach(([key, value], i) => {
-      where.push(anchored ? same("r", key, `eq${i}`) : `r.\`${key}\` = $eq${i}`);
+      where.push(anchored ? same("r", key, `eq${i}`) : `r.\`${requireIdentifier(key)}\` = $eq${i}`);
       params[`eq${i}`] = value;
     });
     if (current_only) where.push(anchored ? "NOT r.is_current <> true" : "r.is_current = true");

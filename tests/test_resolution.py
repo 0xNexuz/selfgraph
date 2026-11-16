@@ -239,92 +239,6 @@ def test_within_batch_needs_fuzzy():
 
 
 def test_unmerge_restores_decision_steps_dropped_as_self_loops():
-    g = fresh_graph("res", resolver="fuzzy")
-    rid = relation_id(BIG_BLUE, "OWNS", IBM)
-    batch = {
-        "entities": [IBM_SEED, {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}}],
-        "relations": [{"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM}],
-        "decisions": [{"title": "acquisition", "steps": [rid]}],
-    }
-    res = run(g.insert.facts(batch))
-    [merge] = res.merges
-    [dec] = res.decisions
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == []
-    restored = run(g.entities.unmerge(merge.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid]
-    assert [s.relation_id for s in restored.decisions[0].steps] == [rid]
-
-
-def test_unmerge_restores_dropped_decision_steps_and_preserves_sibling_merge_steps():
-    g = fresh_graph("res", resolver="fuzzy")
-    rid_loop = relation_id(BIG_BLUE, "OWNS", IBM)
-    rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
-    rid_robert = relation_id(ROBERT_ID, "WORKS_AT", IBM)
-    batch = {
-        "entities": [
-            IBM_SEED,
-            {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
-            ROBERT,
-            BOB,
-        ],
-        "relations": [
-            {"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM},
-            {"from_entity": BOB_ID, "type": "WORKS_AT", "to_entity": IBM},
-        ],
-        "decisions": [{"title": "acquisition", "steps": [rid_loop, rid_bob]}],
-    }
-    res = run(g.insert.facts(batch))
-    assert len(res.merges) == 2
-    merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
-    merge_bob = next(m for m in res.merges if m.absorbed_id == BOB_ID)
-    [dec] = res.decisions
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
-
-    restored = run(g.entities.unmerge(merge_bb.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop, rid_robert]
-    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_loop, rid_robert]
-
-    restored2 = run(g.entities.unmerge(merge_bob.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop, rid_bob]
-    assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop, rid_bob]
-
-
-def test_unmerge_preserves_steps_when_unmerging_in_reverse_order():
-    g = fresh_graph("res", resolver="fuzzy")
-    rid_loop = relation_id(BIG_BLUE, "OWNS", IBM)
-    rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
-    rid_robert = relation_id(ROBERT_ID, "WORKS_AT", IBM)
-    batch = {
-        "entities": [
-            IBM_SEED,
-            {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
-            ROBERT,
-            BOB,
-        ],
-        "relations": [
-            {"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM},
-            {"from_entity": BOB_ID, "type": "WORKS_AT", "to_entity": IBM},
-        ],
-        "decisions": [{"title": "acquisition", "steps": [rid_loop, rid_bob]}],
-    }
-    res = run(g.insert.facts(batch))
-    assert len(res.merges) == 2
-    merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
-    merge_bob = next(m for m in res.merges if m.absorbed_id == BOB_ID)
-    [dec] = res.decisions
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
-
-    restored = run(g.entities.unmerge(merge_bob.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_bob]
-    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_bob]
-
-    restored2 = run(g.entities.unmerge(merge_bb.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop, rid_bob]
-    assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop, rid_bob]
-
-
-def test_unmerge_with_multiple_dropped_self_loops():
-    g = fresh_graph("res", resolver="fuzzy")
     rid_loop1 = relation_id(BIG_BLUE, "OWNS", IBM)
     rid_loop2 = relation_id(BIG_BLUE, "PARENT_OF", IBM)
     rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
@@ -343,6 +257,8 @@ def test_unmerge_with_multiple_dropped_self_loops():
         ],
         "decisions": [{"title": "acquisition", "steps": [rid_loop1, rid_loop2, rid_bob]}],
     }
+
+    g = fresh_graph("res", resolver="fuzzy")
     res = run(g.insert.facts(batch))
     assert len(res.merges) == 2
     merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
@@ -350,13 +266,26 @@ def test_unmerge_with_multiple_dropped_self_loops():
     [dec] = res.decisions
     assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
 
-    restored = run(g.entities.unmerge(merge_bob.id))
-    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_bob]
-    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_bob]
+    restored = run(g.entities.unmerge(merge_bb.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop1, rid_loop2, rid_robert]
+    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_loop1, rid_loop2, rid_robert]
 
-    restored2 = run(g.entities.unmerge(merge_bb.id))
+    restored2 = run(g.entities.unmerge(merge_bob.id))
     assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop1, rid_loop2, rid_bob]
     assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop1, rid_loop2, rid_bob]
+
+    g2 = fresh_graph("res", resolver="fuzzy")
+    res2 = run(g2.insert.facts(batch))
+    merge_bob2 = next(m for m in res2.merges if m.absorbed_id == BOB_ID)
+    merge_bb2 = next(m for m in res2.merges if m.absorbed_id == BIG_BLUE)
+    [dec2] = res2.decisions
+    restored3 = run(g2.entities.unmerge(merge_bob2.id))
+    assert [s.relation_id for s in run(g2.decisions.get(dec2.id)).steps] == [rid_bob]
+    assert [s.relation_id for s in restored3.decisions[0].steps] == [rid_bob]
+
+    restored4 = run(g2.entities.unmerge(merge_bb2.id))
+    assert [s.relation_id for s in run(g2.decisions.get(dec2.id)).steps] == [rid_loop1, rid_loop2, rid_bob]
+    assert [s.relation_id for s in restored4.decisions[0].steps] == [rid_loop1, rid_loop2, rid_bob]
 
 
 def test_insert_result_lists_each_entity_and_relation_once_after_a_merge():
@@ -458,6 +387,97 @@ def test_merge_rewrites_every_reference_and_unmerge_restores_them():
         run(g.entities.unmerge("entitymerge:missing"))
 
 
+def _merge_with_references(g, **facts):
+    _seed(g, ROBERT, {"type": "Person", "name": "Ada"})
+    res = run(g.insert.facts({"entities": [BOB, {"type": "Tool", "name": "Hammer"}], **facts}, source_id="doc-1"))
+    [merge] = res.merges
+    return merge
+
+
+def test_unmerge_skips_preferences_and_decisions_removed_with_a_deleted_entity():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    facts = {
+        "preferences": [{"subject_entity": BOB_ID, "key": "tool", "value_entity": hammer}],
+        "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "outcome_entity": hammer}],
+    }
+    merge = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert run(g.entities.get(BOB_ID)) is not None
+    assert (out.preferences, out.decisions) == ([], [])
+    assert run(g.preferences.list(limit=100)).items == []
+    assert run(g.decisions.list(limit=100)).items == []
+
+
+def test_unmerge_does_not_report_a_relation_to_a_deleted_entity_as_restored():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    uses = {"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}
+    merge = _merge_with_references(g, relations=[uses])
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.relations == []
+    assert run(g.relations.get(relation_id(BOB_ID, "USES", hammer))) is None
+
+
+def test_unmerge_skips_a_decision_whose_step_relation_was_deleted():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    uses = relation_id(BOB_ID, "USES", hammer)
+    facts = {
+        "relations": [{"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}],
+        "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "steps": [uses]}],
+    }
+    merge = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.decisions == []
+    assert run(g.decisions.list(limit=100)).items == []
+
+
+def test_unmerge_skips_a_preference_whose_subject_was_deleted():
+    g = fresh_graph("res", resolver="default")
+    ada = entity_id("Person", "Ada")
+    facts = {"preferences": [{"subject_entity": ada, "key": "friend", "value_entity": BOB_ID, "about_entity": BOB_ID}]}
+    merge = _merge_with_references(g, **facts)
+    run(g.entities.delete(ada))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.preferences == []
+    assert run(g.entities.get(BOB_ID)) is not None
+
+
+def test_unmerge_restores_a_kept_decision_and_preference_without_the_deleted_reference():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    facts = {
+        "preferences": [{"subject_entity": BOB_ID, "key": "friend", "value_entity": ADA, "about_entity": hammer}],
+        "decisions": [{"title": "Pick", "actor_entity": BOB_ID, "alternative_entities": [hammer, ADA]}],
+    }
+    merge = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    [pref] = out.preferences
+    assert (pref.subject_entity, pref.value_entity, pref.about_entity) == (BOB_ID, ADA, None)
+    [dec] = out.decisions
+    assert (dec.actor_entity, dec.alternative_entities) == (BOB_ID, [ADA])
+
+
 def test_unmerge_restores_a_retired_merge_relation_without_superseding():
     g = fresh_graph("res", resolver="default", schema=WORKS_AT_SPEC, contradiction="supersede")
     acme, globex, initech = (entity_id("Company", n) for n in ("Acme", "Globex", "Initech"))
@@ -524,6 +544,48 @@ def test_reinserting_the_same_merge_is_idempotent_and_counts_every_source():
     restored = run(g.entities.unmerge(last.id)).entity
     assert (restored.id, restored.source_count) == (BOB_ID, 2)
     assert run(g.entities.get(ROBERT_ID)).aliases == ["Bob"]
+
+
+ROBERT_RICH = {
+    "type": "Person",
+    "name": "Robert",
+    "aliases": ["Bob"],
+    "external_ids": {"hr": "R1"},
+    "properties": {"team": "red"},
+}
+BOB_FIRST = {
+    "type": "Person",
+    "name": "Bob",
+    "aliases": ["Bobby"],
+    "external_ids": {"crm": "C1"},
+    "properties": {"one": 1, "team": "blue"},
+}
+BOB_LATER = {
+    "type": "Person",
+    "name": "Bob",
+    "aliases": ["Robbie"],
+    "external_ids": {"crm": "C2", "hr": "B2"},
+    "properties": {"one": 3, "two": 2},
+}
+
+
+@pytest.mark.parametrize("together", [False, True], ids=["across_inserts", "one_insert"])
+def test_a_repeated_merge_restores_every_absorbed_field_on_unmerge(together):
+    g = fresh_graph("res", resolver="default")
+    _seed(g, ROBERT_RICH)
+    before = run(g.entities.get(ROBERT_ID))
+    batches = [[BOB_FIRST, BOB_LATER]] if together else [[BOB_FIRST], [BOB_LATER]]
+    merges = [run(g.insert.facts({"entities": b})).merges[0] for b in [*batches, batches[-1]]]
+    assert len({m.id for m in merges}) == 1 and merges[-1].created_at == merges[0].created_at
+    assert merges[-1].absorbed == merges[-2].absorbed
+    merged = run(g.entities.get(ROBERT_ID))
+    assert merged.aliases == ["Bob", "Bobby", "Robbie"]
+    assert (merged.external_ids, merged.properties) == ({"hr": "R1", "crm": "C1"}, {"team": "red", "one": 1, "two": 2})
+    out = run(g.entities.unmerge(merges[-1].id))
+    restored = (out.entity.aliases, out.entity.external_ids, out.entity.properties)
+    assert restored == (["Bobby", "Robbie"], {"crm": "C2", "hr": "B2"}, {"one": 3, "team": "blue", "two": 2})
+    survivor = (out.survivor.aliases, out.survivor.external_ids, out.survivor.properties)
+    assert survivor == (before.aliases, before.external_ids, before.properties)
 
 
 def test_a_merge_repeated_by_many_inserts_keeps_its_record_small_and_unmerges_every_relation():

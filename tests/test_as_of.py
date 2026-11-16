@@ -310,6 +310,26 @@ def test_known_at_counts_only_the_sources_recorded_by_then():
     assert [r.source_count for r in run(g.retrieve("Ann", known_at=learned)).subgraph.relations] == [1]
 
 
+def test_known_at_uses_historical_entity_source_counts_for_scoring_and_results():
+    g = fresh_graph("asof")
+    east, west = ({"type": "Project", "name": name} for name in ("Orchid East", "Orchid West"))
+    run(g.insert.facts({"entities": [east, west]}, source_id="initial"))
+    run(g.relations.create("project:orchid-east", "NEIGHBOR", "project:orchid-west"))
+    cutoff = instant()
+    before = run(g.retrieve("Orchid", known_at=cutoff, k=1))
+    assert [seed.id for seed in before.seeds] == ["project:orchid-east"]
+    run(g.insert.facts({"entities": [east, west]}, source_id="second"))
+    run(g.insert.facts({"entities": [east]}, source_id="third"))
+
+    assert run(g.retrieve("Orchid", k=1)).seeds[0].id == "project:orchid-west"
+    replay = run(g.retrieve("Orchid", known_at=cutoff, k=1))
+    assert replay.seeds == before.seeds
+    assert {e.id: e.source_count for e in replay.subgraph.entities} == {
+        "project:orchid-east": 1,
+        "project:orchid-west": 1,
+    }
+
+
 def test_reinserting_the_same_text_keeps_the_version_as_first_stored():
     g = graph()
     run(g.relations.create("person:ann", "WORKS_AT", "company:acme", event_time=utc(2020)))
@@ -328,3 +348,25 @@ def test_known_at_quotes_a_passage_only_once_its_evidence_was_recorded():
     run(g.insert.text("Ann met Bob.", source_id="note"))
     assert "Ann met Bob." in run(g.retrieve("Bob")).context
     assert "Ann met Bob." not in run(g.retrieve("Bob", known_at=learned)).context
+
+
+def test_known_at_keeps_the_retirement_a_late_middle_fact_corrected():
+    g = employment_graph("asof", contradiction="supersede")
+    run(g.insert.facts({"entities": [{"type": "Company", "name": "Initech"}]}))
+    acme = run(g.relations.create("person:ann", "WORKS_AT", "company:acme", event_time=utc(2020)))
+    initech = run(g.relations.create("person:ann", "WORKS_AT", "company:initech", event_time=utc(2024)))
+    learned = instant()
+    globex = run(g.relations.create("person:ann", "WORKS_AT", "company:globex", event_time=utc(2022)))
+
+    def held(year, **at):
+        return {r.id for r in run(g.retrieve("Ann", as_of=utc(year, 6), **at)).subgraph.relations}
+
+    assert (held(2021), held(2023), held(2025)) == ({acme.id}, {globex.id}, {initech.id})
+    assert (held(2021, known_at=learned), held(2023, known_at=learned), held(2025, known_at=learned)) == (
+        {acme.id},
+        {acme.id},
+        {initech.id},
+    )
+    [new, old] = run(g.relations.versions(acme.id))
+    assert (old.invalidated_by, old.invalidated_at) == (initech.id, utc(2024))
+    assert (new.invalidated_by, new.invalidated_at, new.revision) == (globex.id, utc(2022), old.revision + 1)

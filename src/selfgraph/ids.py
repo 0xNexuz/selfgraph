@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+from ._marks import MARK_CLASS
 from .errors import ValidationError
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "evidence_id",
     "quote_label",
     "quote_reltype",
+    "require_identifier",
 ]
 
 
@@ -147,8 +149,9 @@ def _require_no_control(label: str, value: str) -> None:
 
 _WS = re.compile(r"\s+")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_PUNCT = re.compile(r"[^\w\s]+")
-_NON_IDENT = re.compile(r"[^\w]+")
+_MARK = re.compile(f"[{MARK_CLASS}]")
+_PUNCT = re.compile(rf"[^\w\s{MARK_CLASS}]+")
+_NON_IDENT = re.compile(rf"[^\w{MARK_CLASS}]+")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _ENTITY_SUFFIXES = frozenset(
     {
@@ -214,6 +217,29 @@ def _hash(*parts: str | None) -> str:
     return h.hexdigest()
 
 
+def _is_mark(ch: str) -> bool:
+    """Report whether a character is a combining mark that is part of the word it follows.
+
+    Vowel signs, viramas, nuktas, and tone marks are general category Mn or Mc and have no composed form for NFC
+    to fold them into. The marks are the ones of Unicode 15.0, listed in _marks so that every Python and Node
+    version classifies them alike; the variation selectors are left out, so an emoji presentation selector still
+    drops with its emoji.
+
+    @param ch (str): one character.
+    @return (bool): True for a nonspacing or spacing mark other than a variation selector.
+    """
+    return _MARK.match(ch) is not None
+
+
+def _word_runs(text: str) -> list[str]:
+    """Split text into its runs of letters and digits, each with the combining marks written on them.
+
+    @param text (str): the text to split.
+    @return (list[str]): the runs, in order; underscore, whitespace, punctuation, and symbols separate them.
+    """
+    return [run for run in _NON_IDENT.sub("_", text).split("_") if run]
+
+
 def normalize_text(value: str) -> str:
     """NFC-normalize text so an id, its stored field, and a filter argument share one byte form.
 
@@ -235,7 +261,8 @@ def slug(text: str) -> str:
 def _canonical_name(type: str, name: str) -> str:
     """Canonicalise an entity name so cross-document surface variants collapse.
 
-    Drops punctuation for every type; for organisation-like types it also drops a
+    Drops punctuation for every type and keeps combining marks, so a name written with
+    vowel signs keeps them; for organisation-like types it also drops a
     leading article and trailing corporate suffixes, so "Acme", "Acme, Inc." and
     "The Acme Corporation" resolve to one id while a Work "The Trial" stays distinct
     from "Trial".
@@ -452,8 +479,12 @@ def entity_merge_id(survivor_id: str, absorbed_id: str) -> str:
     return f"entitymerge:{_hash(survivor_id, absorbed_id)}"
 
 
+def _tagged(prefix: str, rest: str) -> str:
+    return f"{prefix}:{rest}"
+
+
 RESERVED_ID_PREFIXES = frozenset(
-    {"relation", "preference", "decision", "profile", "source", "sv", "evidence", "entitymerge"}
+    {"relation", "preference", "decision", "decisionstep", "profile", "source", "sv", "evidence", "entitymerge"}
 )
 
 
@@ -469,13 +500,13 @@ def merge_entry_id(merge_id: str, kind: str, seq: int) -> str:
 
 
 def step_id(trace_id: str, order: int) -> str:
-    """The id of a decision step node: the trace id, then ":step:" and the step's order.
+    """The id of a decision step node, in the reserved "decisionstep:" namespace.
 
     @param trace_id (str): the decision trace id.
     @param order (int): the step's position in the trace.
     @return (str): the step node id.
     """
-    return f"{trace_id}:step:{order}"
+    return _tagged("decisionstep", f"{trace_id}:step:{order}")
 
 
 def trace_of_step(sid: str) -> str:
@@ -484,7 +515,7 @@ def trace_of_step(sid: str) -> str:
     @param sid (str): the step node id.
     @return (str): the trace id.
     """
-    return sid.rsplit(":step:", 1)[0]
+    return sid[len(_tagged("decisionstep", "")) :].rsplit(":step:", 1)[0]
 
 
 def quote_label(name: str) -> str:
@@ -504,3 +535,15 @@ def quote_label(name: str) -> str:
 
 
 quote_reltype = quote_label
+
+
+def require_identifier(name: str, what: str = "property name") -> str:
+    """Validate that a key or column is a plain identifier before it is interpolated into a query.
+
+    @param name (str): the property key or order_by column to check.
+    @param what (str): the field label used in the error message.
+    @return (str): the validated name, unchanged.
+    """
+    if not _IDENT.fullmatch(name):
+        raise ValidationError(f"{what} {name!r} must be a plain identifier of letters, digits, and underscores")
+    return name

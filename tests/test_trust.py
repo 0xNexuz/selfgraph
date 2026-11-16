@@ -266,6 +266,7 @@ def test_readiness_reports_an_unreachable_store():
     report = run(g.readiness())
     assert (report.ready, report.reachable, report.store) == (False, False, "Neo4jStore")
     assert "127.0.0.1:1" in report.error
+    run(g.close())
 
 
 def test_ossie_export_maps_types_properties_and_relations():
@@ -392,6 +393,15 @@ def test_llm_contradiction_keeps_a_certified_rival():
     res = run(g.insert.facts({"relations": [works_at("globex", 2022)]}))
     assert [w.code for w in res.warnings] == ["certified_kept"]
     assert run(g.relations.get(acme.id)).is_current
+
+
+def test_a_delete_leaves_what_the_llm_judge_retired_retired():
+    g = fresh_graph("llm-delete", llm=Judge(), extraction="regex", contradiction="llm")
+    acme = run(g.insert.facts({"entities": ANN_ACME_GLOBEX, "relations": [works_at("acme", 2020)]})).relations[0]
+    globex = run(g.insert.facts({"relations": [works_at("globex", 2022)]})).relations[0]
+    assert run(g.relations.versions(acme.id))[0].invalidated_by == globex.id
+    assert run(g.relations.delete(globex.id)).restored_relations == 0
+    assert not run(g.relations.versions(acme.id))[0].is_current
 
 
 def test_a_write_that_changes_a_certified_relation_warns_it_dropped_the_mark():

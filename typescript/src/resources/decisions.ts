@@ -11,13 +11,13 @@ import { checkOptions, keysOf, parseTime } from "../validate.js";
 import { paginate, parseStatus, Resource } from "./common.js";
 
 export interface DecisionCreateOptions {
-  steps?: Iterable<string>;
+  steps?: readonly string[];
   id?: string | null;
   actor_entity?: string | null;
   summary?: string | null;
   rationale?: string | null;
   outcome_entity?: string | null;
-  alternative_entities?: Iterable<string>;
+  alternative_entities?: readonly string[];
   status?: Status;
   event_time?: DateTimeInput | null;
 }
@@ -31,12 +31,12 @@ export interface DecisionListOptions {
 
 export interface DecisionUpdateFields {
   title?: string;
-  steps?: Iterable<string>;
+  steps?: readonly string[];
   actor_entity?: string | null;
   summary?: string | null;
   rationale?: string | null;
   outcome_entity?: string | null;
-  alternative_entities?: Iterable<string>;
+  alternative_entities?: readonly string[];
   status?: Status;
   event_time?: DateTimeInput | null;
   clear?: readonly string[];
@@ -82,13 +82,13 @@ export class Decisions extends Resource {
     return this.graph.write((tx, ns) =>
       ops.createTrace(tx, ns, {
         title,
-        steps: [...(options.steps ?? [])],
+        steps: options.steps === undefined ? [] : options.steps,
         id: options.id,
         actor_entity: options.actor_entity,
         summary: options.summary,
         rationale: options.rationale,
         outcome_entity: options.outcome_entity,
-        alternative_entities: [...(options.alternative_entities ?? [])],
+        alternative_entities: options.alternative_entities === undefined ? [] : options.alternative_entities,
         status,
         event_time: eventTime,
       }),
@@ -139,9 +139,7 @@ export class Decisions extends Resource {
     const out: ops.UpdateTraceFields = {};
     for (const [key, value] of Object.entries(fields)) {
       if (value === undefined) continue;
-      if (key === "steps" || key === "alternative_entities")
-        (out as Record<string, unknown>)[key] = [...(value as Iterable<string>)];
-      else if (key === "status") out.status = parseStatus(value);
+      if (key === "status") out.status = parseStatus(value);
       else if (key === "event_time") out.event_time = parseTime(value, "event_time");
       else (out as Record<string, unknown>)[key] = value;
     }
