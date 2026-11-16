@@ -1145,6 +1145,19 @@ async function writeMerges(
 }
 
 /**
+ * Keep distinct originals of dropped self-loops without duplicating a repeated original.
+ *
+ * @param rw (MergeRewrite): the recorded rewrite.
+ * @return (string): its deduplication key.
+ */
+function rewriteKey(rw: MergeRewrite): string {
+  const key: unknown[] = [rw.kind, rw.id];
+  if (rw.kind === "relation" && rw.dropped)
+    key.push(...["from_entity", "type", "to_entity"].map((name) => rw.original[name] ?? null));
+  return dumps(key);
+}
+
+/**
  * Write one record per merge, folding a repeat of the same merge into its live record so inserts stay idempotent.
  *
  * @param runner (Runner): the graph runner.
@@ -1191,7 +1204,7 @@ export async function saveMerges(
     const prevProps = stored.get(mid);
     const prev = prevProps === undefined ? null : decodeMerge(prevProps, entries.get(mid));
     if (prev !== null && prev.reverted_at === null) {
-      const seen = new Set(prev.rewrites.map((r) => `${r.kind}\u0000${r.id}`));
+      const seen = new Set(prev.rewrites.map(rewriteKey));
       rec = {
         ...prev,
         source_ids: ops.dedupList([...prev.source_ids, ...rec.source_ids]),
@@ -1199,7 +1212,7 @@ export async function saveMerges(
         added_aliases: ops.dedupList([...prev.added_aliases, ...merge.added_aliases]),
         added_external_ids: ops.dedupList([...prev.added_external_ids, ...merge.added_external_ids]),
         added_properties: ops.dedupList([...prev.added_properties, ...merge.added_properties]),
-        rewrites: [...prev.rewrites, ...merge.rewrites.filter((r) => !seen.has(`${r.kind}\u0000${r.id}`))],
+        rewrites: [...prev.rewrites, ...merge.rewrites.filter((r) => !seen.has(rewriteKey(r)))],
       };
     }
     records.push(rec);

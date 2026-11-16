@@ -672,15 +672,35 @@ function suite(spec: StoreSpec) {
       relations: [{ from_entity: ADA, type: "KNOWS", to_entity: BOB }],
     };
     const merges = [];
-    for (const source of ["s1", "s2", "s1"])
-      merges.push((await g.insert.facts(facts, { source_id: source })).merges[0]!);
+    for (const [i, source] of ["s1", "s2", "s1"].entries()) {
+      merges.push(
+        (
+          await g.insert.facts(
+            { ...facts, relations: [{ ...facts.relations![0]!, properties: { revision: i } }] },
+            { source_id: source },
+          )
+        ).merges[0]!,
+      );
+    }
     const last = merges[2]!;
     expect(new Set(merges.map((m) => m.id)).size).toBe(1);
     expect([last.added_aliases, last.rewrites.map((r) => r.existed)]).toEqual([["Bobby"], [false]]);
     expect([last.source_id, last.source_ids]).toEqual(["s1", ["s1", "s2"]]);
+    expect(last.rewrites[0]!.original.properties).toEqual({ revision: 0 });
     expect((await g.entities.merges(ROBERT)).items).toHaveLength(1);
-    const restored = (await g.entities.unmerge(last.id)).entity;
-    expect([restored.id, restored.source_count]).toEqual([BOB, 2]);
+    const redirected = relationId(ADA, "KNOWS", ROBERT);
+    expect((await g.relations.get(redirected))!.properties).toEqual({ revision: 2 });
+    expect(new Set((await g.relations.evidence(redirected)).items.map((e) => e.source_id))).toEqual(
+      new Set(["s1", "s2"]),
+    );
+    const out = await g.entities.unmerge(last.id);
+    expect([out.entity.id, out.entity.source_count]).toEqual([BOB, 2]);
+    expect(out.relations).toHaveLength(1);
+    const restored = out.relations[0]!;
+    expect(restored.properties).toEqual({ revision: 2 });
+    expect(new Set((await g.relations.evidence(restored.id)).items.map((e) => e.source_id))).toEqual(
+      new Set(["s1", "s2"]),
+    );
     expect((await g.entities.get(ROBERT))!.aliases).toEqual(["Bob"]);
   });
 
@@ -740,6 +760,45 @@ function suite(spec: StoreSpec) {
     const visited = (await g.relations.list({ type: "VISITED", limit: 200 })).items;
     expect(new Set(visited.map((r) => r.from_entity))).toEqual(new Set([BOB]));
   });
+
+  for (const reverseFirst of [false, true]) {
+    it(`keeps both reciprocal self-loop rewrites, reverse first: ${reverseFirst}`, async () => {
+      const g = open({ resolver: "default" });
+      await seed(g, { type: "Person", name: "Robert", aliases: ["Bob"] });
+      const pairs: Array<readonly [string, string]> = [
+        [BOB, ROBERT],
+        [ROBERT, BOB],
+      ];
+      if (reverseFirst) pairs.reverse();
+      const mergeIds: string[] = [];
+      for (const [i, [source, target]] of [...pairs, ...pairs].entries()) {
+        const result = await g.insert.facts(
+          {
+            entities: [{ type: "Person", name: "Bob" }],
+            relations: [{ from_entity: source, type: "KNOWS", to_entity: target, properties: { revision: i } }],
+          },
+          { source_id: `s${i % 2}` },
+        );
+        mergeIds.push(result.merges[0]!.id);
+      }
+      const page = await g.entities.merges(ROBERT);
+      expect(page.items).toHaveLength(1);
+      const record = page.items[0]!;
+      expect(new Set(mergeIds).size).toBe(1);
+      expect(record.source_ids).toEqual(["s0", "s1"]);
+      expect(record.rewrites).toHaveLength(2);
+      expect(record.rewrites.every((r) => r.kind === "relation" && r.dropped)).toBe(true);
+      expect(new Set(record.rewrites.map((r) => r.id)).size).toBe(1);
+      expect(record.rewrites.map((r) => r.original.properties)).toEqual([{ revision: 0 }, { revision: 1 }]);
+      expect((await g.relations.list()).items).toEqual([]);
+      const out = await g.entities.unmerge(record.id);
+      const expected = [relationId(BOB, "KNOWS", ROBERT), relationId(ROBERT, "KNOWS", BOB)].sort();
+      expect(out.relations.map((r) => r.id).sort()).toEqual(expected);
+      expect((await g.relations.list()).items.map((r) => r.id).sort()).toEqual(expected);
+      expect(out.entity.source_count).toBe(2);
+      expect(new Set((await g.entities.evidence(BOB)).items.map((e) => e.source_id))).toEqual(new Set(["s0", "s1"]));
+    });
+  }
 
   it("drops merge records with a deleted survivor, or a deleted absorbed id so a later merge starts fresh", async () => {
     const gone = open({ resolver: "default" });
