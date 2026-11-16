@@ -124,6 +124,13 @@ def test_nan_property_and_invalid_facts_are_rejected():
         )
 
 
+def test_none_facts_are_rejected_like_other_non_objects():
+    g = new_graph()
+    for value in (None, [], 5):
+        with pytest.raises(ValidationError, match=r"^invalid facts: expected object$"):
+            run(g.insert.facts(value))
+
+
 def test_relation_endpoints_are_immutable():
     g = new_graph()
     t_entities(g, "a", "b", "c")
