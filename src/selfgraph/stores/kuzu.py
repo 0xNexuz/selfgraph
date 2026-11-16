@@ -216,7 +216,17 @@ class KuzuStore(AutoCommitStore):
         self._cache_key = key
         self._db = db
         self._connect = partial(kuzu.Connection, db)
-        self._conn = self._connect()
+        try:
+            self._conn = self._connect()
+        except Exception:  # noqa: BLE001
+            with _CACHE_LOCK:
+                _OPEN_STORES[key] -= 1
+                if _OPEN_STORES[key] == 0:
+                    del _OPEN_STORES[key]
+                    _DATABASES.pop(key).close()
+                    _LOCKS.pop(key, None)
+                    _WRITE_LOCKS.pop(key, None)
+            raise
         self._statements = 0
         self._raw = False
 

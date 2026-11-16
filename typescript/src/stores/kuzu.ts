@@ -238,7 +238,17 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     }
     OPEN_STORES.set(this.cacheKey, (OPEN_STORES.get(this.cacheKey) ?? 0) + 1);
     this.connect = () => new kuzu.Connection(db);
-    return this.connect();
+    try {
+      return this.connect();
+    } catch (exc) {
+      const open = (OPEN_STORES.get(this.cacheKey) ?? 1) - 1;
+      if (open > 0) OPEN_STORES.set(this.cacheKey, open);
+      else {
+        OPEN_STORES.delete(this.cacheKey);
+        await KuzuStore.closeCachedDatabase(this.cacheKey);
+      }
+      throw exc;
+    }
   });
   private connect!: () => KuzuConnection;
   private statements = 0;

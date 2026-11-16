@@ -62,6 +62,33 @@ def test_the_shared_locks_are_dropped_with_the_database():
     assert path not in _WRITE_LOCKS, "the write lock outlived the database"
 
 
+@pytest.mark.skipif(not KUZU, reason="the database cache is Kuzu's")
+def test_a_failed_connect_rolls_back_the_cache(monkeypatch):
+    import kuzu
+
+    def refuse(db):
+        raise RuntimeError("connection refused")
+
+    path = a_path()
+    store = KuzuStore(path)
+    monkeypatch.setattr(kuzu, "Connection", refuse)
+    with pytest.raises(RuntimeError, match="connection refused"):
+        KuzuStore(path)
+    assert _OPEN_STORES[path] == 1
+    assert store._db is _DATABASES[path]
+    run(store.close())
+    assert path not in _DATABASES
+
+    path = a_path()
+    with pytest.raises(RuntimeError, match="connection refused"):
+        KuzuStore(path)
+    monkeypatch.undo()
+    for cache in (_DATABASES, _OPEN_STORES, _LOCKS, _WRITE_LOCKS):
+        assert path not in cache
+    store = KuzuStore(path)
+    run(store.close())
+
+
 @pytest.mark.skipif(not KUZU, reason="anonymous stores each get their own cache key")
 def test_two_in_memory_stores_share_neither_data_nor_locks():
     first = KuzuStore(":memory:")
