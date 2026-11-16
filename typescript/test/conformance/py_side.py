@@ -717,6 +717,31 @@ async def write(graph):
         except ValidationError as exc:
             require_identifier_cases[name] = str(exc)
     out["require_identifier"] = require_identifier_cases
+    extra_ns = f"{graph.namespace}:extra"
+    await graph.store.upsert_nodes(
+        extra_ns,
+        "Extra",
+        [
+            ("extra:batch-1", {"id": "extra:batch-1", "name": "batch-1"}),
+            ("extra:batch-2", {"id": "extra:batch-2", "name": "batch-2"}),
+        ],
+        extra_label="CustomLabel",
+    )
+    await graph.store.upsert_node(
+        extra_ns,
+        "Extra",
+        "extra:single",
+        {"id": "extra:single", "name": "single"},
+        extra_label="CustomLabel",
+    )
+    primary_node = await graph.store.get_node(extra_ns, "Extra", "extra:batch-1")
+    extra_batch_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:batch-2")
+    extra_single_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:single")
+    out["extra_label"] = {
+        "primary": primary_node["id"] if primary_node else None,
+        "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
+        "single_extra": extra_single_node["id"] if extra_single_node else None,
+    }
     return out
 
 
