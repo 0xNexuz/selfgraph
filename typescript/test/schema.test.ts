@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildGraph } from "../src/client.js";
 import { toOssie } from "../src/export.js";
-import { FalkorDBStore, KuzuStore, type LLMClient, SelfGraph, ValidationError } from "../src/index.js";
+import { FalkorDBStore, KuzuStore, type LLMClient, SelfGraph, toNeo4jOntology, ValidationError } from "../src/index.js";
 import { runStdio } from "../src/mcp.js";
 import { EntityInput, Extraction, parseOrThrow } from "../src/models.js";
 import { DEFAULT_SETTINGS } from "../src/runtime.js";
@@ -87,6 +87,31 @@ describe("endpoint types", () => {
     expect(check(schema, facts)).toEqual([]);
     const swapped = { ...facts, relations: [{ ...facts.relations[0]!, from_entity: "company:acme" }] };
     expect(check(schema, swapped).map((w) => w.code)).toEqual(["endpoint_type_violation"]);
+    const parsed = asSchema({
+      entities: [
+        { name: "Person", aliases: ["Human"] },
+        { name: "Company", aliases: ["Org"] },
+      ],
+      relations: [
+        { type: "WORKS_AT", from: { types: ["person"] }, to: { types: ["Company", "Org"] } },
+        { type: "KNOWS", from: { types: ["Person"] }, to: { types: ["Human"] } },
+      ],
+    })!;
+    expect(parsed.relations.map((r) => [r.from.types, r.to.types])).toEqual([
+      [["Person"], ["Company"]],
+      [["Person"], ["Person"]],
+    ]);
+    expect((toOssie(parsed).ontology as Array<{ concept: string }>).map((c) => c.concept)).toEqual([
+      "Person",
+      "Company",
+    ]);
+    expect(
+      (toOssie(parsed).ontology as Array<{ relationships: Array<{ roles: unknown }> }>)[0]!.relationships[1]!.roles,
+    ).toEqual([{ concept: "Person", name: "other" }]);
+    expect(toNeo4jOntology(parsed).patterns).toEqual([
+      ["Person", "WORKS_AT", "Company"],
+      ["Person", "KNOWS", "Person"],
+    ]);
     expect(Schema.parse({ relations: [{ type: "R", to: { types: ["Anything"] } }] }).entities).toEqual([]);
     expect(() => asSchema({ ...schema, entities: [...schema.entities, { name: "Team", aliases: ["org"] }] })).toThrow(
       "entities[2].aliases[0]",

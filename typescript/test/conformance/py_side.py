@@ -302,6 +302,28 @@ def schema_warnings():
         except ValidationError as exc:
             return str(exc)
 
+    endpoint_specs = [
+        {
+            "entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Company", "aliases": ["Org"]}],
+            "relations": [
+                {"type": "WORKS_AT", "from": {"types": ["person", "Human"]}, "to": {"types": ["Org", "company"]}},
+                {"type": "KNOWS", "from": {"types": ["Person"]}, "to": {"types": ["Human"]}},
+            ],
+        },
+        {"relations": [{"type": "R", "from": {"types": ["CustomFrom"]}, "to": {"types": ["CustomTo"]}}]},
+        {
+            "entities": [{"name": "Person"}],
+            "relations": [{"type": "R", "to": {"types": ["Missing"]}}],
+        },
+    ]
+
+    def endpoint_outcome(spec):
+        try:
+            parsed = Schema.model_validate(spec)
+            return [[r.from_.types, r.to.types] for r in parsed.relations]
+        except ValidationError as exc:
+            return str(exc)
+
     return {
         "warnings": [
             [
@@ -317,6 +339,7 @@ def schema_warnings():
             for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
         ],
         "parents": [parent_outcome(spec) for spec in parent_specs],
+        "endpoint_types": [endpoint_outcome(spec) for spec in endpoint_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "tables_errors": tables_reference_errors(),
