@@ -236,6 +236,23 @@ def schema_warnings():
             alias_errors.append(str(exc))
         else:
             alias_errors.append("no error")
+    parent_specs = [
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "person"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "human"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "HUMAN"}]},
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "Person"}]},
+        {"entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Manager", "parent": "Human"}]},
+        {"entities": [{"name": "Person"}, {"name": "Manager", "parent": "X"}]},
+        {"entities": [{"name": "A", "parent": "b"}, {"name": "B", "parent": "a"}]},
+        {"entities": [{"name": "A", "parent": "a"}]},
+    ]
+
+    def parent_outcome(spec):
+        try:
+            return [entity.parent for entity in Schema.model_validate(spec).entities]
+        except ValidationError as exc:
+            return str(exc)
+
     return {
         "warnings": [
             [
@@ -245,6 +262,7 @@ def schema_warnings():
             for facts in cases
         ],
         "alias_errors": alias_errors,
+        "parents": [parent_outcome(spec) for spec in parent_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
