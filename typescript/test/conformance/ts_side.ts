@@ -927,6 +927,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const cutoff = sourceVersions.find((s) => s.source_id === "spec")!.created_at as string;
   const historical = await graph.retrieve("database", { known_at: cutoff, k: 1, depth: 1 });
   const retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", { depth: 2 });
+  const defaults = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", {
+    depth: undefined,
+    k: undefined,
+    max_nodes: undefined,
+    budget_tokens: undefined,
+  });
   const ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", {
     strategy: "ppr",
     depth: 3,
@@ -978,6 +984,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     source_versions: sourceVersions,
     chunks,
     retrieval: { seeds: retrieval.seeds, context: retrieval.context },
+    retrieval_defaults: { seeds: defaults.seeds, context: defaults.context },
     retrieval_ppr: { seeds: ppr.seeds, context: ppr.context, entities: ppr.subgraph.entities.map((e) => e.id) },
     retrieval_dfs: { seeds: dfs.seeds, context: dfs.context },
     retrieval_marks: { seeds: marks.seeds, context: marks.context },

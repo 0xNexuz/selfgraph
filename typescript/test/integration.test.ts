@@ -660,6 +660,7 @@ function suite(spec: StoreSpec) {
       expect(expected.subgraph.relations).toHaveLength(1);
       expect(expected.context).not.toContain(notes);
       expect(await g.retrieve("Ada", { [option]: undefined })).toEqual(expected);
+      await expect(g.retrieve("Ada", { [option]: null })).rejects.toThrow(ValidationError);
     },
   );
 
