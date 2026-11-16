@@ -691,6 +691,38 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  const mixed = new SelfGraph(graph.store, { namespace: `${graph.namespace}_mixed_case`, resolver: "fuzzy" });
+  await mixed.insert.facts({ entities: [{ type: "Person", name: "Jane Doe", aliases: ["JD"] }] });
+  const mixedFuzzy = await mixed.insert.facts({
+    entities: [
+      { type: "person", name: "Jane Does" },
+      { type: "thing", name: "JD" },
+    ],
+  });
+  const orgSchema = {
+    entities: [
+      { name: "Organization", aliases: ["Org"] },
+      { name: "Company", parent: "Organization" },
+    ],
+  };
+  const mixedSchema = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_mixed_schema`,
+    resolver: "default",
+    schema: orgSchema,
+  });
+  await mixedSchema.insert.facts({
+    entities: [{ type: "Organization", name: "International Business Machines", aliases: ["IBM"] }],
+  });
+  const mixedOrg = await mixedSchema.insert.facts({
+    entities: [
+      { type: "company", name: "IBM" },
+      { type: "org", name: "Big Blue", aliases: ["IBM"] },
+    ],
+  });
+  out.mixed_case_merges = [
+    mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+    mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+  ];
   await graph.insert.facts(
     {
       entities: [
