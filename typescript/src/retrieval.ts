@@ -130,14 +130,12 @@ function entityText(e: Entity): string {
  * Render relation properties as a compact brace-wrapped string, values rendered by pyStr.
  *
  * @param props (JsonObject): the properties.
- * @param singleLine (boolean): contain rendered values on one context line.
  * @return (string): the rendered text, or empty when there are none.
  */
-export function formatProps(props: JsonObject, singleLine = false): string {
+export function formatProps(props: JsonObject): string {
   const entries = Object.entries(props);
   if (!entries.length) return "";
-  const text = `{${entries.map(([k, v]) => `${k}=${pyStr(v)}`).join(", ")}}`;
-  return singleLine ? renderValue(text) : text;
+  return `{${entries.map(([k, v]) => `${k}=${pyStr(v)}`).join(", ")}}`;
 }
 
 /**
@@ -841,46 +839,30 @@ async function collectPreferences(
 }
 
 /**
- * Render terminal controls as text so stored values cannot erase context headers.
+ * Contain stored content before admitting it to the context's SDK-owned headers.
  *
- * @param text (string): stored text after line separator normalization.
- * @return (string): text with non-layout control characters visibly escaped.
+ * @param text (string): a source passage or assembled graph record, never its trust header.
+ * @param source (boolean): preserve passage lines and label each as source data.
+ * @return (string): display-safe content with no unlabelled physical lines.
  */
-function visibleControls(text: string): string {
-  return [...text]
-    .map((char) => {
-      const code = char.codePointAt(0)!;
-      return code <= 8 || (code >= 14 && code <= 27) || code === 31 || (code >= 127 && code <= 159)
-        ? `\\u${code.toString(16).padStart(4, "0")}`
-        : char;
-    })
-    .join("");
-}
-
-/**
- * Keep stored values inside their SDK-built context line.
- *
- * @param text (string): stored text rendered into context.
- * @return (string): text with line separators replaced by spaces.
- */
-function renderValue(text: string): string {
-  text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
-  return visibleControls(text.replace(/[\r\n\v\f\x85\u2028\u2029]+/g, " "));
-}
-
-/**
- * Label every source passage line without flattening its readable layout.
- *
- * @param text (string): a stored source passage.
- * @return (string): source-prefixed lines with normalized line separators.
- */
-function sourceLines(text: string): string {
-  text = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
-  return text
-    .split(/[\n\v\f\x85\u2028\u2029]/)
-    .map((line) => `SOURCE | ${visibleControls(line)}`)
-    .join("\n");
+function contextPayload(text: string, source = false): string {
+  const normalized = text.replaceAll("\r\n", "\n");
+  const rows: string[] = [""];
+  for (const c of normalized) {
+    const n = c.codePointAt(0)!;
+    if ([10, 13, 11, 12, 28, 29, 30, 133, 8232, 8233].includes(n)) {
+      rows.push("");
+    } else {
+      const control =
+        (n < 32 && n !== 9) ||
+        (n >= 127 && n <= 159) ||
+        [0x061c, 0x200e, 0x200f].includes(n) ||
+        (n >= 0x202a && n <= 0x202e) ||
+        (n >= 0x2066 && n <= 0x2069);
+      rows[rows.length - 1] += control ? `\\u${n.toString(16).padStart(4, "0")}` : c;
+    }
+  }
+  return source ? rows.map((row) => `SOURCE | ${row}`).join("\n") : rows.join("\\n");
 }
 
 /**
@@ -905,11 +887,12 @@ function assemble(
   hubs: ReadonlySet<string> = new Set(),
 ): string {
   const { entities, relations, preferences, decisions } = subgraph;
-  const nameOf = (id: string): string => renderValue(names.get(id) ?? id);
+  const nameOf = (id: string): string => names.get(id) ?? id;
   const lines: string[] = [];
   let first: string | null = null;
   let full = false;
-  const add = (line: string, cap: number): boolean => {
+  const add = (payload: string, cap: number, header = "GRAPH"): boolean => {
+    const line = header === "SOURCE" ? contextPayload(payload, true) : `${header} | ${contextPayload(payload)}`;
     first ??= line;
     if (full) return false;
     const cost = countTokens([...lines, line].join("\n"));
@@ -922,7 +905,7 @@ function assemble(
   };
 
   const passageCap = Math.floor((budgetTokens * PASSAGE_BUDGET_PERCENT) / 100);
-  for (const p of passages) if (!add(sourceLines(p), passageCap)) break;
+  for (const p of passages) if (!add(p, passageCap, "SOURCE")) break;
 
   const distOf = distanceIn(dist);
   const relRank = (r: Relation): [number, number, number, number] => {
@@ -936,32 +919,32 @@ function assemble(
     return a0 - b0 || a1 - b1 || a2 - b2 || a3 - b3;
   });
   for (const r of ordered) {
-    let line = `${nameOf(r.from_entity)} -[${renderValue(r.type)}]-> ${nameOf(r.to_entity)}`;
-    const props = formatProps(r.properties, true);
+    let line = `${nameOf(r.from_entity)} -[${r.type}]-> ${nameOf(r.to_entity)}`;
+    const props = formatProps(r.properties);
     if (props) line += ` ${props}`;
-    let prefix = "GRAPH";
-    if (r.certified_at !== null) prefix += " [certified]";
-    if (hubs.has(r.from_entity) || hubs.has(r.to_entity)) prefix += " (via hub)";
-    if (!add(`${prefix} | ${line}`, budgetTokens)) break;
+    let header = "GRAPH";
+    if (r.certified_at !== null) header += " [certified]";
+    if (hubs.has(r.from_entity) || hubs.has(r.to_entity)) header += " (via hub)";
+    if (!add(line, budgetTokens, header)) break;
   }
 
   for (const p of [...preferences].sort((a, b) => distOf(a.subject_entity) - distOf(b.subject_entity))) {
     const verb = preferenceEdgeType(p.stance).toLowerCase();
-    let line = `${nameOf(p.subject_entity)} ${verb} ${nameOf(p.value_entity)} ${renderValue(`(${p.key})`)}`;
+    let line = `${nameOf(p.subject_entity)} ${verb} ${nameOf(p.value_entity)} (${p.key})`;
     if (p.strength !== null) line += ` [strength ${pyFloatRepr(p.strength)}]`;
-    if (!add(`GRAPH | ${line}`, budgetTokens)) break;
+    if (!add(line, budgetTokens)) break;
   }
 
   for (const d of decisions) {
-    const parts = [`Decision: ${renderValue(d.title)}`];
+    const parts = [`Decision: ${d.title}`];
     if (d.outcome_entity) parts.push(`outcome ${nameOf(d.outcome_entity)}`);
     if (d.alternative_entities.length) parts.push(`alternatives ${d.alternative_entities.map(nameOf).join(", ")}`);
-    if (d.rationale) parts.push(`rationale ${renderValue(d.rationale)}`);
-    add(`GRAPH | ${parts.join("; ")}`, budgetTokens);
+    if (d.rationale) parts.push(`rationale ${d.rationale}`);
+    add(parts.join("; "), budgetTokens);
   }
 
   for (const e of [...entities].sort((a, b) => distOf(a.id) - distOf(b.id))) {
-    if (!add(`GRAPH | ${renderValue(e.name)} [${renderValue(e.type)}]`, budgetTokens)) break;
+    if (!add(`${e.name} [${e.type}]`, budgetTokens)) break;
   }
 
   return lines.length || first === null ? lines.join("\n") : truncate(first, budgetTokens, countTokens);

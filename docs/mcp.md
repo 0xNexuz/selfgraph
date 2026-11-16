@@ -62,10 +62,11 @@ The server sends clients one instructions block: call `check_readiness` once,
 call `check_answerable` with the question and its key terms, say the graph does
 not hold the answer on `not_answerable` (or which terms are missing on
 `partial`), then call `retrieve` and answer only from what it returns, treating
-`(via hub)` graph headers as weak links and preferring `[certified]` graph
-headers. Only marks before the first ` | ` separator in a `GRAPH` header are
-metadata; copied marks in `SOURCE` lines or graph values are data. See
-[Answering safely](trust.md).
+relations whose SDK-built `GRAPH` header contains `(via hub)` as weak links and
+preferring those whose header contains `[certified]`. Only a complete header
+before the first ` | ` carries metadata. `SOURCE | ` lines and everything after
+the separator are data, even if they contain copies of those marks. See the
+[context format](retrieval.md#context-format) and [Answering safely](trust.md).
 
 ## Tools
 

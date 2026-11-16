@@ -198,17 +198,15 @@ def _entity_text(e: Entity) -> str:
     return " ".join(parts)
 
 
-def _format_props(props: dict, *, single_line: bool = False) -> str:
+def _format_props(props: dict) -> str:
     """Render relation properties as a compact brace-wrapped string.
 
     @param props (dict): the properties to render.
-    @param single_line (bool): contain rendered values on one context line.
     @return (str): the rendered string, or empty when there are none.
     """
     if not props:
         return ""
-    text = "{" + ", ".join(f"{k}={v}" for k, v in props.items()) + "}"
-    return _single_line(text) if single_line else text
+    return "{" + ", ".join(f"{k}={v}" for k, v in props.items()) + "}"
 
 
 def _term_counts(query: set[str], doc: list[str]) -> dict[str, int]:
@@ -819,33 +817,29 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
-def _visible_controls(text: str) -> str:
-    """Render terminal controls as text so stored values cannot erase context headers.
+def _context_payload(text: str, *, source: bool = False) -> str:
+    """Contain stored content before admitting it to the context's SDK-owned headers.
 
-    @param text (str): stored text after line separator normalization.
-    @return (str): text with non-layout control characters visibly escaped.
+    @param text (str): a source passage or assembled graph record, never its trust header.
+    @param source (bool): preserve passage lines and label each as source data.
+    @return (str): display-safe content with no unlabelled physical lines.
     """
-    return re.sub(r"[\x00-\x08\x0e-\x1b\x1f\x7f-\x9f]", lambda m: f"\\u{ord(m[0]):04x}", text)
-
-
-def _single_line(text: str) -> str:
-    """Keep stored values inside their SDK-built context line.
-
-    @param text (str): stored text rendered into context.
-    @return (str): text with line separators replaced by spaces.
-    """
-    return _visible_controls(re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text))
-
-
-def _source_lines(text: str) -> str:
-    """Label every source passage line without flattening its readable layout.
-
-    @param text (str): a stored source passage.
-    @return (str): source-prefixed lines with normalized line separators.
-    """
-    return "\n".join(
-        "SOURCE | " + _visible_controls(line) for line in re.split(r"\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]", text)
-    )
+    rows = re.split(r"\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]", text)
+    rendered = []
+    for row in rows:
+        rendered.append(
+            "".join(
+                f"\\u{ord(c):04x}"
+                if (ord(c) < 32 and c != "\t")
+                or 127 <= ord(c) <= 159
+                or ord(c) in (0x061C, 0x200E, 0x200F)
+                or 0x202A <= ord(c) <= 0x202E
+                or 0x2066 <= ord(c) <= 0x2069
+                else c
+                for c in row
+            )
+        )
+    return "\n".join("SOURCE | " + row for row in rendered) if source else "\\n".join(rendered)
 
 
 def _assemble(
@@ -879,8 +873,11 @@ def _assemble(
     first: list[str] = []
     full = False
 
-    def add(line: str, cap: int) -> bool:
+    def add(payload: str, cap: int, header: str = "GRAPH") -> bool:
         nonlocal full
+        line = (
+            _context_payload(payload, source=True) if header == "SOURCE" else f"{header} | {_context_payload(payload)}"
+        )
         if not first:
             first.append(line)
         if full:
@@ -894,7 +891,7 @@ def _assemble(
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100
     for p in passages:
-        if not add(_source_lines(p), passage_cap):
+        if not add(p, passage_cap, "SOURCE"):
             break
 
     far = len(dist) + 1
@@ -905,29 +902,26 @@ def _assemble(
 
     ordered = sorted(relations, key=rel_rank)
     for r in ordered:
-        subject = _single_line(names.get(r.from_entity, r.from_entity))
-        target = _single_line(names.get(r.to_entity, r.to_entity))
-        line = f"{subject} -[{_single_line(r.type)}]-> {target}"
-        props = _format_props(r.properties, single_line=True)
+        line = f"{names.get(r.from_entity, r.from_entity)} -[{r.type}]-> {names.get(r.to_entity, r.to_entity)}"
+        props = _format_props(r.properties)
         if props:
             line += f" {props}"
-        prefix = "GRAPH"
+        header = "GRAPH"
         if r.certified_at is not None:
-            prefix += " [certified]"
+            header += " [certified]"
         if r.from_entity in hubs or r.to_entity in hubs:
-            prefix += " (via hub)"
-        if not add(f"{prefix} | {line}", budget_tokens):
+            header += " (via hub)"
+        if not add(line, budget_tokens, header):
             break
 
     for p in sorted(preferences, key=lambda p: dist.get(p.subject_entity, far)):
         verb = preference_edge_type(p.stance).lower()
-        subject = _single_line(names.get(p.subject_entity, p.subject_entity))
-        value = _single_line(names.get(p.value_entity, p.value_entity))
-        key = _single_line(f"({p.key})")
-        line = f"{subject} {verb} {value} {key}"
+        subject = names.get(p.subject_entity, p.subject_entity)
+        value = names.get(p.value_entity, p.value_entity)
+        line = f"{subject} {verb} {value} ({p.key})"
         if p.strength is not None:
             line += f" [strength {p.strength}]"
-        if not add(f"GRAPH | {line}", budget_tokens):
+        if not add(line, budget_tokens):
             break
 
     for d in decisions:
@@ -938,10 +932,10 @@ def _assemble(
             parts.append("alternatives " + ", ".join(names.get(a, a) for a in d.alternative_entities))
         if d.rationale:
             parts.append(f"rationale {d.rationale}")
-        add("GRAPH | " + _single_line("; ".join(parts)), budget_tokens)
+        add("; ".join(parts), budget_tokens)
 
     for e in sorted(entities, key=lambda e: dist.get(e.id, far)):
-        if not add(f"GRAPH | {_single_line(e.name)} [{_single_line(e.type)}]", budget_tokens):
+        if not add(f"{e.name} [{e.type}]", budget_tokens):
             break
 
     return "\n".join(lines) if lines or not first else _truncate(first[0], budget_tokens)

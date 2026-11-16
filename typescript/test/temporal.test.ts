@@ -438,7 +438,7 @@ function suite(spec: StoreSpec): void {
     expect((await p.retrieve("Ann Acme", { as_of: at(2021) })).context.split("\n")).toContain(
       "SOURCE | Ann works at Acme.",
     );
-    expect((await p.retrieve("Ann Acme", { as_of: at(2019) })).context).not.toContain("SOURCE | Ann works at Acme.");
+    expect((await p.retrieve("Ann Acme", { as_of: at(2019) })).context).not.toContain("Ann works at Acme.");
   });
 
   it("known_at reads what the graph held before a backdated correction", async () => {
@@ -484,12 +484,12 @@ function suite(spec: StoreSpec): void {
     expect([held!.revision, held!.is_current, held!.certified_at]).toEqual([1, true, null]);
     expect(then.context).not.toContain("[certified]");
     expect(then.context.split("\n")).toContain("SOURCE | Ann works at Acme in Berlin.");
-    expect(then.context).not.toContain("SOURCE | Ann works at Acme in Paris.");
+    expect(then.context).not.toContain("Ann works at Acme in Paris.");
     const later = await g.retrieve("Ann Acme Zed Berlin Paris", { as_of: at(2099) });
     expect(later.subgraph.entities.map((e) => e.id)).toContain("person:zed");
     expect(later.subgraph.decisions.map((d) => d.title)).toEqual(["Join Acme"]);
     expect(later.context.split("\n")).toContain("SOURCE | Ann works at Acme in Paris.");
-    expect(later.context).not.toContain("SOURCE | Ann works at Acme in Berlin.");
+    expect(later.context).not.toContain("Ann works at Acme in Berlin.");
     expect((await g.checkAnswerable("Zed", { known_at: learned })).verdict).toBe("not_answerable");
     expect((await g.checkAnswerable("Zed", { known_at: await instant() })).verdict).toBe("answerable");
   });
