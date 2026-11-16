@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 
 import pytest
 from helpers import FakeLLM, extracting_llm, fresh_graph, new_graph, run
@@ -110,6 +111,21 @@ def test_regex_extraction_stops_names_at_line_breaks(text, names):
     res = run(fresh_graph("lines", extraction="regex").insert.text(text))
     assert sorted(e.name for e in res.entities) == sorted(names)
     assert [w.code for w in res.warnings] == ["basic_extraction"]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+def test_regex_extraction_keeps_names_with_combining_marks_whole(form):
+    text = unicodedata.normalize(form, "Zoë met José García at Café Société in São Paulo.")
+    res = run(fresh_graph("marks", extraction="regex").insert.text(text))
+    names = ["Zoë", "José García", "Café Société", "São Paulo"]
+    assert sorted(e.name for e in res.entities) == sorted(names)
+
+
+def test_regex_extraction_keeps_a_mark_with_no_precomposed_form():
+    res = run(fresh_graph("marks", extraction="regex").insert.text("Ann met Q\u0307ing Lee at Acme."))
+    assert sorted(e.name for e in res.entities) == sorted(
+        ["Ann", unicodedata.normalize("NFC", "Q\u0307ing Lee"), "Acme"]
+    )
 
 
 def test_regex_extraction_still_relates_names_in_a_sentence_wrapped_across_lines():
@@ -281,6 +297,25 @@ def test_strict_text_insert_drops_off_schema_extractions_but_facts_insert_raises
     assert any("relation" in m and "thing:team was dropped" in m for m in dropped)
     with pytest.raises(ValidationError, match="unknown type 'Team'"):
         run(g.insert.facts({"entities": [{"type": "Team", "name": "Core"}]}))
+
+    aged_schema = {
+        "entities": [
+            {"name": "Person", "properties": [{"name": "age", "type": "integer", "required": True}]},
+            {"name": "Company"},
+        ],
+        "relations": [{"type": "WORKS_AT", "from": {"types": ["Person"]}, "to": {"types": ["Company"]}}],
+    }
+    g_aged = fresh_graph("strict-text-merged", llm=FakeLLM(_full_responses()), schema=aged_schema, schema_mode="strict")
+    run(
+        g_aged.insert.facts(
+            {"entities": [{"type": "Person", "name": "Soham Gupta", "aliases": ["Soham"], "properties": {"age": 28}}]}
+        )
+    )
+    res_aged = run(g_aged.insert.text("Soham works at HydraDB. The team selected it.", source_id="m-aged"))
+    assert {e.id for e in res_aged.entities} == {"person:soham-gupta", "company:hydradb"}
+    assert [(r.from_entity, r.type) for r in res_aged.relations] == [("person:soham-gupta", "WORKS_AT")]
+    assert [m.survivor_id for m in res_aged.merges] == ["person:soham-gupta"]
+    assert run(g_aged.entities.get("person:soham-gupta")).properties == {"age": 28}
 
 
 def test_llm_relations_cite_their_chunk_and_progress_is_logged(caplog):

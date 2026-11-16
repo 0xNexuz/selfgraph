@@ -277,6 +277,37 @@ function suite(spec: StoreSpec): void {
     await expect(g.retrieve("x", { seeds: "embeddings" })).rejects.toThrow(/seeds 'embeddings' needs an embedder/);
   });
 
+  it("synonym seeding expands parent types and definitions to subtypes", async () => {
+    const hierarchy: Schema = {
+      entities: [
+        {
+          name: "Employee",
+          aliases: ["Worker"],
+          synonyms: ["staff"],
+          definitions: [{ name: "Active Staff", expression: "active = true", synonyms: ["personnel"] }],
+        },
+        { name: "Engineer", parent: "Employee" },
+        { name: "PrincipalEngineer", parent: "Engineer" },
+      ],
+    };
+    const g = open({ schema: hierarchy });
+    await g.entities.create("Ann", "PrincipalEngineer");
+    for (const question of [
+      "Who are the Employees?",
+      "Who are the Workers?",
+      "Who are the staff?",
+      "Who are the personnel?",
+    ]) {
+      expect((await g.checkAnswerable(question)).verdict, question).toBe("answerable");
+      const found = await g.retrieve(question, { seeds: "synonyms" });
+      expect(
+        found.seeds.map((s) => s.id),
+        question,
+      ).toEqual(["principalengineer:ann"]);
+      expect((await g.retrieve(question, { seeds: "bm25" })).seeds, question).toEqual([]);
+    }
+  });
+
   it("embedding seeding fuses with BM25 and embeds each entity once", async () => {
     const embedder = new FakeEmbedder();
     const g = open({ embedder, seeds: "embeddings" });
