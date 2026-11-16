@@ -45,6 +45,24 @@ async function instant(): Promise<Date> {
 function suite(spec: StoreSpec): void {
   const open = freshGraphs(spec, "temporal");
 
+  it.each([
+    "0001-01-01T00:00:00+01:00",
+    "9999-12-31T23:00:00-02:00",
+    new Date("0000-01-01T00:00:00Z"),
+    new Date("+010000-01-01T00:00:00Z"),
+  ])("rejects %s before a relation is stored", async (value) => {
+    const g = open();
+    await g.entities.create("Ann", "Person");
+    await g.entities.create("Acme", "Company");
+    await expect(
+      g.relations.create("person:ann", "WORKS_AT", "company:acme", {
+        id: "relation:invalid",
+        event_time: value,
+      }),
+    ).rejects.toThrow(new ValidationError("event_time is outside the representable datetime range"));
+    expect((await g.relations.list()).items).toEqual([]);
+  });
+
   async function graph(contradiction: ContradictionMode = "warn", schemaMode: SchemaMode = "warn") {
     const g = open({ schema: SPEC, schema_mode: schemaMode, contradiction });
     await g.insert.facts({ entities: PEOPLE });

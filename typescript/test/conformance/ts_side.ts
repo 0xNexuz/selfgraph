@@ -19,6 +19,7 @@ import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
+import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
 
 const TERMS_SPEC = {
@@ -276,6 +277,7 @@ export function schemaWarnings(): {
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  datetime_errors: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -369,6 +371,15 @@ export function schemaWarnings(): {
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
+    datetime_errors: ["0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"].map((text) => {
+      try {
+        parseTime(text, "event_time");
+        return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
     terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
       [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
     ),

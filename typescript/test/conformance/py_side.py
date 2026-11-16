@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, _serde, ids
+from selfgraph._ops import parse_time
 from selfgraph.cli import _kv
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
@@ -296,6 +297,7 @@ def schema_warnings():
             for terms in [Schema.model_validate(TERMS_SPEC)]
             for q in TERM_QUESTIONS
         ],
+        "datetime_errors": datetime_errors(),
         "terms_subtypes": [
             sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
             for sub_schema in [
@@ -317,6 +319,21 @@ def schema_warnings():
             for q in ("Employees", "staff", "personnel")
         ],
     }
+
+
+def datetime_errors():
+    """Return validation errors for offsets that shift dates beyond Python's datetime range.
+
+    @return (list[str]): the errors for the lower and upper boundary.
+    """
+    errors = []
+    for text in ("0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"):
+        try:
+            parse_time(text, "event_time")
+            errors.append("accepted")
+        except ValidationError as exc:
+            errors.append(str(exc))
+    return errors
 
 
 STORES = {
