@@ -1355,8 +1355,11 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   for (const rw of rec.rewrites.filter((r) => r.kind === "relation")) {
     const original = parseOrThrow(RelationInput, rw.original, "relation");
     const rewritten = parseOrThrow(RelationInput, rw.rewritten, "relation");
+    const source = await end(original.from_entity, rewritten.from_entity);
+    const target = await end(original.to_entity, rewritten.to_entity);
     const [latest] = history.get(rw.id) ?? [];
     history.delete(rw.id);
+    if (!((await exists(source)) && (await exists(target)))) continue;
     let properties: JsonObject = { ...original.properties };
     let eventTime = original.event_time;
     let carried: Evidence[] = [];
@@ -1371,8 +1374,8 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     }
     const back: ParsedRelationInput = {
       ...original,
-      from_entity: await end(original.from_entity, rewritten.from_entity),
-      to_entity: await end(original.to_entity, rewritten.to_entity),
+      from_entity: source,
+      to_entity: target,
       properties,
       event_time: eventTime,
       evidence: [],
@@ -1394,14 +1397,18 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   for (const rw of rec.rewrites.filter((r) => r.kind === "preference")) {
     const original = parseOrThrow(PreferenceInput, rw.original, "preference");
     const rewritten = parseOrThrow(PreferenceInput, rw.rewritten, "preference");
+    const subject = await end(original.subject_entity, rewritten.subject_entity);
+    const value = await end(original.value_entity, rewritten.value_entity);
+    const about = await end(original.about_entity, rewritten.about_entity);
+    if (!((await exists(subject)) && (await exists(value)))) continue;
     const current = await ops.getPreference(runner, ns, rw.id);
     const kept = current !== null && !rw.existed ? current : original;
     if (kept === current) await runner.deleteEdges(ns, rw.id);
     const back: ParsedPreferenceInput = {
       ...original,
-      subject_entity: await end(original.subject_entity, rewritten.subject_entity),
-      value_entity: await end(original.value_entity, rewritten.value_entity),
-      about_entity: await end(original.about_entity, rewritten.about_entity),
+      subject_entity: subject,
+      value_entity: value,
+      about_entity: about === null || (await exists(about)) ? about : null,
       strength: kept.strength,
       properties: kept.properties,
       event_time: kept.event_time,
@@ -1416,12 +1423,20 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   for (const rw of rec.rewrites.filter((r) => r.kind === "decision")) {
     const original = parseOrThrow(DecisionTraceInput, rw.original, "decision");
     const rewritten = parseOrThrow(DecisionTraceInput, rw.rewritten, "decision");
+    const actor = await end(original.actor_entity, rewritten.actor_entity);
+    const outcome = await end(original.outcome_entity, rewritten.outcome_entity);
+    if ((actor !== null && !(await exists(actor))) || (outcome !== null && !(await exists(outcome)))) continue;
+    const steps = rewritten.steps.map((s) => restored.get(s) ?? s);
+    let stepsExist = true;
+    for (const s of steps) stepsExist = stepsExist && (await ops.relationExists(runner, ns, s));
+    if (!stepsExist) continue;
     const current = await ops.getTrace(runner, ns, rw.id);
     const kept = current !== null && !rw.existed ? current : original;
     if (kept === current) await ops.deleteTraceQuietly(runner, ns, rw.id);
     const alternatives: string[] = [];
     for (const [i, o] of original.alternative_entities.entries()) {
-      alternatives.push(await end(o, rewritten.alternative_entities[i]!));
+      const alternative = await end(o, rewritten.alternative_entities[i]!);
+      if (await exists(alternative)) alternatives.push(alternative);
     }
     const back: ParsedDecisionTraceInput = {
       ...original,
@@ -1430,9 +1445,9 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       rationale: kept.rationale,
       status: kept.status,
       event_time: kept.event_time,
-      steps: rewritten.steps.map((s) => restored.get(s) ?? s),
-      actor_entity: await end(original.actor_entity, rewritten.actor_entity),
-      outcome_entity: await end(original.outcome_entity, rewritten.outcome_entity),
+      steps,
+      actor_entity: actor,
+      outcome_entity: outcome,
       alternative_entities: alternatives,
     };
     const existed = await runner.nodeExists(ns, L_TRACE, tidOf(back));

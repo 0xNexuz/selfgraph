@@ -230,3 +230,57 @@ def test_insert_restating_a_decision_keeps_what_it_leaves_out():
     [dated] = run(g.insert.facts({"decisions": [title]}, event_time="2025-01-01T00:00:00Z")).decisions
     assert dated.event_time.isoformat() == "2025-01-01T00:00:00+00:00"
     assert run(g.insert.facts({"decisions": [{"title": "Fresh"}]})).decisions[0].status == "completed"
+
+
+@pytest.mark.parametrize("step_first", [False, True])
+def test_decision_ids_cannot_overwrite_steps_in_either_creation_order(step_first):
+    g = new_graph()
+    rel, _ = seed(g)
+
+    def with_step():
+        return run(g.decisions.create("With a step", id="decision:first", steps=[rel.id]))
+
+    def with_old_step_id():
+        return run(g.decisions.create("Independent decision", id="decision:first:step:0"))
+
+    if step_first:
+        with_step()
+        with_old_step_id()
+    else:
+        with_old_step_id()
+        with_step()
+    assert run(g.decisions.get("decision:first:step:0")).title == "Independent decision"
+    assert [s.relation_id for s in run(g.decisions.get("decision:first")).steps] == [rel.id]
+    run(g.decisions.delete("decision:first:step:0"))
+    assert [s.relation_id for s in run(g.decisions.get("decision:first")).steps] == [rel.id]
+    assert run(g.relations.delete(rel.id)).deleted_decisions == 1
+    assert run(g.decisions.get("decision:first")) is None
+
+
+@pytest.mark.parametrize("step_first", [False, True])
+def test_internal_step_prefix_is_reserved_in_either_creation_order(step_first):
+    g = new_graph()
+    rel, _ = seed(g)
+
+    def with_step():
+        run(g.decisions.create("With a step", id="decision:first", steps=[rel.id]))
+
+    if step_first:
+        with_step()
+    with pytest.raises(ValidationError, match="reserved"):
+        run(g.entities.create("Intruder", "Thing", id="decisionstep:decision:first:step:0"))
+    with pytest.raises(ValidationError, match="must start"):
+        run(g.decisions.create("Intruder", id="decisionstep:decision:first:step:0"))
+    if not step_first:
+        with_step()
+    assert [s.relation_id for s in run(g.decisions.get("decision:first")).steps] == [rel.id]
+
+
+def test_step_ids_round_trip():
+    from selfgraph import ids
+
+    for tid in ("decision:first", "decision:first:step:0", "decision:日本語"):
+        for order in (0, 1, 99):
+            sid = ids.step_id(tid, order)
+            assert sid == f"decisionstep:{tid}:step:{order}"
+            assert ids.trace_of_step(sid) == tid

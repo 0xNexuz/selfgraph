@@ -96,3 +96,14 @@ def test_combining_marks_follow_one_pinned_table():
         if unicodedata.category(chr(cp)) in ("Mn", "Mc") and not (0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF)
     }
     assert {cp for cp in range(sys.maxunicode + 1) if ids._is_mark(chr(cp))} == marks
+
+
+def test_require_identifier_accepts_plain_identifiers():
+    for name in ("id", "sid", "index", "external_ids", "name", "k_Entity_1"):
+        assert ids.require_identifier(name) == name
+
+
+def test_require_identifier_rejects_injection_and_non_identifiers():
+    for bad in ("id` RETURN 1 //", "a`b", "a b", "1name", "na.me", "", "n`) DETACH DELETE (m"):
+        with pytest.raises(ValidationError):
+            ids.require_identifier(bad)

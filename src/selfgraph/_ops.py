@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
 from datetime import datetime
 from functools import partial
-from typing import Any, NamedTuple, get_args
+from typing import Any, NamedTuple, TypeVar, get_args
 
 from . import ids as _ids
 from ._serde import (
@@ -75,6 +76,7 @@ _NO_DELETES = {
     "deleted_relation_versions": 0,
     "deleted_decisions": 0,
     "deleted_preference_versions": 0,
+    "restored_relations": 0,
 }
 _ENTITY_UPDATE_FIELDS = ("type", "name", "aliases", "external_ids", "properties", "remove_aliases", "remove_properties")
 _DECISION_UPDATE_FIELDS = (
@@ -359,8 +361,28 @@ def _require_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
     _ids._require_clean_json(name, value, safe_ints=safe_ints)
 
 
-def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
-    """Validate an optional mapping has string keys and JSON-serializable values, up front.
+def _whole_floats_as_ints(value: Any) -> Any:
+    """Turn each whole float within the safe integer range, other than -0.0, into an int, as TypeScript stores it.
+
+    @param value (Any): a JSON-like value, searched through mappings, lists, and tuples.
+    @return (Any): the value with those floats as ints.
+    """
+    if isinstance(value, float):
+        whole = (
+            value.is_integer()
+            and abs(value) <= _ids.MAX_SAFE_INTEGER
+            and not (value == 0 and math.copysign(1, value) < 0)
+        )
+        return int(value) if whole else value
+    if isinstance(value, Mapping):
+        return {k: _whole_floats_as_ints(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_whole_floats_as_ints(v) for v in value]
+    return value
+
+
+def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> dict[str, Any] | None:
+    """Validate an optional mapping has string keys and JSON-serializable values, up front, and return it to store.
 
     Callers that supersede a version before encoding must reject a non-serializable value here,
     before the supersede write, or a mid-write encode failure leaves no current version.
@@ -368,14 +390,16 @@ def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> N
     @param name (str): the field name for the error message.
     @param value (Any): the value to check, or None.
     @param safe_ints (bool): reject integers outside +/-(2**53 - 1); stored values must round-trip in TypeScript.
-    @return (None): nothing; raises ValidationError when not a JSON string-keyed mapping or a key is blank.
+    @return (dict[str, Any] | None): the mapping with whole-number floats as ints, as TypeScript stores them, or
+        None for None; raises ValidationError when not a JSON string-keyed mapping or a key is blank.
     """
     if value is None:
-        return
+        return None
     _require_mapping(name, value, safe_ints=safe_ints)
     if any(not key.strip() for key in value):
         raise ValidationError(f"{name} keys cannot be empty or whitespace")
     _dumps(dict(value))
+    return _whole_floats_as_ints(value)
 
 
 def _canon_props(props: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -881,7 +905,7 @@ async def validate_facts(
     for item in (*facts.entities, *facts.relations, *facts.preferences):
         if item.properties is None:
             raise ValidationError("properties must be a mapping, got NoneType")
-        _require_json_mapping("properties", item.properties)
+        item.properties = _require_json_mapping("properties", item.properties)
     for ent in facts.entities:
         _require_str_mapping("external_ids", ent.external_ids)
         _require_list("entity aliases", ent.aliases)
@@ -1084,8 +1108,7 @@ async def create_entity(
         _require_list("aliases", aliases)
     if external_ids is not None:
         _require_str_mapping("external_ids", external_ids)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     if schema_check is not None:
         subject = EntityInput(id=eid if id else None, type=type, name=name, properties=properties)
         await schema_check(runner, Extraction(entities=[subject]))
@@ -1147,7 +1170,7 @@ async def update_entity(
         if key in fields:
             _require_list(key, fields[key])
     if "properties" in fields:
-        _require_json_mapping("properties", fields["properties"])
+        fields["properties"] = _require_json_mapping("properties", fields["properties"])
     if "external_ids" in fields:
         _require_str_mapping("external_ids", fields["external_ids"])
     if "type" in fields:
@@ -1315,18 +1338,21 @@ async def _repoint_steps(runner: Any, ns: str, tids: Iterable[str], moved: Mappi
             await update_trace(runner, ns, tid, steps=[moved.get(s.relation_id, s.relation_id) for s in trace.steps])
 
 
-async def delete_entity(runner: Any, ns: str, eid: str) -> dict[str, int]:
+async def delete_entity(
+    runner: Any, ns: str, eid: str, caps: Mapping[str, RelationCap] | None = None
+) -> dict[str, int]:
     """Delete an entity and everything attached to it, including the merge records it survived or was absorbed in.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param eid (str): entity id.
-    @return (dict[str, int]): counts of what was removed.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @return (dict[str, int]): counts of what was removed and restored.
     """
     eid = _ids.canonical_entity_id(eid)
     if not await runner.node_exists(ns, L_ENTITY, eid):
         raise NotFoundError("Entity", eid)
-    return await delete_entities(runner, ns, [eid])
+    return await delete_entities(runner, ns, [eid], caps)
 
 
 async def _edges_into(
@@ -1381,19 +1407,23 @@ async def _delete_nodes_where(runner: Any, ns: str, label: str, key: str, values
         await runner.delete_nodes(ns, label, batch)
 
 
-async def delete_entities(runner: Any, ns: str, eids: list[str]) -> dict[str, int]:
+async def delete_entities(
+    runner: Any, ns: str, eids: list[str], caps: Mapping[str, RelationCap] | None = None
+) -> dict[str, int]:
     """Delete many entities and everything attached to them, reading and deleting in batches.
 
     The result matches deleting them one by one: their relations with every version and the relations' evidence,
     decisions that reference an entity or use one of those relations as a step, their profiles and the preferences
     pointing at them, their evidence, and the merge records they survived or were absorbed in. A considered
     alternative is dropped from a decision that is kept, and a kept preference about a deleted entity loses its
-    about_entity in a new version. Ids that are not stored are skipped.
+    about_entity in a new version. The max_count endpoints a deleted relation sat at are settled again after (see
+    resettle_after_delete). Ids that are not stored are skipped.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param eids (list[str]): canonical entity ids.
-    @return (dict[str, int]): counts of what was removed.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @return (dict[str, int]): counts of what was removed and restored.
     """
     counts = dict(_NO_DELETES)
     eids = list(await _nodes_by_id(runner, ns, L_ENTITY, _dedup_list(eids)))
@@ -1452,21 +1482,28 @@ async def delete_entities(runner: Any, ns: str, eids: list[str]) -> dict[str, in
         for batch in _batches(merges):
             await runner.delete_nodes(ns, L_MERGE, batch)
     counts["deleted_entities"] = len(eids)
+    newest: dict[str, dict] = {}
+    for edge in versions:
+        _keep_newest(newest, edge)
+    counts["restored_relations"] = await resettle_after_delete(runner, ns, newest.values(), caps, now())
     return counts
 
 
-async def delete_relations(runner: Any, ns: str, rids: list[str]) -> dict[str, int]:
+async def delete_relations(
+    runner: Any, ns: str, rids: list[str], caps: Mapping[str, RelationCap] | None = None
+) -> dict[str, int]:
     """Delete many relations with every version, skipping ids that are not stored.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param rids (list[str]): relation ids.
-    @return (dict[str, int]): counts of what was removed.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @return (dict[str, int]): counts of what was removed and restored.
     """
     counts = dict(_NO_DELETES)
     for rid in rids:
         if await relation_exists(runner, ns, rid):
-            for key, value in (await delete_relation(runner, ns, rid)).items():
+            for key, value in (await delete_relation(runner, ns, rid, caps)).items():
                 counts[key] += value
     return counts
 
@@ -1754,6 +1791,23 @@ def _rank(rel: Relation) -> tuple[datetime, int, datetime]:
     return effective_time(rel), rel.revision, aware(rel.created_at)
 
 
+def _cap_slots(
+    caps: Mapping[str, RelationCap], rtype: str, from_entity: str, to_entity: str
+) -> list[tuple[tuple[str, str, str], int]]:
+    """List the constrained endpoint groups a relation belongs to, with each group's max_count.
+
+    @param caps (Mapping[str, RelationCap]): the max_count limits by normalized relation type and alias.
+    @param rtype (str): the normalized relation type.
+    @param from_entity (str): the source entity id.
+    @param to_entity (str): the destination entity id.
+    @return (list[tuple[tuple[str, str, str], int]]): ((canonical type, side, endpoint), max_count) pairs.
+    """
+    cap = caps.get(rtype)
+    if cap is None:
+        return []
+    return [((cap.canonical, side, from_entity if side == "from" else to_entity), limit) for side, limit in cap.limits]
+
+
 class Contradictions:
     def __init__(
         self,
@@ -1782,26 +1836,11 @@ class Contradictions:
         for rel in history:
             if rel.invalidated_by is not None and rel.invalidated_at is not None:
                 self._ended[rel.id] = (rel.invalidated_by, rel.invalidated_at)
-            for key, _ in self._slots(rel.type, rel.from_entity, rel.to_entity):
+            for key, _ in _cap_slots(self._caps, rel.type, rel.from_entity, rel.to_entity):
                 self._past.setdefault(key, {})[rel.id] = _rank(rel)
         for rel in current:
-            for key, _ in self._slots(rel.type, rel.from_entity, rel.to_entity):
+            for key, _ in _cap_slots(self._caps, rel.type, rel.from_entity, rel.to_entity):
                 self._seat(key, rel.id, _rank(rel))
-
-    def _slots(self, rtype: str, from_entity: str, to_entity: str) -> list[tuple[tuple[str, str, str], int]]:
-        """List the constrained endpoint groups a relation belongs to, with each group's max_count.
-
-        @param rtype (str): the normalized relation type.
-        @param from_entity (str): the source entity id.
-        @param to_entity (str): the destination entity id.
-        @return (list[tuple[tuple[str, str, str], int]]): ((canonical type, side, endpoint), max_count) pairs.
-        """
-        cap = self._caps.get(rtype)
-        if cap is None:
-            return []
-        return [
-            ((cap.canonical, side, from_entity if side == "from" else to_entity), limit) for side, limit in cap.limits
-        ]
 
     def _seat(self, key: tuple[str, str, str], rid: str, rank: tuple) -> None:
         self._groups.setdefault(key, {})[rid] = rank
@@ -1839,7 +1878,7 @@ class Contradictions:
         else:
             self._certified.discard(rid)
         warnings: list[InsertWarning] = []
-        slots = self._slots(rtype, from_entity, to_entity)
+        slots = _cap_slots(self._caps, rtype, from_entity, to_entity)
         for key, limit in slots:
             group = self._groups.get(key, {})
             if self._mode == "supersede":
@@ -1994,6 +2033,34 @@ def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
     return {**edge, "props": props}
 
 
+async def _endpoint_edges(
+    runner: Any, ns: str, caps: Mapping[str, RelationCap], ends: Iterable[tuple[str, str, str]]
+) -> dict[str, dict]:
+    """Read the newest version of every relation at the constrained endpoints of some relations.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param caps (Mapping[str, RelationCap]): the schema's max_count limits by relation type.
+    @param ends (Iterable[tuple[str, str, str]]): (normalized type, source id, destination id) of each relation.
+    @return (dict[str, dict]): each relation's newest edge row by id, in read order.
+    """
+    found: dict[str, dict] = {}
+    seen: set[tuple[str, str, str]] = set()
+    for rtype, from_entity, to_entity in ends:
+        cap = caps.get(rtype)
+        for side, _ in cap.limits if cap else ():
+            endpoint = from_entity if side == "from" else to_entity
+            for stored in cap.types:
+                if (side, endpoint, stored) in seen:
+                    continue
+                seen.add((side, endpoint, stored))
+                anchor = {"from_id": endpoint} if side == "from" else {"to_id": endpoint}
+                fetch = partial(runner.match_edges, ns, from_label=L_ENTITY, to_label=L_ENTITY, type=stored)
+                for edge in await _paged(partial(fetch, **anchor), page=_BATCH):
+                    _keep_newest(found, edge)
+    return found
+
+
 async def _contradiction_check(
     runner: Any,
     ns: str,
@@ -2013,20 +2080,7 @@ async def _contradiction_check(
     """
     if contradiction == "off" or not caps:
         return None, {}
-    found: dict[str, dict] = {}
-    seen: set[tuple[str, str, str]] = set()
-    for rtype, from_entity, to_entity in ends:
-        cap = caps.get(rtype)
-        for side, _ in cap.limits if cap else ():
-            endpoint = from_entity if side == "from" else to_entity
-            for stored in cap.types:
-                if (side, endpoint, stored) in seen:
-                    continue
-                seen.add((side, endpoint, stored))
-                anchor = {"from_id": endpoint} if side == "from" else {"to_id": endpoint}
-                fetch = partial(runner.match_edges, ns, from_label=L_ENTITY, to_label=L_ENTITY, type=stored)
-                for edge in await _paged(partial(fetch, **anchor), page=_BATCH):
-                    _keep_newest(found, edge)
+    found = await _endpoint_edges(runner, ns, caps, ends)
     current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
     history = [
         _relation_of(e)
@@ -2103,6 +2157,113 @@ async def retire_relations(
     if rows:
         await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     return [_relation_of(e) for e in gone.values()]
+
+
+async def resettle_after_delete(
+    runner: Any, ns: str, deleted: Iterable[dict], caps: Mapping[str, RelationCap] | None, at: datetime
+) -> int:
+    """Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
+
+    Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
+    Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
+    counted at each one. One that comes back is written as a new current revision with its properties and source
+    count, taking effect when the retired version did, so as_of reads show it valid from its start. One that stays
+    retired, or a retired one whose invalidation settle corrects, takes a new revision naming the relation and time
+    that now displace it, so known_at reads still see the earlier retirement. A current one settle retires is retired
+    as a supersede retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so
+    it is left as it is. Both endpoints of each deleted relation are locked before they are read.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param deleted (Iterable[dict]): the edge rows of the deleted relations, read before they were deleted.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @param at (datetime): the delete's timestamp, the created_at of each restored revision.
+    @return (int): how many relations came back.
+    """
+    caps = caps or {}
+    deleted = [e for e in deleted if _cap_slots(caps, e["type"], e["from_id"], e["to_id"])]
+    if not deleted:
+        return 0
+    for eid in _dedup_list(end for edge in deleted for end in (edge["from_id"], edge["to_id"])):
+        await runner.lock_node(ns, L_ENTITY, eid)
+    found = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in deleted])
+    members: dict[tuple[str, str, str], set[str]] = {}
+    for edge in [*deleted, *found.values()]:
+        for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"]):
+            members.setdefault(key, set()).add(edge["props"]["id"])
+    freed = {key for edge in deleted for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])}
+    stale = [
+        edge
+        for edge in found.values()
+        if not edge["props"]["is_current"]
+        and edge["props"].get("invalidated_at")
+        and any(
+            key in freed and edge["props"].get("invalidated_by") in members[key]
+            for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])
+        )
+    ]
+    if not stale:
+        return 0
+    ends = [(e["type"], e["from_id"], e["to_id"]) for e in stale]
+    tracker, found = await _contradiction_check(runner, ns, "supersede", caps, ends)
+    for edge in stale:
+        rel = _relation_of(edge)
+        tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, _rank(rel))
+    ended, _ = tracker.settle()
+    rows = []
+    for edge in stale:
+        if edge["props"]["id"] in ended:
+            continue
+        rel = _relation_of(edge)
+        props = encode_relation_props(
+            ns=ns,
+            id=rel.id,
+            revision=rel.revision + 1,
+            properties=rel.properties,
+            event_time=effective_time(rel),
+            created_at=at,
+            is_current=True,
+            source_count=rel.source_count,
+        )
+        rows.append((edge["type"], edge["from_id"], edge["to_id"], props))
+    restored = len(rows)
+    for rid, (by, when) in ended.items():
+        edge = found[rid]
+        if (by, to_iso(when)) != (edge["props"].get("invalidated_by"), edge["props"].get("invalidated_at")):
+            gone = _retired(edge, by, when, at)
+            rows.append((gone["type"], gone["from_id"], gone["to_id"], gone["props"]))
+    for row in rows:
+        await _precheck_write(runner, row[3])
+    if rows:
+        await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
+    return restored
+
+
+async def repoint_retired(runner: Any, ns: str, deleted: Iterable[dict], survivor: str) -> None:
+    """Re-point the relations some deleted duplicates had retired to the survivor they were folded into, in place.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param deleted (Iterable[dict]): the edge rows of the deleted duplicates, each with its id, type, and endpoints.
+    @param survivor (str): the relation id the duplicates were folded into.
+    @return (None): nothing.
+    """
+    deleted = list(deleted)
+    ids = {edge["props"]["id"] for edge in deleted}
+    found: dict[str, dict] = {}
+    for side, end in (("from_in", "from_id"), ("to_in", "to_id")):
+        for edge in await _edges_into(runner, ns, L_ENTITY, L_ENTITY, side, _dedup_list(e[end] for e in deleted)):
+            if _is_relation_type(edge["type"]):
+                _keep_newest(found, edge)
+    rows = [
+        (edge["type"], edge["from_id"], edge["to_id"], {**edge["props"], "invalidated_by": survivor})
+        for rid, edge in sorted(found.items())
+        if rid not in ids and not edge["props"]["is_current"] and edge["props"].get("invalidated_by") in ids
+    ]
+    for row in rows:
+        await _precheck_write(runner, row[3])
+    if rows:
+        await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
 
 
 async def upsert_relations(
@@ -2295,8 +2456,7 @@ async def create_relation(
     _require_text("relation type", type)
     _require_text("relation to_entity", to_entity)
     from_entity, to_entity = _ids._canonical_id(from_entity), _ids._canonical_id(to_entity)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     event_time = parse_time(event_time, "event_time")
     rtype = _ids.normalize_rel_type(type)
     _validate_own_id("relation", id)
@@ -2379,7 +2539,7 @@ async def update_relation(
         the stored version too so only violations the update introduces count.
     @return (Relation): the new current version; raises ValidationError for a relation a contradiction invalidated.
     """
-    _require_json_mapping("set_properties", set_properties)
+    set_properties = _require_json_mapping("set_properties", set_properties)
     _require_list("remove_properties", remove_properties)
     given = {
         "set_properties": set_properties,
@@ -2613,13 +2773,28 @@ async def relations_as_of(
     )
     edges = [e for e in await _paged(fetch) if _is_relation_type(e["type"])]
     picked = _pick_as_of(edges, _relation_of, as_of)
-    if as_of.known is None or not count_sources or not picked:
-        return picked
+    return await with_known_sources(runner, ns, picked, as_of.known) if count_sources else picked
+
+
+_Sourced = TypeVar("_Sourced", Entity, Relation)
+
+
+async def with_known_sources(runner: Any, ns: str, records: list[_Sourced], known: datetime | None) -> list[_Sourced]:
+    """Count distinct sources whose evidence was recorded by the knowledge cutoff.
+
+    @param runner (Any): graph reader.
+    @param ns (str): namespace.
+    @param records (list): entities or relations to recount.
+    @param known (datetime | None): knowledge cutoff, or None to keep the stored counts.
+    @return (list): records with the source counts visible at the cutoff.
+    """
+    if known is None or not records:
+        return records
     sources: dict[str, set[str]] = {}
-    for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", [r.id for r in picked]):
-        if _known_by(from_iso(row.get("created_at")), as_of.known):
+    for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", [r.id for r in records]):
+        if _known_by(from_iso(row.get("created_at")), known):
             sources.setdefault(row["target_id"], set()).add(row["source_id"])
-    return [r.model_copy(update={"source_count": len(sources.get(r.id, ()))}) for r in picked]
+    return [r.model_copy(update={"source_count": len(sources.get(r.id, ()))}) for r in records]
 
 
 async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preference]:
@@ -2635,22 +2810,32 @@ async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preferenc
     return _pick_as_of(edges, _preference_of, as_of)
 
 
-async def delete_relation(runner: Any, ns: str, rid: str) -> dict[str, int]:
-    """Delete a relation and all of its versions.
+async def delete_relation(
+    runner: Any, ns: str, rid: str, caps: Mapping[str, RelationCap] | None = None
+) -> dict[str, int]:
+    """Delete a relation and all of its versions, then settle its max_count endpoints again (see resettle_after_delete).
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param rid (str): relation id.
-    @return (dict[str, int]): counts of what was removed.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @return (dict[str, int]): counts of what was removed and restored.
     """
     _ids._require_str("relation id", rid)
-    if not await relation_exists(runner, ns, rid):
+    newest = await _newest_edge(runner, ns, rid, _is_relation_type)
+    if newest is None:
         raise NotFoundError("Relation", rid)
     trace_ids = await _traces_touching_relations(runner, ns, [rid])
     n = await runner.delete_edges(ns, rid)
     await _delete_evidence(runner, ns, rid)
     deleted_decisions = sum([await _delete_trace_quietly(runner, ns, tid) for tid in trace_ids])
-    return {**_NO_DELETES, "deleted_relation_versions": n, "deleted_decisions": deleted_decisions}
+    restored = await resettle_after_delete(runner, ns, [newest], caps, now())
+    return {
+        **_NO_DELETES,
+        "deleted_relation_versions": n,
+        "deleted_decisions": deleted_decisions,
+        "restored_relations": restored,
+    }
 
 
 async def certify_relation(runner: Any, ns: str, rid: str, by: str | None, at: datetime) -> Relation:
@@ -2958,8 +3143,7 @@ async def create_preference(
     _require_text("preference value_entity", value_entity)
     subject_entity, value_entity, about_entity = map(_ids._canonical_id, (subject_entity, value_entity, about_entity))
     key = _ids.normalize_text(key)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     event_time = parse_time(event_time, "event_time")
     _validate_own_id("preference", id)
     pid = id or _ids.preference_id(subject_entity, stance, key, value_entity)
@@ -3009,7 +3193,7 @@ async def update_preference(
     @return (Preference): the new current version.
     """
     _validate_strength(strength)
-    _require_json_mapping("properties", properties)
+    properties = _require_json_mapping("properties", properties)
     _require_list("remove_properties", remove_properties)
     event_time = parse_time(event_time, "event_time")
     cleared = _require_clear(
