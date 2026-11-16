@@ -1093,8 +1093,7 @@ async def upsert_entities(
         current[eid] = decode_entity(props)
         out.append(current[eid])
 
-    for props in writes.values():
-        await _precheck_write(runner, props)
+    await _precheck_nodes(runner, ns, L_ENTITY, list(writes.items()))
     for eid, props in writes.items():
         if eid in stored and props["type"] != stored[eid].type:
             await runner.remove_node_label(ns, L_ENTITY, eid, stored[eid].type)
@@ -1255,7 +1254,7 @@ async def update_entity(
         relevance=existing.relevance,
         relevance_at=existing.relevance_at,
     )
-    await _precheck_write(runner, props)
+    await _precheck_nodes(runner, ns, L_ENTITY, [(eid, props)])
     if new_type != existing.type:
         await runner.remove_node_label(ns, L_ENTITY, eid, existing.type)
     await runner.upsert_node(ns, L_ENTITY, eid, props, extra_label=new_type)
@@ -1637,7 +1636,7 @@ async def _write_relation_version(
     @return (Relation): the written version.
     """
     if retire:
-        await _precheck_write(runner, props)
+        await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, [(rtype, from_id, to_id, props)])
         await runner.update_current_edge(ns, props["id"], {"is_current": False})
     _reject_reserved_rel_type(rtype, rtype)
     if not await runner.create_edge(ns, rtype, L_ENTITY, from_id, L_ENTITY, to_id, props):
@@ -1732,20 +1731,36 @@ async def _lock_current(
     return current
 
 
-async def _precheck_write(runner: Any, props: Mapping[str, Any]) -> None:
-    """Ask the store whether an encoded write fits its limits before any prior state is mutated.
-
-    This keeps a multi-step write (retire-then-add a version, or ensure-profile-then-add an edge) atomic on
-    auto-commit backends: a store size limit is checked up front, so the first write never commits ahead of a
-    second write that would fail.
+async def _precheck_nodes(runner: Any, ns: str, label: str, rows: list[tuple[str, dict]]) -> None:
+    """Ask the store whether node upserts fit its limits before any prior state is mutated.
 
     @param runner (Any): graph runner.
-    @param props (Mapping[str, Any]): the encoded properties about to be written.
-    @return (None): nothing; raises when the store would reject the write.
+    @param ns (str): namespace.
+    @param label (str): the node label.
+    @param rows (list[tuple[str, dict]]): (id, encoded properties) pairs, as upsert_nodes takes them.
+    @return (None): nothing; raises when the store would reject a write.
     """
-    check = getattr(runner, "check_doc_size", None)
+    check = getattr(runner, "check_node_writes", None)
     if check is not None:
-        check(props)
+        check(ns, label, rows)
+
+
+async def _precheck_edges(
+    runner: Any, ns: str, from_label: str, to_label: str, rows: list[tuple[str, str, str, dict]]
+) -> None:
+    """Ask the store whether edge writes fit its limits before any prior state is mutated.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param from_label (str): the source node label.
+    @param to_label (str): the destination node label.
+    @param rows (list[tuple[str, str, str, dict]]): (type, from id, to id, encoded properties), as create_edges
+        takes them.
+    @return (None): nothing; raises when the store would reject a write.
+    """
+    check = getattr(runner, "check_edge_writes", None)
+    if check is not None:
+        check(ns, from_label, to_label, rows)
 
 
 async def _current_relations(
@@ -2259,9 +2274,8 @@ async def retire_relations(
     gone: dict[str, dict] = {}
     for edge, by, at in retirements:
         gone.setdefault(edge["props"]["id"], _retired(edge, by, at, known))
-    for edge in gone.values():
-        await _precheck_write(runner, edge["props"])
     rows = [(e["type"], e["from_id"], e["to_id"], e["props"]) for e in gone.values()]
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
     if rows:
         await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     return [_relation_of(e) for e in gone.values()]
@@ -2341,8 +2355,7 @@ async def resettle_endpoints(
         if (by, to_iso(when)) != (edge["props"].get("invalidated_by"), edge["props"].get("invalidated_at")):
             gone = _retired(edge, by, when, at)
             rows.append((gone["type"], gone["from_id"], gone["to_id"], gone["props"]))
-    for row in rows:
-        await _precheck_write(runner, row[3])
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
     if rows:
         await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     return restored
@@ -2369,8 +2382,7 @@ async def repoint_retired(runner: Any, ns: str, deleted: Iterable[dict], survivo
         for rid, edge in sorted(found.items())
         if rid not in ids and not edge["props"]["is_current"] and edge["props"].get("invalidated_by") in ids
     ]
-    for row in rows:
-        await _precheck_write(runner, row[3])
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
     if rows:
         await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
 
@@ -2508,13 +2520,15 @@ async def upsert_relations(
         (writes if key in writes else retires)[key] = gone["props"]
         current[old] = gone
 
-    for props in [*writes.values(), *retires.values()]:
-        await _precheck_write(runner, props)
-    for batch in (writes, retires):
-        rows = []
-        for (rid, _), props in batch.items():
-            edge = current[rid]
-            rows.append((edge["type"], edge["from_id"], edge["to_id"], props))
+    batches = [
+        [
+            (current[rid]["type"], current[rid]["from_id"], current[rid]["to_id"], props)
+            for (rid, _), props in batch.items()
+        ]
+        for batch in (writes, retires)
+    ]
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, [row for rows in batches for row in rows])
+    for rows in batches:
         if rows:
             await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     await _write_evidence(runner, ns, records, created_at)
@@ -2614,13 +2628,11 @@ async def create_relation(
         retires = [_retired(existing[old], by, at, created_at) for old, (by, at) in ended.items() if old != rid]
         if rid in ended:
             props = _retired(edge, *ended[rid], created_at)["props"]
-    for write in [props, *(edge["props"] for edge in retires)]:
-        await _precheck_write(runner, write)
+    retired = [(e["type"], e["from_id"], e["to_id"], e["props"]) for e in retires]
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, [(rtype, from_entity, to_entity, props), *retired])
     rel = await _write_relation_version(runner, ns, from_entity, rtype, to_entity, props, retire=False)
-    if retires:
-        await runner.create_edges(
-            ns, L_ENTITY, L_ENTITY, [(e["type"], e["from_id"], e["to_id"], e["props"]) for e in retires]
-        )
+    if retired:
+        await runner.create_edges(ns, L_ENTITY, L_ENTITY, retired)
     await _write_evidence(runner, ns, records, created_at)
     if prior is not None and warnings is not None:
         warnings.append(
@@ -3008,8 +3020,9 @@ async def certify_relation(runner: Any, ns: str, rid: str, by: str | None, at: d
         "certified_by": by,
         "certifications_json": _dumps(history),
     }
-    await _precheck_write(runner, props)
-    await runner.create_edges(ns, L_ENTITY, L_ENTITY, [(edge["type"], edge["from_id"], edge["to_id"], props)])
+    rows = [(edge["type"], edge["from_id"], edge["to_id"], props)]
+    await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
+    await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     return _relation_of({**edge, "props": props})
 
 
@@ -3134,10 +3147,11 @@ async def _write_preference_version(
     @param retire (bool): True when an existing current version must be flipped first.
     @return (Preference): the written version.
     """
+    rtype = preference_edge_type(stance)
     if retire:
-        await _precheck_write(runner, props)
+        await _precheck_edges(runner, ns, L_PROFILE, L_ENTITY, [(rtype, profile_id, value_entity, props)])
         await runner.update_current_edge(ns, props["id"], {"is_current": False})
-    await runner.create_edge(ns, preference_edge_type(stance), L_PROFILE, profile_id, L_ENTITY, value_entity, props)
+    await runner.create_edge(ns, rtype, L_PROFILE, profile_id, L_ENTITY, value_entity, props)
     return decode_preference(props, value_entity=value_entity, profile_id=profile_id, stance=stance)
 
 
@@ -3291,7 +3305,8 @@ async def create_preference(
         created_at=now(),
         is_current=True,
     )
-    await _precheck_write(runner, props)
+    rows = [(preference_edge_type(stance), _ids.profile_id(subject_entity), value_entity, props)]
+    await _precheck_edges(runner, ns, L_PROFILE, L_ENTITY, rows)
     profile_id = await _ensure_profile(runner, ns, subject_entity, now())
     await runner.lock_node(ns, L_PROFILE, profile_id)
     if await preference_exists(runner, ns, pid):
@@ -3634,7 +3649,7 @@ async def upsert_trace(
         created_at=made_at,
         updated_at=created_at,
     )
-    await _precheck_write(runner, props)
+    await _precheck_nodes(runner, ns, L_TRACE, [(tid, props)])
     if existing is not None:
         await _delete_steps(runner, ns, tid)
         for rtype in (R_MADE_DECISION, R_RESULTED_IN, R_CONSIDERED):

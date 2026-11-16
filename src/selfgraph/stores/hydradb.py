@@ -35,7 +35,8 @@ _SEEK_BATCH = 256
 _PARALLEL = 32
 _QUEUING: ContextVar[HydraDBStore | None] = ContextVar("selfgraph_hydradb_queuing", default=None)
 _SCALARS = (str, int, float, bool)
-_MAX_STRING_BYTES = 32000
+_MAX_MESSAGE_BYTES = 2 * 1024 * 1024
+_MAX_WRITE_BYTES = _MAX_MESSAGE_BYTES - 64 * 1024
 _WRITE_BATCH = 1000
 _DELETE_BATCH = 1024
 _TRANSIENT_MARKERS = ("snapshot", "epoch", "transient", "serializ", "conflict", "lock")
@@ -50,27 +51,27 @@ def _transient(lowered: str) -> bool:
     return any(k in lowered for k in _TRANSIENT_MARKERS)
 
 
-def _guard_sizes(row: Mapping[str, Any]) -> None:
-    """Reject a write whose stored strings exceed the engine's per-string size limit.
+def _write_size(row: Mapping[str, Any]) -> int:
+    """The bytes a row adds to a HydraDB write: its column names, its strings, and 9 for each other value.
 
     @param row (Mapping[str, Any]): the column names and values about to be written.
-    @return (None): nothing; raises when a stored string is too large.
+    @return (int): the size in bytes.
     """
-    for key, value in row.items():
-        if not isinstance(value, str):
-            continue
-        size = len(value.encode("utf-8"))
-        if size > _MAX_STRING_BYTES:
-            field = (
-                "the serialized node or edge document (HydraDB stores each node or edge as one JSON document, "
-                "so its properties share this budget)"
-                if key == "doc"
-                else f"the string column {key!r}"
-            )
-            raise StoreError(
-                f"HydraDB rejects {field} at {size} bytes; the engine limit is "
-                f"{_MAX_STRING_BYTES} bytes per stored string"
-            )
+    return sum(len(key.encode()) + (len(value.encode()) if isinstance(value, str) else 9) for key, value in row.items())
+
+
+def _guard_sizes(row: Mapping[str, Any]) -> None:
+    """Reject a write that would not fit in one HydraDB Bolt message.
+
+    @param row (Mapping[str, Any]): the column names and values about to be written.
+    @return (None): nothing; raises when the write is too large.
+    """
+    size = _write_size(row)
+    if size > _MAX_WRITE_BYTES:
+        raise StoreError(
+            f"HydraDB rejects this write at {size} bytes; a node or edge row goes in one Bolt message, which HydraDB "
+            f"caps at {_MAX_MESSAGE_BYTES} bytes, so a row may take at most {_MAX_WRITE_BYTES}"
+        )
 
 
 def _sk(ns: str, sid: str) -> int:
@@ -149,16 +150,80 @@ def _keyed(alias: str, label: str, equals: dict | None, params: dict) -> str:
     return f"{alias}:{label} {{{', '.join(entries)}}}" if entries else f"{alias}:{label}"
 
 
+def _node_write_row(ns: str, label: str, id: str, props: dict) -> dict:
+    """The row a node upsert writes.
+
+    @param ns (str): namespace.
+    @param label (str): the node label.
+    @param id (str): the node id.
+    @param props (dict): the encoded node properties.
+    @return (dict): the row, with its surrogate id, sort key, document, and scalar columns.
+    """
+    return {
+        "id": _sk(ns, id),
+        "sid": id,
+        "ns": ns,
+        "label": label,
+        _sort_key(ns, label): id,
+        "doc": _doc(props),
+        **_scalars(props),
+    }
+
+
+def _edge_write_row(ns: str, type: str, from_label: str, from_id: str, to_label: str, to_id: str, props: dict) -> dict:
+    """The row an edge write creates.
+
+    @param ns (str): namespace.
+    @param type (str): the edge type.
+    @param from_label (str): the source node label.
+    @param from_id (str): the source node id.
+    @param to_label (str): the destination node label.
+    @param to_id (str): the destination node id.
+    @param props (dict): the encoded edge properties.
+    @return (dict): the row, with its endpoints, surrogate id, document, and scalar columns.
+    """
+    sid = props.get("id")
+    row: dict[str, Any] = {
+        "f": _sk(ns, from_id),
+        "t": _sk(ns, to_id),
+        "fa": from_id,
+        "tb": to_id,
+        "fl": from_label,
+        "tl": to_label,
+        "id": _sk(ns, f"{from_id}|{type}|{to_id}|{sid}|{props.get('revision')}"),
+        "ns": ns,
+        "etype": type,
+        "doc": _doc(props),
+    }
+    if sid is not None:
+        row["sid"] = sid
+    row.update(_scalars(props))
+    return row
+
+
 def _by_columns(rows: list[dict]) -> list[list[dict]]:
     """Group write rows by column set into batches, since an UNWIND write needs every row to carry the same fields.
 
     @param rows (list[dict]): the rows to group.
-    @return (list[list[dict]]): batches of at most _WRITE_BATCH rows sharing one column set, in first-seen order.
+    @return (list[list[dict]]): batches sharing one column set, each at most _WRITE_BATCH rows and _MAX_WRITE_BYTES
+        bytes, in first-seen order.
     """
     groups: dict[tuple[str, ...], list[dict]] = {}
     for row in rows:
         groups.setdefault(tuple(sorted(row)), []).append(row)
-    return [group[i : i + _WRITE_BATCH] for group in groups.values() for i in range(0, len(group), _WRITE_BATCH)]
+    out: list[list[dict]] = []
+    for group in groups.values():
+        batch: list[dict] = []
+        size = 0
+        for row in group:
+            row_size = _write_size(row)
+            if batch and (len(batch) == _WRITE_BATCH or size + row_size > _MAX_WRITE_BYTES):
+                out.append(batch)
+                batch, size = [], 0
+            batch.append(row)
+            size += row_size
+        out.append(batch)
+    return out
 
 
 def _sets(alias: str, row: dict, skip: tuple[str, ...]) -> str:
@@ -399,13 +464,31 @@ class HydraDBStore(AutoCommitStore):
         res = await self._run(f"MATCH (n:{label} {{id: $iid}}) RETURN n.sid AS sid", {"iid": iid}, reads=[iid])
         return bool(res.rows)
 
-    def check_doc_size(self, props: Mapping[str, Any]) -> None:
-        """Reject an encoded write whose serialized document exceeds the engine's per-string limit, before any write.
+    def check_node_writes(self, ns: str, label: str, rows: list[tuple[str, dict]]) -> None:
+        """Reject node upserts that would not fit in one HydraDB Bolt message, before any write.
 
-        @param props (Mapping[str, Any]): the encoded node or edge properties about to be written.
-        @return (None): nothing; raises StoreError when the document is too large.
+        @param ns (str): namespace.
+        @param label (str): the node label.
+        @param rows (list[tuple[str, dict]]): (id, encoded properties) pairs, as upsert_nodes takes them.
+        @return (None): nothing; raises StoreError when a row is too large.
         """
-        _guard_sizes({"doc": _doc(props), **_scalars(dict(props))})
+        for id, props in rows:
+            _guard_sizes(_node_write_row(ns, label, id, props))
+
+    def check_edge_writes(
+        self, ns: str, from_label: str, to_label: str, rows: list[tuple[str, str, str, dict]]
+    ) -> None:
+        """Reject edge writes that would not fit in one HydraDB Bolt message, before any write.
+
+        @param ns (str): namespace.
+        @param from_label (str): the source node label.
+        @param to_label (str): the destination node label.
+        @param rows (list[tuple[str, str, str, dict]]): (type, from id, to id, encoded properties), as create_edges
+            takes them.
+        @return (None): nothing; raises StoreError when a row is too large.
+        """
+        for type, from_id, to_id, props in rows:
+            _guard_sizes(_edge_write_row(ns, type, from_label, from_id, to_label, to_id, props))
 
     async def upsert_node(self, ns: str, label: str, id: str, props: dict, *, extra_label: str | None = None) -> None:
         await self.upsert_nodes(ns, label, [(id, props)], extra_label=extra_label)
@@ -417,19 +500,10 @@ class HydraDBStore(AutoCommitStore):
             quote_label(extra_label)
         out = []
         cleared: dict[tuple[str, ...], list[int]] = {}
-        key = _sort_key(ns, label)
         for id, props in rows:
             for prop_key in props:
                 require_identifier(prop_key)
-            row = {
-                "id": _sk(ns, id),
-                "sid": id,
-                "ns": ns,
-                "label": label,
-                key: id,
-                "doc": _doc(props),
-                **_scalars(props),
-            }
+            row = _node_write_row(ns, label, id, props)
             _guard_sizes(row)
             out.append(row)
             if keys := _unset(props):
@@ -642,22 +716,7 @@ class HydraDBStore(AutoCommitStore):
         for type, from_id, to_id, props in rows:
             for key in props:
                 require_identifier(key)
-            sid = props.get("id")
-            row: dict[str, Any] = {
-                "f": _sk(ns, from_id),
-                "t": _sk(ns, to_id),
-                "fa": from_id,
-                "tb": to_id,
-                "fl": from_label,
-                "tl": to_label,
-                "id": _sk(ns, f"{from_id}|{type}|{to_id}|{sid}|{props.get('revision')}"),
-                "ns": ns,
-                "etype": type,
-                "doc": _doc(props),
-            }
-            if sid is not None:
-                row["sid"] = sid
-            row.update(_scalars(props))
+            row = _edge_write_row(ns, type, from_label, from_id, to_label, to_id, props)
             _guard_sizes(row)
             out.append(row)
         for batch in _by_columns(out):

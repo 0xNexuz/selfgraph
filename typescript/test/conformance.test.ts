@@ -219,6 +219,9 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
             });
           }
         }
+        for (const ops of [pyOps, tsOps]) {
+          expect((ops as { large_document: unknown }).large_document).toEqual({ entity: 40_000, relation: 40_000 });
+        }
         rmSync(evidence, { recursive: true, force: true });
       },
     );

@@ -1220,11 +1220,53 @@ function suite(spec: StoreSpec) {
     });
   }
 
-  it.runIf(spec.name === "hydradb")("rejects a document over HydraDB's 32 KB string limit before writing", async () => {
-    await expect(graph.entities.create("Huge", "Thing", { properties: { blob: "x".repeat(40_000) } })).rejects.toThrow(
-      /32000 bytes/,
-    );
-    expect(await graph.entities.get("thing:huge")).toBeNull();
+  it("stores and reads back an entity and a relation whose documents are over 32 KB", async () => {
+    const blob = "x".repeat(40_000);
+    await graph.entities.create("Huge", "Thing", { properties: { blob } });
+    await graph.entities.create("Other", "Thing");
+    const rel = await graph.relations.create("thing:huge", "LINKS", "thing:other", { properties: { blob } });
+    expect((await graph.entities.get("thing:huge"))?.properties.blob).toBe(blob);
+    expect((await graph.relations.get(rel.id))?.properties.blob).toBe(blob);
+  });
+
+  it.runIf(spec.name === "hydradb")(
+    "rejects an update over HydraDB's message limit before retiring the current version",
+    async () => {
+      const g = fresh();
+      const blob = "x".repeat(1_100_000);
+      await g.entities.create("Ann", "Person");
+      await g.entities.create("Beta", "Company");
+      const rel = await g.relations.create("person:ann", "WORKS_AT", "company:beta");
+      await expect(g.relations.update(rel.id, { set_properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.relations.get(rel.id)).toMatchObject({ revision: 1, properties: {} });
+      const pref = await g.preferences.create("person:ann", "employer", "company:beta");
+      await expect(g.preferences.update(pref.id, { properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.preferences.get(pref.id)).toMatchObject({ revision: 1, properties: {} });
+    },
+  );
+
+  it.runIf(spec.name === "hydradb")(
+    "rejects an update whose edge row is over HydraDB's message limit before retiring the current version",
+    async () => {
+      const g = fresh();
+      await g.entities.create("Ann", "Person");
+      await g.entities.create("Beta", "Company");
+      const rel = await g.relations.create("person:ann", `LINKS_${"X".repeat(20_000)}`, "company:beta");
+      const blob = "x".repeat(1_010_000);
+      await expect(g.relations.update(rel.id, { set_properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.relations.get(rel.id)).toMatchObject({ revision: 1, properties: {} });
+    },
+  );
+
+  it.runIf(spec.name === "hydradb")("writes every entity of an insert larger than one HydraDB message", async () => {
+    const g = fresh();
+    const blob = "x".repeat(700_000);
+    await g.insert.facts({ entities: [0, 1].map((i) => ({ type: "Doc", name: `Doc ${i}`, properties: { blob } })) });
+    const docs = (await g.entities.list()).items.map((e) => [e.name, String(e.properties.blob).length]);
+    expect(docs).toEqual([
+      ["Doc 0", 700_000],
+      ["Doc 1", 700_000],
+    ]);
   });
 }
 
