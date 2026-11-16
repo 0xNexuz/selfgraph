@@ -177,9 +177,9 @@ const floatArg = (flag: string) => (value: string) => {
  * @param text (boolean): keep every value as text instead of parsing JSON.
  * @return (JsonObject): the parsed mapping.
  */
-function kv(pairs: string[], flag: string, text: true): Record<string, string>;
-function kv(pairs: string[], flag: string, text?: false): JsonObject;
-function kv(pairs: string[], flag: string, text = false): JsonObject {
+export function kv(pairs: string[], flag: string, text: true): Record<string, string>;
+export function kv(pairs: string[], flag: string, text?: false): JsonObject;
+export function kv(pairs: string[], flag: string, text = false): JsonObject {
   const out: JsonObject = {};
   for (const pair of pairs) {
     const i = pair.indexOf("=");

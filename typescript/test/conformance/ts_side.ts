@@ -1,9 +1,21 @@
+import { kv } from "../../src/cli.js";
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
-import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable, ValidationError } from "../../src/index.js";
+import {
+  FalkorDBStore,
+  fromTables,
+  ids,
+  KuzuStore,
+  SelfGraph,
+  toJsonable,
+  toNeo4jOntology,
+  ValidationError,
+} from "../../src/index.js";
+import { setLogger } from "../../src/internal/log.js";
 import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
+import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
@@ -59,6 +71,25 @@ const TABLES = [
   { name: "Companies", columns: [{ name: "customer_id", references: "Customers" }] },
 ];
 
+const NEO4J_LOSS_SPEC = {
+  name: "conformance",
+  entities: [
+    {
+      name: "Person",
+      aliases: ["Human"],
+      synonyms: ["individual"],
+      certified: true,
+      mappings: [{ source: "crm", table: "users" }],
+      definitions: [{ name: "seniority", expression: "count(Job)" }],
+    },
+    { name: "Org" },
+    { name: "Company", parent: "Org" },
+  ],
+  relations: [
+    { type: "OWNS", synonyms: ["holds"], certified: true, from: { types: ["Person"] }, to: { types: ["Company"] } },
+  ],
+};
+
 const SCHEMA_SPEC = {
   name: "conformance",
   entities: [
@@ -88,6 +119,22 @@ const SCHEMA_SPEC = {
 const SCHEMA_CASES = [
   {
     entities: [
+      { id: "person:p", type: "Person", name: "P", properties: { age: 30 } },
+      { id: "company:c", type: "Company", name: "C" },
+    ],
+    relations: [
+      { from_entity: "person:p", type: "WORKS_AT", to_entity: "company:c" },
+      { from_entity: "person:p", type: "works at", to_entity: "company:c" },
+      {
+        id: ids.relationId("person:p", "WORKS_AT", "company:c"),
+        from_entity: "person:p",
+        type: "WORKS_AT",
+        to_entity: "company:c",
+      },
+    ],
+  },
+  {
+    entities: [
       { id: "manager:m", type: "Manager", name: "M", properties: { age: 30 } },
       { id: "org:o", type: "org", name: "O" },
     ],
@@ -113,6 +160,10 @@ const SCHEMA_CASES = [
       { from_entity: "manager:z", type: "employed by", to_entity: "org:o2" },
       { from_entity: "company:stored", type: "KNOWS", to_entity: "manager:z" },
     ],
+  },
+  {
+    entities: [{ id: "person:n", type: "Person", name: "N", properties: { age: null } }],
+    relations: [],
   },
 ];
 
@@ -155,18 +206,72 @@ function unknownKeyError(kind: "facts" | "schema", value: unknown): string {
 }
 
 /**
+ * Export a schema holding every field the Neo4j ontology cannot carry, and return what it logs.
+ *
+ * @return (string): the logged warning lines joined by newlines, empty when the export logs nothing.
+ */
+export function neo4jExportWarnings(): string {
+  const lines: string[] = [];
+  const previous = setLogger((message) => lines.push(message));
+  try {
+    toNeo4jOntology(Schema.parse(NEO4J_LOSS_SPEC));
+  } finally {
+    setLogger(previous);
+  }
+  return lines.join("\n");
+}
+
+const JSON_INPUTS = ["NaN", "Infinity", "-Infinity", "1.5", "[1]", "nope"];
+
+/**
+ * Parse each input as a KEY=VALUE flag value and inside a JSON document, as the CLI and settings do.
+ *
+ * @return ({ flags: unknown[]; documents: unknown[] }): each input's flag value, and each document's parsed value or its error up to the first colon, since the two JSON parsers word a syntax error differently.
+ */
+function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
+  const document = (text: string): unknown => {
+    try {
+      return parseJson(text, " in --metadata");
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      return exc.message.split(":")[0];
+    }
+  };
+  return {
+    flags: JSON_INPUTS.map((x) => kv([`v=${x}`], "--prop").v),
+    documents: JSON_INPUTS.map((x) => document(`{"v": ${x}}`)),
+  };
+}
+
+/**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[] }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, and the expanded tokens per question.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
+  alias_errors: string[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  terms_subtypes: unknown[];
+  neo4j_dropped: string;
+  json_constants: { flags: unknown[]; documents: unknown[] };
 } {
   const terms = Schema.parse(TERMS_SPEC);
+  const subSchema = Schema.parse({
+    entities: [
+      {
+        name: "Employee",
+        aliases: ["Worker"],
+        synonyms: ["staff"],
+        definitions: [{ name: "Active Staff", expression: "a", synonyms: ["personnel"] }],
+      },
+      { name: "Engineer", parent: "Employee" },
+      { name: "PrincipalEngineer", parent: "Engineer" },
+    ],
+  });
   const schema = Schema.parse(SCHEMA_SPEC);
   return {
     warnings: SCHEMA_CASES.map((c) =>
@@ -175,12 +280,35 @@ export function schemaWarnings(): {
         message: w.message,
       })),
     ),
+    alias_errors: [
+      { entities: [{ name: "Person" }, { name: "Company", aliases: ["Person"] }] },
+      {
+        entities: [
+          { name: "Company", aliases: ["org"] },
+          { name: "Team", aliases: ["Org"] },
+        ],
+      },
+      { entities: [{ name: "Straße" }, { name: "Company", aliases: ["STRASSE"] }] },
+      { relations: [{ type: "WORKS_AT" }, { type: "OWNS", aliases: ["works at"] }] },
+      { relations: [{ type: "OWNS", aliases: ["works-at"] }, { type: "WORKS_AT" }] },
+      {
+        relations: [
+          { type: "OWNS", aliases: ["employed by"] },
+          { type: "WORKS_AT", aliases: ["employed-by"] },
+        ],
+      },
+    ].map((spec) => unknownKeyError("schema", spec)),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
+    neo4j_dropped: neo4jExportWarnings(),
+    json_constants: jsonConstants(),
     term_forms: Object.fromEntries(
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
+    terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
+      [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
+    ),
   };
 }
 
@@ -264,6 +392,11 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const USES_SPEC = {
+  entities: [{ name: "Person" }, { name: "Tool" }],
+  relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
+};
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -299,6 +432,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
       ],
     }),
   );
+  const step = ids.stepId(dec, 0);
+  for (const [label, node, type] of [
+    ["DecisionStep", step, "FROM"],
+    ["DecisionStep", step, "TO"],
+  ] as const) {
+    await graph.store.deleteEdgesTouchingByType(graph.namespace, label, node, type);
+  }
+  await graph.insert.facts({ decisions: [restated] });
+  const links: string[][] = [];
+  for (const [from_label, to_label, filters] of [
+    ["Entity", "DecisionTrace", { to_in: [dec] }],
+    ["DecisionTrace", "Entity", { from_in: [dec] }],
+    ["DecisionStep", "Entity", { from_in: [step] }],
+  ] as const) {
+    const edges = await graph.store.matchEdges(graph.namespace, { from_label, to_label, ...filters });
+    links.push(...edges.map((e) => [e.type, e.from_id, e.to_id]));
+  }
+  const repaired = (await graph.decisions.get(dec))!;
+  await graph.insert.facts({ decisions: [restated] });
+  const retried = (await graph.decisions.get(dec))!;
+  out.dec_retry = {
+    links: links.sort((a, b) => comparePy(a[0]!, b[0]!)),
+    unchanged: retried.updated_at.getTime() === repaired.updated_at.getTime(),
+  };
   out.ent_update = toJsonable(
     await graph.entities.update("company:acme", { aliases: ["ACME", "Acme Co"], properties: { hq: "Paris", n: 3 } }),
   );
@@ -316,7 +473,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }),
   );
   await graph.entities.create("Temp Thing", "Thing", { properties: { k: "v" } });
-  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme");
+  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme", {
+    id: "relation:touch-a",
+    properties: { active: 1, flags: [false], count: 1 },
+  });
+  await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme", {
+    id: "relation:touch-b",
+    properties: { active: true, flags: [0], count: 1 },
+  });
+  out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
@@ -325,9 +490,140 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.unsafe_integer = exc.message;
   }
+  const restateSchema: Schema = {
+    entities: [{ name: "Thing", properties: [{ name: "k", type: "string", required: true }] }, { name: "Company" }],
+    relations: [{ type: "TOUCHES", from: { types: ["Thing"] }, to: { types: ["Company"] } }],
+  };
+  out.schema_restate = toJsonable(
+    (
+      await graph.insert.facts(
+        { entities: [{ type: "Thing", name: "Temp Thing", properties: { extra: "ok" } }] },
+        { schema: restateSchema, schema_mode: "strict" },
+      )
+    ).entities[0]?.properties,
+  );
+  try {
+    await graph.insert.facts(
+      { entities: [{ type: "Thing", name: "Temp Thing", properties: { k: null } }] },
+      { schema: restateSchema, schema_mode: "strict" },
+    );
+    out.schema_null_required = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.schema_null_required = exc.message;
+  }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  await graph.insert.facts(
+    { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
+    { source_id: "merge-seed" },
+  );
+  const merged = await graph.insert.facts(
+    {
+      entities: [
+        { type: "Person", name: "Mergia Bob" },
+        { type: "Tool", name: "Mergia Anvil" },
+      ],
+      preferences: [{ subject_entity: "person:mergia-bob", key: "tool", value_entity: "tool:mergia-anvil" }],
+    },
+    { source_id: "merge-doc", resolver: "default" },
+  );
+  await graph.entities.delete("tool:mergia-anvil");
+  const undone = await graph.entities.unmerge(merged.merges[0]!.id);
+  out.unmerge_after_delete = {
+    entity: undone.entity.id,
+    survivor: undone.survivor?.id ?? null,
+    reverted: undone.merge.reverted_at !== null,
+    relations: undone.relations.map((r) => r.id),
+    preferences: undone.preferences.map((p) => p.id),
+    decisions: undone.decisions.map((d) => d.id),
+  };
+  const repeatedMerges: Record<string, unknown> = {};
+  const first = {
+    type: "Person",
+    name: "Bob",
+    aliases: ["Bobby"],
+    external_ids: { crm: "C1" },
+    properties: { one: 1 },
+  };
+  const later = {
+    type: "Person",
+    name: "Bob",
+    aliases: ["Robbie"],
+    external_ids: { crm: "C2" },
+    properties: { two: 2 },
+  };
+  for (const [mode, batches] of [
+    ["one_insert", [[first, later]]],
+    ["across_inserts", [[first], [later]]],
+  ] as const) {
+    const resolved = new SelfGraph(graph.store, { namespace: `${graph.namespace}_${mode}`, resolver: "default" });
+    await resolved.insert.facts({
+      entities: [{ type: "Person", name: "Robert", aliases: ["Bob"], properties: { one: 0 } }],
+    });
+    for (const batch of [...batches, batches.at(-1)!]) await resolved.insert.facts({ entities: [...batch] });
+    const record = (await resolved.entities.merges("person:robert")).items[0]!;
+    const merged = await resolved.entities.get("person:robert");
+    const restored = await resolved.entities.unmerge(record.id);
+    repeatedMerges[mode] = toJsonable({
+      absorbed: record.absorbed,
+      merged,
+      restored: restored.entity,
+      survivor: restored.survivor,
+    });
+  }
+  out.repeated_merges = repeatedMerges;
+  await graph.insert.facts(
+    {
+      entities: [
+        { type: "Database", name: "HydraDB" },
+        { type: "Company", name: "Acme, Inc." },
+      ],
+    },
+    { source_id: "follow-up" },
+  );
+  out.retrieval_overflow = await overflow(graph);
+  const capped = new SelfGraph(graph.store, {
+    namespace: graph.namespace,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  const names = ["a", "b", "c", "d"];
+  await capped.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const uses = names.map((n) => ids.relationId("person:ann", "USES", `tool:${n}`));
+  for (const [i, name] of names.entries()) {
+    await capped.relations.create("person:ann", "USES", `tool:${name}`, {
+      event_time: `${2020 + i}-01-01T00:00:00+00:00`,
+    });
+  }
+  out.resettle_delete = toJsonable(await capped.relations.delete(uses[2]!));
+  const versions: Record<string, unknown> = {};
+  for (const rid of uses.filter((r) => r !== uses[2])) {
+    versions[rid] = await capped.relations.versions(rid, { newest_first: false });
+  }
+  out.resettle_versions = toJsonable(versions);
   return out;
+}
+
+/**
+ * Retrieve under a budget where a near line fits, the next overflows under any counter, and short lines remain.
+ *
+ * @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+ * @return (Promise<{ tight: string; full: string }>): the context at the tight budget and at the default one.
+ */
+async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string }> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_budget` });
+  for (const name of ["Ann", "Bob", "Cid"])
+    await g.entities.create(name, "Person", { id: `person:${name.toLowerCase()}` });
+  await g.relations.create("person:ann", "KNOWS", "person:bob");
+  await g.relations.create("person:bob", "KNOWS", "person:cid", {
+    properties: { note: "met at the old harbour ".repeat(20) },
+  });
+  const tight = await g.retrieve("Ann", { k: 1, depth: 2, budget_tokens: 12 });
+  const full = await g.retrieve("Ann", { k: 1, depth: 2 });
+  return { tight: tight.context, full: full.context };
 }
 
 async function allEvidence(list: (cursor: string | null) => Promise<Page<Evidence>>): Promise<Evidence[]> {
@@ -378,6 +674,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const rows = await store.childNodes(ns, "SourceVersion", sv.id as string, "HAS_CHUNK", "Chunk");
     chunks[sv.id as string] = rows.sort((a, b) => Number(a.index) - Number(b.index));
   }
+  const cutoff = sourceVersions.find((s) => s.source_id === "spec")!.created_at as string;
+  const historical = await graph.retrieve("database", { known_at: cutoff, k: 1, depth: 1 });
   const retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", { depth: 2 });
   const ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", {
     strategy: "ppr",
@@ -403,6 +701,10 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   return toJsonable({
     answerable,
     prune_types: pruned,
+    known_at_sources: {
+      seeds: historical.seeds.map((s) => s.id),
+      counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
+    },
     retrieval_seeded: seeded,
     tiers: termed.tiers,
     entities,
@@ -475,5 +777,44 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
-  return { warnings, versions };
+  await graph.insert.facts({ entities: [{ type: "Person", name: "Cid" }] });
+  await graph.insert.facts({ relations: [link("cid", "acme", 2020)] }, { source_id: "cid-withdrawn" });
+  await graph.insert.text("nothing happened.", { source_id: "cid-withdrawn", replace_source: true });
+  const cidOlder = await graph.insert.facts({ relations: [link("cid", "globex", 2019)] }, { source_id: "cid-globex" });
+  const withdrawn_versions: Record<string, unknown> = {};
+  for (const company of ["acme", "globex"]) {
+    const rid = ids.relationId("person:cid", "WORKS_AT", `company:${company}`);
+    withdrawn_versions[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
+  await graph.insert.facts({
+    entities: [
+      ...["Dan", "Eve"].map((name) => ({ type: "Person", name })),
+      ...["Hooli", "Umbrella", "Wayne"].map((name) => ({ type: "Company", name })),
+    ],
+  });
+  for (const [person, company, year] of [
+    ["dan", "hooli", 2020],
+    ["dan", "umbrella", 2021],
+    ["eve", "hooli", 2022],
+  ] as const) {
+    await graph.insert.facts({ relations: [link(person, company, year)] });
+  }
+  await graph.insert.facts({ relations: [link("eve", "wayne", 2023)] });
+  const deleted = await graph.relations.delete(ids.relationId("person:dan", "WORKS_AT", "company:umbrella"));
+  const delete_versions = (
+    await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
+  ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  return {
+    warnings,
+    versions,
+    withdrawn_warnings: cidOlder.warnings.map((w) => w.code),
+    withdrawn_versions,
+    delete_restored: deleted.restored_relations,
+    delete_versions,
+  };
 }

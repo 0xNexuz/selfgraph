@@ -353,6 +353,8 @@ async def _scan_seeds(
 
     best: list[tuple[Entity, float]] = []
     async for page in scored():
+        if as_of is not None and as_of.known is not None:
+            page = await _ops.with_known_sources(graph.store, ns, page, as_of.known)
         best = heapq.nsmallest(k, [*best, *_seed_scores(page, query_tokens, exact, stats)], key=_seed_rank)
     return best
 
@@ -835,8 +837,9 @@ def _assemble(
     @param decisions (list[DecisionTrace]): the collected decision traces.
     @param names (dict[str, str]): display name for every entity id the context mentions.
     @param dist (dict[str, int]): each entity's closeness rank to the query, lower first (hops, or PageRank rank).
-    @param budget_tokens (int): the maximum estimated tokens to emit; when even the first line does not fit, that
-        line is cut to the budget, so a non-empty subgraph never yields an empty context.
+    @param budget_tokens (int): the maximum estimated tokens to emit; the first line that does not fit ends the
+        context, so a farther line never takes the place of a nearer one, and when even the first line does not fit,
+        that line is cut to the budget, so a non-empty subgraph never yields an empty context.
     @param hubs (Collection[str]): hub entity ids; a relation line through one is marked "(via hub)".
     @return (str): the assembled context text. Certified relations come first among equally close ones and are
         marked "[certified]".
@@ -844,13 +847,17 @@ def _assemble(
     lines: list[str] = []
     first: list[str] = []
     used = 0
+    full = False
 
     def add(line: str, cap: int) -> bool:
-        nonlocal used
+        nonlocal used, full
         if not first:
             first.append(line)
+        if full:
+            return False
         cost = count_tokens(line)
         if used + cost > cap:
+            full = cap >= budget_tokens
             return False
         lines.append(line)
         used += cost
@@ -1006,6 +1013,8 @@ async def retrieve(
 
     await _load(graph, ns, known, dist)
     entities = [known[eid] for eid in dist if eid in known]
+    if as_of is not None and as_of.known is not None:
+        entities = await _ops.with_known_sources(graph.store, ns, entities, as_of.known)
 
     decisions = await _collect_decisions(graph, ns, {r.id for r in relations}, as_of)
     preferences = await _collect_preferences(graph, ns, dist, valid)

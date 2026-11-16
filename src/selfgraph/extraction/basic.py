@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 
+from .._marks import MARK_CLASS
 from ..errors import LLM_HINT
 from ..models import EntityInput, Extraction, InsertWarning, ParsedDocument
 from .extractor import _FALLBACK_TYPE, LLMExtractor, _RelOut, _WarningSink
@@ -27,7 +28,8 @@ _TYPE_MAP = {
     "LAW": "Law",
     "LANGUAGE": "Language",
 }
-_CAP = re.compile(r"[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*)*")
+_WORD = rf"[\w&.'\-{MARK_CLASS}]"
+_CAP = re.compile(rf"[A-Z]{_WORD}*(?:\s+[A-Z]{_WORD}*)*")
 _SENT = re.compile(r"(?<=[.!?])\s+")
 _STOPNAMES = frozenset(
     {

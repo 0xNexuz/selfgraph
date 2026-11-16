@@ -69,6 +69,41 @@ def test_insert_changed_properties_creates_version():
     assert run(g.relations.get("relation:1")).properties == {"k": 2}
 
 
+def test_nested_property_type_changes_on_reinsert_and_update():
+    g = new_graph()
+
+    def facts(value):
+        props = {"flags": [{"active": value}]}
+        return {
+            "entities": [
+                {"name": "Ann", "type": "Person", "properties": props},
+                {"name": "Acme", "type": "Company"},
+            ],
+            "relations": [
+                {"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme", "properties": props}
+            ],
+            "preferences": [
+                {"subject_entity": "person:ann", "key": "employer", "value_entity": "company:acme", "properties": props}
+            ],
+        }
+
+    initial = run(g.insert.facts(facts(0)))
+    entity, relation, pref = initial.entities[0], initial.relations[0], initial.preferences[0]
+    records = [(g.entities, entity.id), (g.relations, relation.id), (g.preferences, pref.id)]
+
+    run(g.insert.facts(facts(False)))
+    for resource, record_id in records:
+        assert run(resource.get(record_id)).properties["flags"][0]["active"] is False
+
+    props = {"flags": [{"active": 0}]}
+    run(g.entities.update(entity.id, properties=props))
+    run(g.relations.update(relation.id, set_properties=props))
+    run(g.preferences.update(pref.id, properties=props))
+    for resource, record_id in records:
+        value = run(resource.get(record_id)).properties["flags"][0]["active"]
+        assert type(value) is int and value == 0
+
+
 def test_entity_merge_rules():
     g = new_graph()
     run(

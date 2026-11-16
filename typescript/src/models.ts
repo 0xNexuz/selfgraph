@@ -266,6 +266,7 @@ export interface DeleteResult {
   deleted_relation_versions: number;
   deleted_decisions: number;
   deleted_preference_versions: number;
+  restored_relations: number;
 }
 
 export interface DecayResult {
