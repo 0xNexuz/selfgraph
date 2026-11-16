@@ -292,6 +292,34 @@ async def write(graph):
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    out["repeated_merges"] = {}
+    first = {
+        "type": "Person",
+        "name": "Bob",
+        "aliases": ["Bobby"],
+        "external_ids": {"crm": "C1"},
+        "properties": {"one": 1},
+    }
+    later = {
+        "type": "Person",
+        "name": "Bob",
+        "aliases": ["Robbie"],
+        "external_ids": {"crm": "C2"},
+        "properties": {"two": 2},
+    }
+    for mode, batches in (("one_insert", [[first, later]]), ("across_inserts", [[first], [later]])):
+        resolved = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_{mode}", resolver="default")
+        await resolved.insert.facts(
+            {"entities": [{"type": "Person", "name": "Robert", "aliases": ["Bob"], "properties": {"one": 0}}]}
+        )
+        for batch in [*batches, batches[-1]]:
+            await resolved.insert.facts({"entities": batch})
+        record = (await resolved.entities.merges("person:robert")).items[0]
+        merged = await resolved.entities.get("person:robert")
+        restored = await resolved.entities.unmerge(record.id)
+        out["repeated_merges"][mode] = to_jsonable(
+            {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
+        )
     return out
 
 
