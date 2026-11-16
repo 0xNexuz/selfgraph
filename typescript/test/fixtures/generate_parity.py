@@ -8,6 +8,7 @@ from selfgraph import _marks, _serde, ids
 from selfgraph._export import obsidian_vault
 from selfgraph._maintenance import lint, relevance_score
 from selfgraph._ops import AsOf, Contradictions, version_as_of
+from selfgraph.errors import ValidationError
 from selfgraph.extraction import chunking
 from selfgraph.extraction.basic import _regex_extract
 from selfgraph.extraction.extractor import LLMExtractor, _is_noise_name, _RelOut
@@ -809,6 +810,7 @@ OSSIE_SCHEMAS = [
             {"name": "Person", "description": "a human", "properties": [{"name": "age", "type": "integer"}]},
             {"name": "Employee", "parent": "Person", "properties": [{"name": "since", "type": "datetime"}]},
             {"name": "Company", "properties": [{"name": "meta", "type": "json"}, {"name": "ok", "type": "boolean"}]},
+            {"name": "Division"},
         ],
         "relations": [
             {
@@ -837,6 +839,29 @@ def ossie_cases():
     for raw in OSSIE_SCHEMAS:
         schema = Schema.model_validate(raw)
         out.append([raw, attempt(schema.to_ossie)])
+    return out
+
+
+ENDPOINT_SCHEMAS = [
+    {
+        "entities": [{"name": "Company", "aliases": ["org"]}],
+        "relations": [{"type": "OWNS", "from": {"types": ["org"]}}],
+    },
+    {"entities": [{"name": "Company"}], "relations": [{"type": "OWNS", "from": {"types": ["company"]}}]},
+    {"entities": [{"name": "Company"}], "relations": [{"type": "OWNS", "from": {"types": ["Firm"]}}]},
+    {"entities": [{"name": "Company"}], "relations": [{"type": "OWNS", "to": {"types": ["Company", "Firm"]}}]},
+    {"relations": [{"type": "OWNS", "from": {"types": ["Firm"]}}]},
+]
+
+
+def endpoint_cases():
+    out = []
+    for raw in ENDPOINT_SCHEMAS:
+        try:
+            Schema.model_validate(raw)
+            out.append([raw, True])
+        except ValidationError:
+            out.append([raw, False])
     return out
 
 
@@ -1237,6 +1262,7 @@ def main():
         "answerability": answerability_cases(),
         "lint": lint_case(),
         "ossie": ossie_cases(),
+        "schema_endpoints": endpoint_cases(),
         "obsidian": obsidian_case(),
         "cypher_names": [[q, list(cypher_names(q))] for q in CYPHER_NAME_QUERIES],
     }

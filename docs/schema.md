@@ -69,6 +69,10 @@ serialize with `schema.model_dump(by_alias=True)` (or
 `model_dump_json(by_alias=True)`) to get the `from` key. A plain `model_dump()`
 writes `from_`.
 
+The `types` of an endpoint name entity types the same way entities do: by name or alias,
+ignoring case, with the parent chain followed. An entity typed `Company` matches an
+endpoint that lists `org`, where `org` is an alias of `Company`.
+
 ### Invalid schemas
 
 An unknown key is rejected ([Unknown keys](inserting.md#unknown-keys)). Names
@@ -83,6 +87,7 @@ first problem by its path:
 | Two entity types with the same name, ignoring case | `entities[1].name: duplicate entity type 'Person'` |
 | A `parent` that is no entity type name or alias | `entities[1].parent: unknown type 'X'` |
 | A `parent` chain that loops back | `entities[0].parent: parent cycle 'A' -> 'B' -> 'A'` |
+| An endpoint type that is no entity type name or alias, in a schema with entities | `relations[0].to.types[1]: unknown type 'B'` |
 | Two relation types equal after normalization | `relations[1].type: duplicate relation type 'works at'` |
 | `max_count` below 1 | `relations[0].from.max_count: must be >= 1` |
 | `min_count` below 0 | `relations[0].to.min_count: must be >= 0` |

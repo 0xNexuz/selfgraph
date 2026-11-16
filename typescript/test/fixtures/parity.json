@@ -11504,6 +11504,9 @@
         "type": "boolean"
        }
       ]
+     },
+     {
+      "name": "Division"
      }
     ],
     "relations": [
@@ -11770,6 +11773,107 @@
    {
     "error": "ValidationError"
    }
+  ]
+ ],
+ "schema_endpoints": [
+  [
+   {
+    "entities": [
+     {
+      "name": "Company",
+      "aliases": [
+       "org"
+      ]
+     }
+    ],
+    "relations": [
+     {
+      "type": "OWNS",
+      "from": {
+       "types": [
+        "org"
+       ]
+      }
+     }
+    ]
+   },
+   true
+  ],
+  [
+   {
+    "entities": [
+     {
+      "name": "Company"
+     }
+    ],
+    "relations": [
+     {
+      "type": "OWNS",
+      "from": {
+       "types": [
+        "company"
+       ]
+      }
+     }
+    ]
+   },
+   true
+  ],
+  [
+   {
+    "entities": [
+     {
+      "name": "Company"
+     }
+    ],
+    "relations": [
+     {
+      "type": "OWNS",
+      "from": {
+       "types": [
+        "Firm"
+       ]
+      }
+     }
+    ]
+   },
+   false
+  ],
+  [
+   {
+    "entities": [
+     {
+      "name": "Company"
+     }
+    ],
+    "relations": [
+     {
+      "type": "OWNS",
+      "to": {
+       "types": [
+        "Company",
+        "Firm"
+       ]
+      }
+     }
+    ]
+   },
+   false
+  ],
+  [
+   {
+    "relations": [
+     {
+      "type": "OWNS",
+      "from": {
+       "types": [
+        "Firm"
+       ]
+      }
+     }
+    ]
+   },
+   true
   ]
  ],
  "obsidian": {

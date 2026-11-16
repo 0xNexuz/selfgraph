@@ -211,6 +211,10 @@ def test_invalid_schema_and_mode_raise_validation_error():
             {"relations": [{"type": "WORKS_AT"}, {"type": "works at"}]},
             "relations[1].type: duplicate relation type 'works at'",
         ),
+        (
+            {"entities": [{"name": "A"}], "relations": [{"type": "R", "to": {"types": ["A", "B"]}}]},
+            "relations[0].to.types[1]: unknown type 'B'",
+        ),
         ({"relations": [{"type": "R", "from": {"max_count": 0}}]}, "relations[0].from.max_count: must be >= 1"),
         ({"relations": [{"type": "R", "to": {"min_count": -1}}]}, "relations[0].to.min_count: must be >= 0"),
         (
@@ -546,3 +550,22 @@ def test_schema_aliases_and_case_canonicalize_types_before_ids_are_derived():
     )
     assert [e.id for e in res.entities] == ["company:acme", "company:globex"]
     assert [(r.from_entity, r.to_entity) for r in res.relations] == [("company:acme", "company:globex")] * 2
+
+
+def test_endpoint_types_resolve_like_entity_types_and_are_only_checked_with_entities():
+    schema = {
+        "entities": [{"name": "Person"}, {"name": "Company", "aliases": ["Org"]}],
+        "relations": [{"type": "WORKS_AT", "from": {"types": ["person"]}, "to": {"types": ["Org"]}}],
+    }
+    facts = Extraction.model_validate(
+        {
+            "entities": [{"type": "Person", "name": "Ann"}, {"type": "Company", "name": "Acme"}],
+            "relations": [{"from_entity": "person:ann", "type": "WORKS_AT", "to_entity": "company:acme"}],
+        }
+    )
+    assert validate_against_schema(facts, as_schema(schema)) == []
+    swapped = facts.model_copy(
+        update={"relations": [facts.relations[0].model_copy(update={"from_entity": "company:acme"})]}
+    )
+    assert [w.code for w in validate_against_schema(swapped, as_schema(schema))] == ["endpoint_type_violation"]
+    assert as_schema({"relations": [{"type": "R", "to": {"types": ["Anything"]}}]}).entities == []
