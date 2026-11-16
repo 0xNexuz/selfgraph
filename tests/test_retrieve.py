@@ -79,6 +79,23 @@ def test_retrieve_strategies_and_depth_bound_traversal():
         run(g.retrieve("team", strategy="sideways"))
 
 
+def test_retrieve_includes_source_passage():
+    llm = extracting_llm([("Person", "Soham"), ("Company", "HydraDB")])
+    g = new_graph(llm=llm)
+    passage = "Soham praised HydraDB for its bitemporal provenance ledger."
+    run(g.insert.text(passage, source_id="m1"))
+    res = run(g.retrieve("Soham HydraDB"))
+    assert "bitemporal provenance ledger" in res.context
+
+
+def test_retrieve_surfaces_preferences():
+    g = _graph()
+    run(g.preferences.create("person:soham", "database", "company:hydradb", strength=0.9))
+    res = run(g.retrieve("what database does Soham prefer"))
+    assert any(p.subject_entity == "person:soham" for p in res.subgraph.preferences)
+    assert "Soham prefers HydraDB (database)" in res.context
+
+
 @pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
 def test_self_relations_count_once_toward_hub_threshold(strategy):
     for loops in (24, 48):
@@ -115,23 +132,6 @@ def test_self_relations_count_once_toward_hub_threshold(strategy):
         assert report.connected
         assert report.verdict == ("uncertain" if is_hub else "answerable")
         assert report.hub_only == ([["ada", "bob"]] if is_hub else [])
-
-
-def test_retrieve_includes_source_passage():
-    llm = extracting_llm([("Person", "Soham"), ("Company", "HydraDB")])
-    g = new_graph(llm=llm)
-    passage = "Soham praised HydraDB for its bitemporal provenance ledger."
-    run(g.insert.text(passage, source_id="m1"))
-    res = run(g.retrieve("Soham HydraDB"))
-    assert "bitemporal provenance ledger" in res.context
-
-
-def test_retrieve_surfaces_preferences():
-    g = _graph()
-    run(g.preferences.create("person:soham", "database", "company:hydradb", strength=0.9))
-    res = run(g.retrieve("what database does Soham prefer"))
-    assert any(p.subject_entity == "person:soham" for p in res.subgraph.preferences)
-    assert "Soham prefers HydraDB (database)" in res.context
 
 
 def test_stopword_query_returns_nothing_and_an_empty_query_is_rejected():

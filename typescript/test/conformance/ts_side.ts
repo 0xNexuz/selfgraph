@@ -1230,14 +1230,6 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await graph.retrieve("Grace Hopper COBOL Jane acme", { strategy: walk, k: 1, depth: 4, max_nodes: 3 });
     tight[walk] = { entities: r.subgraph.entities.map((e) => e.id), relations: r.subgraph.relations.map((x) => x.id) };
   }
-  const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
-  const answerable = [];
-  for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
-  const seeded: Record<string, unknown> = {};
-  for (const tier of ["bm25", "synonyms"] as const) {
-    const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
-    seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
-  }
   const loops = new SelfGraph(store, { namespace: `${ns}_loops` });
   await loops.insert.facts({
     entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
@@ -1254,6 +1246,14 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   });
   const loopResult = await loops.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true });
   const loopReport = await loops.checkAnswerable("Ada Bob");
+  const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
+  const answerable = [];
+  for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
+  const seeded: Record<string, unknown> = {};
+  for (const tier of ["bm25", "synonyms"] as const) {
+    const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
+    seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
+  }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
@@ -1273,12 +1273,6 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
     },
     retrieval_seeded: seeded,
-    self_loop_hubs: {
-      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
-      hubs: loopResult.hubs,
-      verdict: loopReport.verdict,
-      hub_only: loopReport.hub_only,
-    },
     tiers: termed.tiers,
     entities,
     relations,
@@ -1286,6 +1280,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    self_loop_hubs: {
+      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
+      hubs: loopResult.hubs,
+      verdict: loopReport.verdict,
+      hub_only: loopReport.hub_only,
+    },
     raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,

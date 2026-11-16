@@ -1376,12 +1376,6 @@ async def dump(graph, ns):
         walk: await graph.retrieve("Grace Hopper COBOL Jane acme", strategy=walk, k=1, depth=4, max_nodes=3)
         for walk in ("bfs", "dfs")
     }
-    termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
-    answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
-    seeded = {
-        tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
-        for tier in ("bm25", "synonyms")
-    }
     loops = SelfGraph(store=store, namespace=f"{ns}_loops")
     await loops.insert.facts(
         {
@@ -1403,6 +1397,12 @@ async def dump(graph, ns):
     )
     loop_result = await loops.retrieve("Ada", k=1, depth=3, skip_hubs=True)
     loop_report = await loops.check_answerable("Ada Bob")
+    termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
+    answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
+    seeded = {
+        tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
+        for tier in ("bm25", "synonyms")
+    }
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1415,12 +1415,6 @@ async def dump(graph, ns):
                 "counts": {e.id: e.source_count for e in historical.subgraph.entities},
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
-            "self_loop_hubs": {
-                "entities": sorted(e.id for e in loop_result.subgraph.entities),
-                "hubs": loop_result.hubs,
-                "verdict": loop_report.verdict,
-                "hub_only": loop_report.hub_only,
-            },
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
@@ -1428,6 +1422,12 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "self_loop_hubs": {
+                "entities": sorted(e.id for e in loop_result.subgraph.entities),
+                "hubs": loop_result.hubs,
+                "verdict": loop_report.verdict,
+                "hub_only": loop_report.hub_only,
+            },
             "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "filters": filters,
