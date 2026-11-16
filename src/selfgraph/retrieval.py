@@ -353,6 +353,8 @@ async def _scan_seeds(
 
     best: list[tuple[Entity, float]] = []
     async for page in scored():
+        if as_of is not None and as_of.known is not None:
+            page = await _ops.with_known_sources(graph.store, ns, page, as_of.known)
         best = heapq.nsmallest(k, [*best, *_seed_scores(page, query_tokens, exact, stats)], key=_seed_rank)
     return best
 
@@ -1011,6 +1013,8 @@ async def retrieve(
 
     await _load(graph, ns, known, dist)
     entities = [known[eid] for eid in dist if eid in known]
+    if as_of is not None and as_of.known is not None:
+        entities = await _ops.with_known_sources(graph.store, ns, entities, as_of.known)
 
     decisions = await _collect_decisions(graph, ns, {r.id for r in relations}, as_of)
     preferences = await _collect_preferences(graph, ns, dist, valid)
