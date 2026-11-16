@@ -189,6 +189,21 @@ function suite(spec: StoreSpec): void {
     expect(then.context).toContain("ann WORKS_AT acme");
     const again = await g.insert.text("ann KNOWS bob\nann READS news", { source_id: "hr", replace_source: true });
     expect(again.source_diff).toEqual({ kept: [knows, reads].sort(), added: [], retired: [] });
+    const readded = await g.insert.text("ann WORKS_AT acme\nann KNOWS bob", {
+      source_id: "hr",
+      event_time: utc(2026),
+      replace_source: true,
+    });
+    expect(readded.source_diff).toEqual({ kept: [knows], added: [works], retired: [reads] });
+    const manual = await g.relations.create("thing:ann", "READS", "thing:news", {
+      evidence: [{ source_id: "hr", quote: "hand" }],
+    });
+    const withManual = await g.insert.text("ann WORKS_AT acme\nann KNOWS bob\nann READS news", {
+      source_id: "hr",
+      event_time: utc(2027),
+      replace_source: true,
+    });
+    expect(withManual.source_diff).toEqual({ kept: [knows, manual.id, works].sort(), added: [], retired: [] });
   });
 
   it("keeps certified facts on a replaced source and needs a source id", async () => {
@@ -199,6 +214,8 @@ function suite(spec: StoreSpec): void {
     expect(result.source_diff!.retired).toEqual([]);
     expect(result.warnings.map((w) => w.code)).toEqual(["certified_kept"]);
     expect((await g.relations.get(rel.id))!.is_current).toBe(true);
+    const later = await g.insert.text("ann KNOWS bob\nann READS news", { source_id: "hr", replace_source: true });
+    expect(later.warnings.map((w) => w.code)).toEqual([]);
     expect((await g.insert.text("ann KNOWS bob", { source_id: "hr" })).source_diff).toBeNull();
     await expect(g.insert.text("ann KNOWS bob", { replace_source: true })).rejects.toThrow(
       "replace_source needs a source_id",

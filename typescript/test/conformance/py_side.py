@@ -833,6 +833,25 @@ async def write(graph):
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
     ]
+    replaced_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_src", extraction="regex")
+    rv1 = await replaced_src.insert.text("Alice works at Acme. Alice knows Bob.", source_id="hr")
+    await replaced_src.relations.certify(rv1.relations[1].id, by="hr")
+    rv2 = await replaced_src.insert.text("Bob works at Globex.", source_id="hr", replace_source=True)
+    await replaced_src.insert.facts({"entities": [{"type": "Thing", "name": "Initech"}]})
+    await replaced_src.relations.create(
+        "thing:bob", "RELATED_TO", "thing:initech", evidence=[{"source_id": "hr", "quote": "hand"}]
+    )
+    rv3 = await replaced_src.insert.text(
+        "Alice works at Acme. Bob works at Globex. Bob works at Initech.", source_id="hr", replace_source=True
+    )
+    out["replace_source_steps"] = to_jsonable(
+        {
+            "v2_diff": rv2.source_diff,
+            "v2_warnings": [w.code for w in rv2.warnings],
+            "v3_diff": rv3.source_diff,
+            "v3_warnings": [w.code for w in rv3.warnings],
+        }
+    )
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
