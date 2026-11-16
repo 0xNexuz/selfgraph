@@ -1011,7 +1011,7 @@ def _rewrite_key(rw: MergeRewrite) -> tuple[Any, ...]:
     """
     key = (rw.kind, rw.id)
     if rw.kind == "relation" and rw.dropped:
-        return (*key, *(rw.original.get(name) for name in ("id", "from_entity", "type", "to_entity")))
+        return (*key, *(rw.original.get(name) for name in ("from_entity", "type", "to_entity")))
     return key
 
 

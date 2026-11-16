@@ -1153,7 +1153,7 @@ async function writeMerges(
 function rewriteKey(rw: MergeRewrite): string {
   const key: unknown[] = [rw.kind, rw.id];
   if (rw.kind === "relation" && rw.dropped)
-    key.push(...["id", "from_entity", "type", "to_entity"].map((name) => rw.original[name] ?? null));
+    key.push(...["from_entity", "type", "to_entity"].map((name) => rw.original[name] ?? null));
   return dumps(key);
 }
 
