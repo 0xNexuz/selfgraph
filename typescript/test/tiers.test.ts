@@ -224,6 +224,42 @@ function suite(spec: StoreSpec): void {
     expect((await open().checkAnswerable("anything")).verdict).toBe("not_answerable");
   });
 
+  it("check_answerable ignores possessive and contraction endings", async () => {
+    const spec: Schema = {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [{ type: "WORKS_AT" }, { type: "BACKS", synonyms: ["John's employer"] }],
+    };
+    const g = open({ schema: spec });
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Ann" },
+        { type: "Company", name: "Acme" },
+        { type: "Company", name: "Ann's Bakery" },
+      ],
+      relations: [worksAt("person:ann", "company:acme")],
+    });
+    for (const question of ["What is Ann's company?", "What is Ann’s company?", "Doesn't Ann work at Acme?"]) {
+      const report = await g.checkAnswerable(question);
+      expect([report.verdict, report.missing], question).toEqual(["answerable", []]);
+    }
+    expect((await g.checkAnswerable("What is Ann's company?")).terms.map((t) => t.term)).toEqual(["ann", "company"]);
+    for (const question of ["What is Ann's Bakery?", "What is Ann’s Bakery?"]) {
+      const terms = (await g.checkAnswerable(question)).terms;
+      expect(terms.map((t) => [t.term, t.status])).toEqual([["ann bakery", "entity"]]);
+    }
+    for (const question of ["Who is John's employer?", "Who is John’s employer?"]) {
+      const terms = (await g.checkAnswerable(question)).terms;
+      expect(terms.map((t) => [t.term, t.status])).toEqual([["john employer", "schema_only"]]);
+    }
+  });
+
+  it("check_answerable keeps won't and can't whole", async () => {
+    const g = open();
+    await g.insert.facts({ entities: [{ type: "Person", name: "Ann" }] });
+    expect((await g.checkAnswerable("Why can't Ann stay?")).terms.map((t) => t.term)).toEqual(["can't", "ann", "stay"]);
+    expect((await g.checkAnswerable("Won’t Ann stay?")).terms.map((t) => t.term)).toEqual(["won't", "ann", "stay"]);
+  });
+
   it("synonym seeding finds entities by a type synonym", async () => {
     const g = open({ schema: TERMS });
     await g.insert.facts({

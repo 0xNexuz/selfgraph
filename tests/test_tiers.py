@@ -184,6 +184,40 @@ def test_check_answerable_grounds_schema_synonyms_definitions_and_plurals():
     assert run(fresh_graph("tier").check_answerable("anything")).verdict == "not_answerable"
 
 
+def test_check_answerable_ignores_possessive_and_contraction_endings():
+    spec = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [{"type": "WORKS_AT"}, {"type": "BACKS", "synonyms": ["John's employer"]}],
+    }
+    g = fresh_graph("tier", schema=spec)
+    facts = {
+        "entities": [
+            {"type": "Person", "name": "Ann"},
+            {"type": "Company", "name": "Acme"},
+            {"type": "Company", "name": "Ann's Bakery"},
+        ],
+        "relations": [works_at("acme")],
+    }
+    run(g.insert.facts(facts))
+    for question in ["What is Ann's company?", "What is Ann’s company?", "Doesn't Ann work at Acme?"]:
+        report = run(g.check_answerable(question))
+        assert (report.verdict, report.missing) == ("answerable", []), question
+    assert [t.term for t in run(g.check_answerable("What is Ann's company?")).terms] == ["ann", "company"]
+    for question in ["What is Ann's Bakery?", "What is Ann’s Bakery?"]:
+        assert [(t.term, t.status) for t in run(g.check_answerable(question)).terms] == [("ann bakery", "entity")]
+    for question in ["Who is John's employer?", "Who is John’s employer?"]:
+        assert [(t.term, t.status) for t in run(g.check_answerable(question)).terms] == [
+            ("john employer", "schema_only")
+        ]
+
+
+def test_check_answerable_keeps_wont_and_cant_whole():
+    g = fresh_graph("tier")
+    run(g.insert.facts({"entities": [{"type": "Person", "name": "Ann"}]}))
+    assert [t.term for t in run(g.check_answerable("Why can't Ann stay?")).terms] == ["can't", "ann", "stay"]
+    assert [t.term for t in run(g.check_answerable("Won’t Ann stay?")).terms] == ["won't", "ann", "stay"]
+
+
 def test_synonym_seeding_finds_entities_by_a_type_synonym():
     g = fresh_graph("tier", schema=TERMS)
     run(g.insert.facts({"entities": [{"type": "Company", "name": "Acme"}, {"type": "Person", "name": "Ann"}]}))
