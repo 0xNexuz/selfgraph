@@ -656,6 +656,48 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     preferences: undone.preferences.map((p) => p.id),
     decisions: undone.decisions.map((d) => d.id),
   };
+  const stepsGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:unmerge-steps`,
+    resolver: "fuzzy",
+  });
+  await stepsGraph.initialize();
+  const ibm = ids.entityId("Company", "International Business Machines");
+  const bigBlue = ids.entityId("Company", "Big Blue");
+  const bob = ids.entityId("Person", "Bob");
+  const loop1 = ids.relationId(bigBlue, "OWNS", ibm);
+  const loop2 = ids.relationId(bigBlue, "PARENT_OF", ibm);
+  const bobRel = ids.relationId(bob, "WORKS_AT", ibm);
+  const mergedSteps = await stepsGraph.insert.facts({
+    entities: [
+      { type: "Company", name: "International Business Machines", external_ids: { ticker: "IBM" } },
+      { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+      { type: "Person", name: "Robert", aliases: ["Bob"] },
+      { type: "Person", name: "Bob" },
+    ],
+    relations: [
+      { from_entity: bigBlue, type: "OWNS", to_entity: ibm },
+      { from_entity: bigBlue, type: "PARENT_OF", to_entity: ibm },
+      { from_entity: bob, type: "WORKS_AT", to_entity: ibm },
+    ],
+    decisions: [{ title: "acquisition", steps: [loop1, loop2, bobRel] }],
+  });
+  const mergeBB = mergedSteps.merges.find((m) => m.absorbed_id === bigBlue)!;
+  const mergeBob = mergedSteps.merges.find((m) => m.absorbed_id === bob)!;
+  const [decision] = mergedSteps.decisions;
+  const decisionSteps = async (did: string): Promise<string[]> =>
+    (await stepsGraph.decisions.get(did))!.steps.map((s) => s.relation_id);
+  const afterMerge = await decisionSteps(decision!.id);
+  const afterBbMerge = await stepsGraph.entities.unmerge(mergeBB.id);
+  const afterBb = await decisionSteps(decision!.id);
+  const afterBobMerge = await stepsGraph.entities.unmerge(mergeBob.id);
+  const afterBob = await decisionSteps(decision!.id);
+  out.unmerge_decision_steps = {
+    after_merge: afterMerge,
+    after_bb: afterBb,
+    after_bob: afterBob,
+    returned_after_bb: afterBbMerge.decisions[0]!.steps.map((s) => s.relation_id),
+    returned_after_bob: afterBobMerge.decisions[0]!.steps.map((s) => s.relation_id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",
@@ -691,6 +733,38 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  const mixed = new SelfGraph(graph.store, { namespace: `${graph.namespace}_mixed_case`, resolver: "fuzzy" });
+  await mixed.insert.facts({ entities: [{ type: "Person", name: "Jane Doe", aliases: ["JD"] }] });
+  const mixedFuzzy = await mixed.insert.facts({
+    entities: [
+      { type: "person", name: "Jane Does" },
+      { type: "thing", name: "JD" },
+    ],
+  });
+  const orgSchema = {
+    entities: [
+      { name: "Organization", aliases: ["Org"] },
+      { name: "Company", parent: "Organization" },
+    ],
+  };
+  const mixedSchema = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_mixed_schema`,
+    resolver: "default",
+    schema: orgSchema,
+  });
+  await mixedSchema.insert.facts({
+    entities: [{ type: "Organization", name: "International Business Machines", aliases: ["IBM"] }],
+  });
+  const mixedOrg = await mixedSchema.insert.facts({
+    entities: [
+      { type: "company", name: "IBM" },
+      { type: "org", name: "Big Blue", aliases: ["IBM"] },
+    ],
+  });
+  out.mixed_case_merges = [
+    mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+    mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+  ];
   await graph.insert.facts(
     {
       entities: [
@@ -722,6 +796,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const moved = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_moved`,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  await moved.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const use = (name: string, year: number) => ({
+    from_entity: "person:ann",
+    type: "USES",
+    to_entity: `tool:${name}`,
+    event_time: `${year}-01-01T00:00:00+00:00`,
+  });
+  await moved.insert.facts({ relations: [use("a", 2020), use("b", 2021), use("c", 2022)] });
+  const updated = await moved.relations.update(uses[2]!, { event_time: "2019-01-01T00:00:00+00:00" });
+  await moved.insert.facts({ relations: [use("d", 2023)] });
+  await moved.insert.facts({ relations: [use("d", 2018)] });
+  const movedVersions: Record<string, unknown> = {};
+  for (const rid of uses) movedVersions[rid] = await moved.relations.versions(rid, { newest_first: false });
+  out.resettle_moved = toJsonable({
+    updated: [updated.revision, updated.is_current, updated.invalidated_by],
+    versions: movedVersions,
+  });
   const requireIdentifierCases: Record<string, string> = {};
   for (const name of ["id", "external_ids", "a b", "1x", ""]) {
     try {
@@ -731,6 +829,31 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }
   }
   out.require_identifier = requireIdentifierCases;
+  const extraNs = `${graph.namespace}:extra`;
+  await graph.store.upsertNodes(
+    extraNs,
+    "Extra",
+    [
+      ["extra:batch-1", { id: "extra:batch-1", name: "batch-1" }],
+      ["extra:batch-2", { id: "extra:batch-2", name: "batch-2" }],
+    ],
+    { extra_label: "CustomLabel" },
+  );
+  await graph.store.upsertNode(
+    extraNs,
+    "Extra",
+    "extra:single",
+    { id: "extra:single", name: "single" },
+    { extra_label: "CustomLabel" },
+  );
+  const primaryNode = await graph.store.getNode(extraNs, "Extra", "extra:batch-1");
+  const extraBatchNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:batch-2");
+  const extraSingleNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:single");
+  out.extra_label = {
+    primary: primaryNode ? (primaryNode.id as string) : null,
+    batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
+    single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
+  };
   return out;
 }
 
@@ -945,6 +1068,67 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
   const delete_versions = (
     await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
   ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  await graph.insert.facts({
+    entities: [
+      ...["Frank", "Grace", "Heidi", "Ivan"].map((name) => ({ type: "Person", name })),
+      ...["Cyberdyne", "Tyrell", "Soylent", "Vandelay"].map((name) => ({ type: "Company", name })),
+    ],
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:tyrell",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+      {
+        from_entity: "person:grace",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:ivan",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+    ],
+  });
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:vandelay",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+    ],
+  });
+  const subms: Record<string, unknown> = {};
+  for (const [person, company] of [
+    ["frank", "cyberdyne"],
+    ["heidi", "soylent"],
+  ]) {
+    const rid = ids.relationId(`person:${person}`, "WORKS_AT", `company:${company}`);
+    subms[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
   return {
     warnings,
     versions,
@@ -952,5 +1136,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     withdrawn_versions,
     delete_restored: deleted.restored_relations,
     delete_versions,
+    subms,
   };
 }
