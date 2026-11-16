@@ -207,7 +207,9 @@ A merge record holds:
 - each rewritten relation, preference, and decision, in its original and
   rewritten form.
 
-Inserting the same merge again updates the one record.
+Inserting the same merge again updates the one record. A repeat's aliases,
+external ids, and properties fold into the absorbed input as an upsert of the
+absorbed id would fold them, so unmerging restores them too.
 
 `unmerge` does the following:
 

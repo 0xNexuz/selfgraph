@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
-import json
 import logging
 import os
 import sys
@@ -114,8 +113,8 @@ def _kv(pairs: list[str] | None, flag: str, *, text: bool = False) -> dict[str, 
             out[key] = value
             continue
         try:
-            out[key] = json.loads(value)
-        except json.JSONDecodeError:
+            out[key] = parse_json(value)
+        except ValidationError:
             out[key] = value
     return out
 

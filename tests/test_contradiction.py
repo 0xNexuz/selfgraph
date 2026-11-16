@@ -475,3 +475,75 @@ def test_undated_restatement_keeps_event_time_and_supersede_order():
     assert [r.id for r in run(g.relations.list()).items] == [GLOBEX]
     as_of = {r.id for r in run(g.retrieve("Ann", as_of=utc(2023))).subgraph.relations}
     assert as_of == {GLOBEX}
+
+
+def test_withdrawn_relations_do_not_trigger_supersede_or_lose_invalidation():
+    g = graph(contradiction="supersede")
+    insert(g, works_at("acme", 2020), source_id="src-acme")
+    run(g.insert.text("nothing happened.", source_id="src-acme", replace_source=True))
+    older = insert(g, works_at("globex", 2019), source_id="src-globex")
+    assert older.warnings == []
+    assert [r.id for r in run(g.relations.list(from_entity="person:ann")).items] == [GLOBEX]
+    [acme] = run(g.relations.versions(ACME))
+    assert (acme.revision, acme.is_current) == (1, False)
+    assert acme.invalidated_by and acme.invalidated_by.startswith("sv:")
+
+    g = fresh_graph("contra", schema=SPEC, contradiction="supersede", resolver="default")
+    ann_smith = "person:ann-smith"
+    smith_acme = ids.relation_id(ann_smith, "WORKS_AT", "company:acme")
+    run(
+        g.insert.facts(
+            {
+                "entities": [*PEOPLE, {"type": "Person", "name": "Ann Smith", "aliases": ["Annie"]}],
+                "relations": [
+                    {
+                        "from_entity": ann_smith,
+                        "type": "WORKS_AT",
+                        "to_entity": "company:acme",
+                        "event_time": utc(2020),
+                    }
+                ],
+            },
+            source_id="src-withdrawn",
+        )
+    )
+    run(g.insert.text("nothing happened.", source_id="src-withdrawn", replace_source=True))
+    insert(
+        g,
+        {"from_entity": ann_smith, "type": "WORKS_AT", "to_entity": "company:globex", "event_time": utc(2024)},
+        source_id="src-globex",
+    )
+    merged = run(
+        g.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Annie"}],
+                "relations": [
+                    {
+                        "from_entity": "person:annie",
+                        "type": "WORKS_AT",
+                        "to_entity": "company:initech",
+                        "event_time": utc(2022),
+                    }
+                ],
+            },
+            source_id="src-initech",
+        )
+    )
+    [acme] = run(g.relations.versions(smith_acme))
+    assert (acme.revision, acme.is_current) == (1, False)
+    assert acme.invalidated_by and acme.invalidated_by.startswith("sv:")
+    run(g.entities.unmerge(merged.merges[0].id))
+    [after] = run(g.relations.versions(smith_acme))
+    assert (after.revision, after.is_current, after.invalidated_by) == (1, False, acme.invalidated_by)
+
+    class Judge:
+        async def generate(self, *, system, user, output):
+            return output(retired=[1])
+
+    llm_spec = {**SPEC, "relations": [*SPEC["relations"], {"type": "LEFT"}]}
+    g = fresh_graph("contra", schema=llm_spec, contradiction="llm", extraction="regex", llm=Judge())
+    run(g.insert.facts({"entities": PEOPLE, "relations": [works_at("acme", 2020)]}))
+    run(g.relations.create("person:ann", "LEFT", "company:acme", event_time=utc(2022)))
+    late = insert(g, works_at("globex", 2019))
+    assert [w.code for w in late.warnings] == ["contradiction_out_of_order"]
+    assert run(g.relations.list(from_entity="person:ann", type="WORKS_AT")).items == []

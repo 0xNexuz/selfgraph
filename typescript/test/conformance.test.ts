@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { KuzuStore, SelfGraph } from "../src/index.js";
+import { ids, KuzuStore, SelfGraph } from "../src/index.js";
 import type { Schema } from "../src/schema.js";
 import { conformanceStore, dump, SUPERSEDE_SCHEMA, schemaWarnings, supersede, write } from "./conformance/ts_side.js";
 import { reachable, selectedStores, tempKuzu, uniqueNs } from "./helpers.js";
@@ -119,6 +119,7 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const pyOps = py("write", store, nsPy);
         const tsOps = await ts(store, nsTs, write);
+        expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
@@ -142,6 +143,20 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
           mask(roundFloats(bySource(pyReadsPy))),
         );
         expect(mask(tsOps), `both libraries return the same results ${where}`).toEqual(mask(pyOps));
+        const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
+        const step = ids.stepId(dec, 0);
+        for (const ops of [pyOps, tsOps]) {
+          expect((ops as { dec_retry: unknown }).dec_retry).toEqual({
+            links: [
+              ["CONSIDERED", dec, "database:postgres"],
+              ["FROM", step, "company:acme"],
+              ["MADE_DECISION", "person:jane-doe", dec],
+              ["RESULTED_IN", dec, "database:hydradb"],
+              ["TO", step, "database:hydradb"],
+            ],
+            unchanged: true,
+          });
+        }
         rmSync(evidence, { recursive: true, force: true });
       },
     );
