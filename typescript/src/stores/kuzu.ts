@@ -81,6 +81,7 @@ interface KuzuModule {
 const DATABASES = new Map<string, KuzuDatabase>();
 const OPEN_STORES = new Map<string, number>();
 const WRITE_QUEUES = new Map<string, object>();
+const PATH_QUEUES = new Map<string, Promise<unknown>>();
 const MAX_SKIP = 10_000_000;
 
 function normalize(value: unknown): unknown {
@@ -223,7 +224,6 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     OPEN_STORES.set(this.path, (OPEN_STORES.get(this.path) ?? 0) + 1);
     return new kuzu.Connection(db);
   });
-  private queue: Promise<unknown> = Promise.resolve();
 
   /**
    * Share one write queue with every store on this path, since they share one database.
@@ -277,12 +277,27 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     }
   }
 
+  /**
+   * Run a body in the per-path statement queue, beside the cached database, so every statement on the path,
+   * from every store, runs one at a time.
+   *
+   * @param fn (() => Promise<T>): the body.
+   * @return (Promise<T>): the body's result, once every statement ahead of it on the path has run.
+   */
+  private async onPath<T>(fn: () => Promise<T>): Promise<T> {
+    const key = this.path;
+    const run = (PATH_QUEUES.get(key) ?? Promise.resolve()).then(fn);
+    PATH_QUEUES.set(
+      key,
+      run.catch(() => undefined),
+    );
+    return run;
+  }
+
   protected async _run(query: string, params?: Record<string, unknown> | null): Promise<CypherResult> {
     this.requireOpen();
-    const run = this.queue.then(() => this.exec(query, params));
-    this.queue = run.catch(() => undefined);
     try {
-      return await run;
+      return await this.onPath(() => this.exec(query, params));
     } catch (exc) {
       if (exc instanceof StoreError) throw exc;
       throw kuzuError(exc, "Kuzu query failed");
@@ -304,6 +319,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     const db = DATABASES.get(key);
     DATABASES.delete(key);
     WRITE_QUEUES.delete(key);
+    PATH_QUEUES.delete(key);
     await db?.close?.();
   }
 
@@ -311,8 +327,9 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   async close(): Promise<void> {
     this.closed = true;
     await this.conn.release(async (conn) => {
-      await this.queue;
-      await conn.close?.();
+      await this.onPath(async () => {
+        await conn.close?.();
+      });
       const open = (OPEN_STORES.get(this.path) ?? 1) - 1;
       if (open > 0) OPEN_STORES.set(this.path, open);
       else {

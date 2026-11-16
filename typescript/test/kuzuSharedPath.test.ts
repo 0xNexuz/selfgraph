@@ -62,4 +62,16 @@ describe("two KuzuStore instances over one database", () => {
     await second.close();
     expect(store(path).writeQueueKey()).not.toBe(shared);
   });
+
+  it("initialize the same fresh path from two stores at once", async () => {
+    const path = tempKuzu("selfgraph-shared-");
+    const options = { namespace: uniqueNs("shared"), schema: MAX_ONE };
+    const first = new SelfGraph(store(path), options);
+    const second = new SelfGraph(store(path), options);
+    await Promise.all([first.initialize(), second.initialize()]);
+    await first.insert.facts({ entities: [{ type: "Person", name: "Ann" }] });
+    expect((await first.entities.list()).items.length).toBe(1);
+    await first.close();
+    await second.close();
+  });
 });
