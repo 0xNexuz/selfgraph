@@ -827,6 +827,14 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     answerable,
+    filters:
+      store instanceof KuzuStore
+        ? {
+            aliases_equals: await store.matchNodes(ns, "Entity", { equals: { aliases: ["JD", "J. Doe"] } }),
+            aliases_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [["JD", "J. Doe"]] } }),
+            empty_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [] } }),
+          }
+        : {},
     prune_types: pruned,
     known_at_sources: {
       seeds: historical.seeds.map((s) => s.id),
