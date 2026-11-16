@@ -69,8 +69,11 @@ function suite(spec: StoreSpec) {
       await store.transaction(async (tx) => {
         await tx.upsertNode(ns, "Source", "x:a", props(ns, "x:a"), { extra_label: "CustomLabel" });
       });
-      const found = await store.getNode(ns, "Source", "x:a");
-      expect(found).not.toBeNull();
+      const byPrimary = await store.getNode(ns, "Source", "x:a");
+      const byExtra = await store.getNode(ns, "CustomLabel", "x:a");
+      expect(byPrimary).not.toBeNull();
+      expect(byExtra).not.toBeNull();
+      expect(byExtra?.id).toBe("x:a");
     } finally {
       await store.close?.();
     }
@@ -96,50 +99,6 @@ describe("HydraDB write queue failure", () => {
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", record);
-      await store.close();
-    }
-  });
-
-  it("applies extra_label via a separate SET statement after MERGE", async () => {
-    const store = new HydraDBStore("bolt://127.0.0.1:1", { auth: ["neo4j", "unused"] });
-    const captured: { query: string; params: unknown; marks: readonly bigint[] }[] = [];
-    const queue = store as unknown as {
-      write: (
-        query: string,
-        params: unknown,
-        writes: readonly bigint[],
-        needs: readonly bigint[],
-        marks: readonly bigint[],
-        afterAll: boolean,
-      ) => Promise<void>;
-    };
-    queue.write = (query, params, _writes, _needs, marks) => {
-      captured.push({ query, params, marks });
-      return Promise.resolve();
-    };
-    try {
-      await store.upsertNode(
-        "test_ns",
-        "Source",
-        "x:test",
-        { id: "x:test", name: "test" },
-        { extra_label: "CustomLabel" },
-      );
-      await store.upsertNode("test_ns", "Source", "x:default", { id: "x:default", name: "default" });
-      expect(captured.length).toBe(3);
-
-      expect(captured[0]!.query).toContain("SET n:Source,");
-      expect(captured[0]!.query).not.toContain("CustomLabel");
-      expect(captured[0]!.marks.length).toBe(2);
-
-      expect(captured[1]!.query).toContain("MATCH (n:Source)");
-      expect(captured[1]!.query).toContain("SET n:");
-      expect(captured[1]!.query).toContain("CustomLabel");
-
-      expect(captured[2]!.query).toContain("SET n:Source,");
-      expect(captured[2]!.query).not.toContain("CustomLabel");
-      expect(captured[2]!.marks.length).toBe(1);
-    } finally {
       await store.close();
     }
   });

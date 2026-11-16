@@ -456,28 +456,28 @@ class HydraDBStore(AutoCommitStore):
         """
         marks = [_label_key(label), _label_key(extra_label)] if extra_label is not None else [_label_key(label)]
         for batch in _by_columns(rows):
+            ids = [r["id"] for r in batch]
             await self._write(
                 f"UNWIND $rows AS row MERGE (n {{id: row.id}}) SET n:{label}, {_sets('n', batch[0], ('id',))}",
                 {"rows": batch},
-                [r["id"] for r in batch],
+                ids,
                 needs or (),
                 marks,
                 after_all=label in (L_EVIDENCE, L_MERGE),
             )
             if extra_label is not None:
-                ids = [r["id"] for r in batch]
                 await self._write(
                     f"MATCH (n:{label}) WHERE n.id IN $iids SET n:{quote_label(extra_label)}",
                     {"iids": ids},
                     ids,
-                    [r["id"] for r in batch],
+                    ids,
                     marks,
                     after_all=label in (L_EVIDENCE, L_MERGE),
                 )
             if _QUEUING.get() is self:
-                self._pending_nodes.update((label, r["id"]) for r in batch)
+                self._pending_nodes.update((label, i) for i in ids)
                 if extra_label is not None:
-                    self._pending_nodes.update((extra_label, r["id"]) for r in batch)
+                    self._pending_nodes.update((extra_label, i) for i in ids)
 
     async def entities_matching(self, ns: str, keys: Iterable[str]) -> list[dict]:
         """Read the entities sharing a match key with some keys, through the key index instead of a scan.

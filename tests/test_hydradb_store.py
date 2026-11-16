@@ -76,9 +76,9 @@ def test_upsert_nodes_applies_extra_label():
                 [("x:a", _props(ns, "x:a")), ("x:b", _props(ns, "x:b"))],
                 extra_label="CustomLabel",
             )
-        found = [await store.get_node(ns, "Source", i) is not None for i in ("x:a", "x:b")]
-        res = await store._run("MATCH (n:CustomLabel) WHERE n.ns = $ns RETURN n.id AS id ORDER BY n.id", {"ns": ns})
+        found_primary = [await store.get_node(ns, "Source", i) for i in ("x:a", "x:b")]
+        found_extra = [await store.get_node(ns, "CustomLabel", i) for i in ("x:a", "x:b")]
         await store.close()
-        return found, [r["id"] for r in res.rows]
+        return [f["id"] for f in found_primary if f], [f["id"] for f in found_extra if f]
 
-    assert run(go()) == ([True, True], ["x:a", "x:b"])
+    assert run(go()) == (["x:a", "x:b"], ["x:a", "x:b"])
