@@ -217,7 +217,11 @@ export function autoCommit<B extends AbstractConstructor<object>>(Base: B): B & 
   abstract class AutoCommitted extends Base implements AutoCommit {
     async lockNode(_ns: string, _label: string, _id: string): Promise<void> {}
 
-    /** The object whose queue this store's writes join; a store that shares a backend overrides it. */
+    /**
+     * The object whose queue this store's writes join; a store that shares a backend overrides it.
+     *
+     * @return (object): the key whose write queue this store joins, which is the store itself by default.
+     */
     writeQueueKey(): object {
       return this;
     }

@@ -225,7 +225,11 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   });
   private queue: Promise<unknown> = Promise.resolve();
 
-  /** Share one write queue with every store on this path, since they share one database. */
+  /**
+   * Share one write queue with every store on this path, since they share one database.
+   *
+   * @return (object): the key this path holds in the shared write-queue map, one per open database.
+   */
   override writeQueueKey(): object {
     let key = WRITE_QUEUES.get(this.path);
     if (key === undefined) {
