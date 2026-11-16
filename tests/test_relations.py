@@ -95,3 +95,21 @@ def test_multiple_relations_same_endpoints():
     assert r1.id != r2.id
     both = run(g.relations.list(from_entity="person:soham"))
     assert {x.type for x in both.items} == {"WORKS_AT", "FOUNDED"}
+
+
+def test_whole_number_floats_are_stored_and_read_as_ints_like_typescript():
+    from selfgraph._serde import _loads
+
+    g = new_graph()
+    create_entities(g, "Person:Ann", "Company:Acme")
+    props = {"weight": 2.0, "ratio": 0.5, "zero": -0.0, "big": 1e16, "nested": {"level": 3.0, "list": [1.0, 1.5]}}
+    created = run(g.relations.create("person:ann", "WORKS_AT", "company:acme", properties=props))
+    expected = {"weight": 2, "ratio": 0.5, "zero": -0.0, "big": 1e16, "nested": {"level": 3, "list": [1, 1.5]}}
+    for rel in (created, run(g.relations.get(created.id))):
+        assert rel.properties == expected
+        assert type(rel.properties["weight"]) is int and type(rel.properties["nested"]["list"][0]) is int
+        assert type(rel.properties["zero"]) is float and type(rel.properties["big"]) is float
+    assert "weight=2," in run(g.retrieve("Ann")).context
+    assert run(g.relations.update(created.id, set_properties={"weight": 2})).revision == created.revision
+    stored = _loads('{"w": 2.0, "f": 2.5}', {})
+    assert stored == {"w": 2, "f": 2.5} and type(stored["w"]) is int
