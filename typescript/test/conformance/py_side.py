@@ -136,6 +136,24 @@ SCHEMA_CASES = [
 
 GRAPH_TYPES = {"company:stored": "Company", "org:o": "org"}
 
+OWN_KEY_SPEC = {
+    "entities": [
+        {
+            "name": "Car",
+            "properties": [
+                {"name": "constructor", "type": "string"},
+                {"name": "toString", "type": "string", "required": True},
+            ],
+        }
+    ]
+}
+OWN_KEY_CASES = [
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"constructor": "Ferrari", "toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {"constructor": 5, "toString": "x"}}]},
+    {"entities": [{"type": "Car", "name": "SF-24", "properties": {}}]},
+]
+
 UNKNOWN_KEY_CASES = [
     ["facts", {"entites": []}],
     ["facts", {"entities": [{"type": "P", "nmae": "x"}]}],
@@ -262,6 +280,11 @@ def schema_warnings():
             for facts in cases
         ],
         "alias_errors": alias_errors,
+        "own_keys": [
+            [{"code": w.code, "message": w.message} for w in validate_against_schema(facts, own_key_schema)]
+            for own_key_schema in [Schema.model_validate(OWN_KEY_SPEC)]
+            for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
+        ],
         "parents": [parent_outcome(spec) for spec in parent_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
@@ -521,6 +544,19 @@ async def write(graph):
         properties={"active": True, "flags": [0], "count": 1.0},
     )
     out["dedupe_conflicts"] = (await graph.maintenance.dedupe_relations()).groups[0].conflicts
+    await graph.relations.create(
+        "thing:temp-thing", "BUILT_BY", "company:acme", id="relation:built-a", properties={"year": 2024}
+    )
+    await graph.relations.create(
+        "thing:temp-thing",
+        "BUILT_BY",
+        "company:acme",
+        id="relation:built-b",
+        properties={"constructor": "Ferrari", "toString": "x"},
+    )
+    out["dedupe_own_keys"] = to_jsonable(
+        [g for g in (await graph.maintenance.dedupe_relations()).groups if g.survivor == "relation:built-a"]
+    )
     await graph.preferences.create("thing:temp-thing", "color", "company:acme", strength=1.0)
     try:
         await graph.insert.facts(None)

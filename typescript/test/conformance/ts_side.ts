@@ -173,6 +173,24 @@ const GRAPH_TYPES = new Map([
   ["org:o", "org"],
 ]);
 
+const OWN_KEY_SPEC = {
+  entities: [
+    {
+      name: "Car",
+      properties: [
+        { name: "constructor", type: "string" },
+        { name: "toString", type: "string", required: true },
+      ],
+    },
+  ],
+};
+const OWN_KEY_CASES = [
+  { entities: [{ type: "Car", name: "SF-24", properties: { toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: "Ferrari", toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: { constructor: 5, toString: "x" } }] },
+  { entities: [{ type: "Car", name: "SF-24", properties: {} }] },
+];
+
 const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["facts", { entites: [] }],
   ["facts", { entities: [{ type: "P", nmae: "x" }] }],
@@ -253,6 +271,7 @@ export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
   alias_errors: string[];
+  own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
   tables: unknown;
   term_forms: unknown;
@@ -300,6 +319,12 @@ export function schemaWarnings(): {
         ],
       },
     ].map((spec) => unknownKeyError("schema", spec)),
+    own_keys: OWN_KEY_CASES.map((c) =>
+      validateAgainstSchema(Extraction.parse(c), Schema.parse(OWN_KEY_SPEC)).map((w) => ({
+        code: w.code,
+        message: w.message,
+      })),
+    ),
     parents: [
       { entities: [{ name: "Person" }, { name: "Manager", parent: "person" }] },
       {
@@ -520,6 +545,17 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     properties: { active: true, flags: [0], count: 1 },
   });
   out.dedupe_conflicts = (await graph.maintenance.dedupeRelations()).groups[0]!.conflicts;
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-a",
+    properties: { year: 2024 },
+  });
+  await graph.relations.create("thing:temp-thing", "BUILT_BY", "company:acme", {
+    id: "relation:built-b",
+    properties: { constructor: "Ferrari", toString: "x" },
+  });
+  out.dedupe_own_keys = toJsonable(
+    (await graph.maintenance.dedupeRelations()).groups.filter((g) => g.survivor === "relation:built-a"),
+  );
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
   try {
     await graph.insert.facts(null as never);
