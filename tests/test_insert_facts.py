@@ -194,3 +194,33 @@ def test_insert_facts_event_time_accepts_iso_text():
     with pytest.raises(ValidationError):
         run(g.insert.facts(PAYLOAD, event_time="soon"))
     run(g.close())
+
+
+@pytest.mark.parametrize("stored", [True, False])
+def test_conflicting_relation_id_does_not_write_any_facts(stored):
+    g = fresh_graph("relation_identity")
+    run(g.entities.create("Ada", "Person"))
+    run(g.entities.create("Bob", "Person"))
+    original = {"id": "relation:team", "from_entity": "person:ada", "type": "KNOWS", "to_entity": "person:bob"}
+    conflicting = {**original, "to_entity": "person:cy"}
+    if stored:
+        run(g.relations.create("person:ada", "KNOWS", "person:bob", id="relation:team"))
+
+    with pytest.raises(ValidationError, match="already exists with different endpoints/type"):
+        run(
+            g.insert.facts(
+                {
+                    "entities": [{"type": "Person", "name": "Cy"}],
+                    "relations": [conflicting] if stored else [original, conflicting],
+                },
+                source_id="bad-import",
+            )
+        )
+
+    assert run(g.entities.get("person:cy")) is None
+    assert run(g.store.match_nodes(g.namespace, "SourceVersion")) == []
+    relation = run(g.relations.get("relation:team"))
+    if stored:
+        assert relation.to_entity == "person:bob"
+    else:
+        assert relation is None

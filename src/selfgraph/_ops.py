@@ -1750,6 +1750,28 @@ async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, Relati
     return found
 
 
+async def require_relation_identities(runner: Any, ns: str, relations: list[RelationInput]) -> None:
+    """Reject conflicting explicit relation ids before the insert writes any facts or provenance.
+
+    @param runner (Any): the graph runner.
+    @param ns (str): namespace.
+    @param relations (list[RelationInput]): the final canonical relations to write.
+    @return (None): nothing; raises ValidationError if a relation id names different endpoints or types.
+    """
+    explicit = [(rel.id, rel) for rel in relations if rel.id is not None]
+    if not explicit:
+        return
+    ids = {rid for rid, _ in explicit}
+    stored = await _current_relations(runner, ns, explicit)
+    identities = {rid: (edge["from_id"], edge["type"], edge["to_id"]) for rid, edge in stored.items()}
+    for rel in relations:
+        rtype = _ids.normalize_rel_type(rel.type)
+        rid = rel.id or _ids.relation_id(rel.from_entity, rtype, rel.to_entity)
+        if rid in ids:
+            identity = (rel.from_entity, rtype, rel.to_entity)
+            _require_same_ends(rid, identities.setdefault(rid, identity), identity)
+
+
 class RelationCap(NamedTuple):
     canonical: str
     types: tuple[str, ...]

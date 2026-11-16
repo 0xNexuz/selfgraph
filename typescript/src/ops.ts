@@ -1695,6 +1695,36 @@ export async function currentRelations(
   return found;
 }
 
+/**
+ * Reject conflicting explicit relation ids before the insert writes any facts or provenance.
+ *
+ * @param runner (Runner): the graph runner.
+ * @param ns (string): namespace.
+ * @param relations (readonly ParsedRelationInput[]): the final canonical relations to write.
+ */
+export async function requireRelationIdentities(
+  runner: Runner,
+  ns: string,
+  relations: readonly ParsedRelationInput[],
+): Promise<void> {
+  const explicit = relations.flatMap((rel) => (rel.id === null ? [] : [[rel.id, rel] as const]));
+  if (!explicit.length) return;
+  const idsInBatch = new Set(explicit.map(([rid]) => rid));
+  const stored = await currentRelations(runner, ns, explicit);
+  const identities = new Map<string, readonly [string, string, string]>(
+    [...stored].map(([rid, edge]) => [rid, [edge.from_id, edge.type, edge.to_id]]),
+  );
+  for (const rel of relations) {
+    const rtype = ids.normalizeRelType(rel.type);
+    const rid = rel.id ?? ids.relationId(rel.from_entity, rtype, rel.to_entity);
+    if (!idsInBatch.has(rid)) continue;
+    const identity = [rel.from_entity, rtype, rel.to_entity] as const;
+    const previous = identities.get(rid);
+    if (previous === undefined) identities.set(rid, identity);
+    else requireSameEnds(rid, previous, identity);
+  }
+}
+
 export interface RelationCap {
   canonical: string;
   types: readonly string[];

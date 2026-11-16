@@ -173,6 +173,28 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it.each([true, false])("rejects conflicting explicit relation ids before writing (stored=%s)", async (stored) => {
+    const g = fresh();
+    await g.entities.create("Ada", "Person");
+    await g.entities.create("Bob", "Person");
+    const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
+    const conflicting = { ...original, to_entity: "person:cy" };
+    if (stored) await g.relations.create("person:ada", "KNOWS", "person:bob", { id: "relation:team" });
+
+    await expect(
+      g.insert.facts(
+        { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
+        { source_id: "bad-import" },
+      ),
+    ).rejects.toThrow(/already exists with different endpoints\/type/);
+
+    expect(await g.entities.get("person:cy")).toBeNull();
+    expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
+    const relation = await g.relations.get("relation:team");
+    if (stored) expect(relation?.to_entity).toBe("person:bob");
+    else expect(relation).toBeNull();
+  });
+
   it("canonicalizes explicit entity ids on every input path", async () => {
     const g = fresh();
     expect((await g.entities.create("X", "T", { id: "T:X" })).id).toBe("t:x");
