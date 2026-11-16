@@ -1129,7 +1129,13 @@ def _forward(
 
 
 async def _forward_siblings(
-    runner: Any, ns: str, merge_id: str, moved: list[tuple[MergeRewrite, MergeRewrite]], restored: dict[str, str]
+    runner: Any,
+    ns: str,
+    merge_id: str,
+    moved: list[tuple[MergeRewrite, MergeRewrite]],
+    restored: dict[str, str],
+    live: list[dict[str, Any]] | None = None,
+    entries: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     """Update the live merges that share a rewrite with an unmerged one, so unmerging them later replays exactly.
 
@@ -1142,10 +1148,14 @@ async def _forward_siblings(
     @param merge_id (str): the merge being reverted.
     @param moved (list[tuple[MergeRewrite, MergeRewrite]]): each rewrite the unmerge replayed, with its new location.
     @param restored (dict[str, str]): the relation ids the unmerge moved, old to new.
+    @param live (list[dict[str, Any]] | None): optional cached live merges.
+    @param entries (dict[str, list[dict[str, Any]]] | None): optional cached entries.
     @return (None): nothing.
     """
-    live = [props for props in await scan_live_merges(runner, ns) if props["id"] != merge_id]
-    entries = await _load_entries(runner, ns, live)
+    if live is None:
+        live = [props for props in await scan_live_merges(runner, ns) if props["id"] != merge_id]
+    if entries is None:
+        entries = await _load_entries(runner, ns, live)
     for props in live:
         sib = _decode_merge(props, entries[props["id"]])
         rewrites = [_forward(rw, moved, restored) for rw in sib.rewrites]
@@ -1220,6 +1230,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         return original if await exists(original) else rewritten
 
     restored: dict[str, str] = {}
+    orig_restored: dict[str, str] = {}
     moved: list[tuple[MergeRewrite, MergeRewrite]] = []
     relations = []
     for rw in (r for r in rec.rewrites if r.kind == "relation"):
@@ -1257,6 +1268,8 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
                 runner, ns, [(edge, versions[0].invalidated_by, versions[0].invalidated_at)], at
             )
         restored[rw.id] = rel.id
+        orig_id = original.id or _ids.relation_id(original.from_entity, original.type, original.to_entity)
+        orig_restored[orig_id] = rel.id
         relations.append(rel)
         moved.append((rw, _moved_to(rw, rel.id, _dump(back, exclude={"evidence"}), existed)))
         await _ops._repoint_steps(runner, ns, touching, restored)
@@ -1290,7 +1303,26 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         moved.append((rw, _moved_to(rw, pref.id, _dump(back), existed)))
 
     decisions = []
-    for rw in (r for r in rec.rewrites if r.kind == "decision"):
+    decision_rws = [r for r in rec.rewrites if r.kind == "decision"]
+    dropped_sibling_ids: set[str] = set()
+    sibling_step_map: dict[str, str] = {}
+    live_merges: list[dict[str, Any]] | None = None
+    live_entries: dict[str, list[dict[str, Any]]] | None = None
+    if decision_rws:
+        live_merges = [props for props in await scan_live_merges(runner, ns) if props["id"] != merge_id]
+        live_entries = await _load_entries(runner, ns, live_merges)
+        for props in live_merges:
+            sib = _decode_merge(props, live_entries[props["id"]])
+            for srw in sib.rewrites:
+                if srw.kind == "relation":
+                    sorig = RelationInput.model_validate(srw.original)
+                    sorig_id = sorig.id or _ids.relation_id(sorig.from_entity, sorig.type, sorig.to_entity)
+                    if srw.dropped:
+                        dropped_sibling_ids.add(sorig_id)
+                    else:
+                        sibling_step_map[sorig_id] = restored.get(srw.id, srw.id)
+
+    for rw in decision_rws:
         original = DecisionTraceInput.model_validate(rw.original)
         rewritten = DecisionTraceInput.model_validate(rw.rewritten)
         actor = await end(original.actor_entity, rewritten.actor_entity)
@@ -1316,9 +1348,21 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         alternatives = [
             await end(o, r) for o, r in zip(original.alternative_entities, rewritten.alternative_entities, strict=True)
         ]
+        restored_steps = []
+        for s in original.steps:
+            if s in dropped_sibling_ids and s not in orig_restored:
+                continue
+            if s in orig_restored:
+                restored_steps.append(orig_restored[s])
+            elif s in sibling_step_map:
+                restored_steps.append(sibling_step_map[s])
+            elif s in restored:
+                restored_steps.append(restored[s])
+            elif await _ops.relation_exists(runner, ns, s):
+                restored_steps.append(s)
         back = base.model_copy(
             update={
-                "steps": steps,
+                "steps": restored_steps,
                 "actor_entity": actor,
                 "outcome_entity": outcome,
                 "alternative_entities": [a for a in alternatives if a is not None and await exists(a)],
@@ -1344,7 +1388,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         moved.append((rw, _moved_to(rw, trace.id, _dump(back), existed)))
 
     if moved:
-        await _forward_siblings(runner, ns, rec.id, moved, restored)
+        await _forward_siblings(runner, ns, rec.id, moved, restored, live=live_merges, entries=live_entries)
     survivor = None
     if await exists(rec.survivor_id):
         survivor = await _ops.update_entity(

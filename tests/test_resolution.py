@@ -238,6 +238,83 @@ def test_within_batch_needs_fuzzy():
     assert [(r.id, r.from_entity, r.to_entity) for r in restored.relations] == [(rid, BIG_BLUE, IBM)]
 
 
+def test_unmerge_restores_decision_steps_dropped_as_self_loops():
+    rid_loop1 = relation_id(BIG_BLUE, "OWNS", IBM)
+    rid_loop2 = relation_id(BIG_BLUE, "PARENT_OF", IBM)
+    rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
+    rid_robert = relation_id(ROBERT_ID, "WORKS_AT", IBM)
+    batch = {
+        "entities": [
+            IBM_SEED,
+            {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
+            ROBERT,
+            BOB,
+        ],
+        "relations": [
+            {"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM},
+            {"from_entity": BIG_BLUE, "type": "PARENT_OF", "to_entity": IBM},
+            {"from_entity": BOB_ID, "type": "WORKS_AT", "to_entity": IBM},
+        ],
+        "decisions": [{"title": "acquisition", "steps": [rid_loop1, rid_loop2, rid_bob]}],
+    }
+
+    g = fresh_graph("res", resolver="fuzzy")
+    res = run(g.insert.facts(batch))
+    assert len(res.merges) == 2
+    merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
+    merge_bob = next(m for m in res.merges if m.absorbed_id == BOB_ID)
+    [dec] = res.decisions
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
+
+    restored = run(g.entities.unmerge(merge_bb.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop1, rid_loop2, rid_robert]
+    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_loop1, rid_loop2, rid_robert]
+
+    restored2 = run(g.entities.unmerge(merge_bob.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop1, rid_loop2, rid_bob]
+    assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop1, rid_loop2, rid_bob]
+
+    g2 = fresh_graph("res", resolver="fuzzy")
+    res2 = run(g2.insert.facts(batch))
+    merge_bob2 = next(m for m in res2.merges if m.absorbed_id == BOB_ID)
+    merge_bb2 = next(m for m in res2.merges if m.absorbed_id == BIG_BLUE)
+    [dec2] = res2.decisions
+    restored3 = run(g2.entities.unmerge(merge_bob2.id))
+    assert [s.relation_id for s in run(g2.decisions.get(dec2.id)).steps] == [rid_bob]
+    assert [s.relation_id for s in restored3.decisions[0].steps] == [rid_bob]
+
+    restored4 = run(g2.entities.unmerge(merge_bb2.id))
+    assert [s.relation_id for s in run(g2.decisions.get(dec2.id)).steps] == [rid_loop1, rid_loop2, rid_bob]
+    assert [s.relation_id for s in restored4.decisions[0].steps] == [rid_loop1, rid_loop2, rid_bob]
+
+
+def test_unmerge_restores_step_for_relation_dropped_by_a_later_merge():
+    g = fresh_graph("res", resolver="fuzzy")
+    _seed(g, {"type": "Person", "name": "Jane Doe", "aliases": ["JD"]})
+    rid = relation_id(JD, "KNOWS", JANE_DOES)
+    res = run(
+        g.insert.facts(
+            {
+                **_people("JD", "Jane Does"),
+                "relations": [{"from_entity": JD, "type": "KNOWS", "to_entity": JANE_DOES}],
+                "decisions": [{"title": "knows", "steps": [rid]}],
+            }
+        )
+    )
+    [dec] = res.decisions
+    merge_jd = next(m for m in res.merges if m.absorbed_id == JD)
+    merge_jd_does = next(m for m in res.merges if m.absorbed_id == JANE_DOES)
+    current_id = relation_id(JD, "KNOWS", JANE)
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == []
+
+    restored = run(g.entities.unmerge(merge_jd.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [current_id]
+    assert [s.relation_id for s in restored.decisions[0].steps] == [current_id]
+
+    run(g.entities.unmerge(merge_jd_does.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid]
+
+
 def test_insert_result_lists_each_entity_and_relation_once_after_a_merge():
     g = fresh_graph("res", resolver="fuzzy")
     batch = [IBM_SEED, {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}}, BOB]

@@ -664,6 +664,49 @@ async def write(graph):
         "preferences": [p.id for p in undone.preferences],
         "decisions": [d.id for d in undone.decisions],
     }
+    steps_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:unmerge-steps", resolver="fuzzy")
+    await steps_graph.initialize()
+    ibm = ids.entity_id("Company", "International Business Machines")
+    big_blue = ids.entity_id("Company", "Big Blue")
+    bob = ids.entity_id("Person", "Bob")
+    loop1 = ids.relation_id(big_blue, "OWNS", ibm)
+    loop2 = ids.relation_id(big_blue, "PARENT_OF", ibm)
+    bob_rel = ids.relation_id(bob, "WORKS_AT", ibm)
+    merged_steps = await steps_graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Company", "name": "International Business Machines", "external_ids": {"ticker": "IBM"}},
+                {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
+                {"type": "Person", "name": "Robert", "aliases": ["Bob"]},
+                {"type": "Person", "name": "Bob"},
+            ],
+            "relations": [
+                {"from_entity": big_blue, "type": "OWNS", "to_entity": ibm},
+                {"from_entity": big_blue, "type": "PARENT_OF", "to_entity": ibm},
+                {"from_entity": bob, "type": "WORKS_AT", "to_entity": ibm},
+            ],
+            "decisions": [{"title": "acquisition", "steps": [loop1, loop2, bob_rel]}],
+        }
+    )
+    merge_bb = next(m for m in merged_steps.merges if m.absorbed_id == big_blue)
+    merge_bob = next(m for m in merged_steps.merges if m.absorbed_id == bob)
+    [decision] = merged_steps.decisions
+
+    async def decision_steps(did):
+        return [s.relation_id for s in (await steps_graph.decisions.get(did)).steps]
+
+    after_merge = await decision_steps(decision.id)
+    after_bb_merge = await steps_graph.entities.unmerge(merge_bb.id)
+    after_bb = await decision_steps(decision.id)
+    after_bob_merge = await steps_graph.entities.unmerge(merge_bob.id)
+    after_bob = await decision_steps(decision.id)
+    out["unmerge_decision_steps"] = {
+        "after_merge": after_merge,
+        "after_bb": after_bb,
+        "after_bob": after_bob,
+        "returned_after_bb": [s.relation_id for s in after_bb_merge.decisions[0].steps],
+        "returned_after_bob": [s.relation_id for s in after_bob_merge.decisions[0].steps],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",
@@ -758,6 +801,31 @@ async def write(graph):
     out["resettle_delete"] = to_jsonable(await capped.relations.delete(uses[2]))
     out["resettle_versions"] = to_jsonable(
         {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
+    )
+    moved = SelfGraph(
+        store=graph.store, namespace=f"{graph.namespace}_moved", schema=USES_SPEC, contradiction="supersede"
+    )
+    await moved.insert.facts(
+        {"entities": [{"type": "Person", "name": "Ann"}, *({"type": "Tool", "name": n} for n in "abcd")]}
+    )
+
+    def use(name, year):
+        return {
+            "from_entity": "person:ann",
+            "type": "USES",
+            "to_entity": f"tool:{name}",
+            "event_time": datetime(year, 1, 1, tzinfo=timezone.utc),
+        }
+
+    await moved.insert.facts({"relations": [use("a", 2020), use("b", 2021), use("c", 2022)]})
+    updated = await moved.relations.update(uses[2], event_time=datetime(2019, 1, 1, tzinfo=timezone.utc))
+    await moved.insert.facts({"relations": [use("d", 2023)]})
+    await moved.insert.facts({"relations": [use("d", 2018)]})
+    out["resettle_moved"] = to_jsonable(
+        {
+            "updated": [updated.revision, updated.is_current, updated.invalidated_by],
+            "versions": {rid: await moved.relations.versions(rid, newest_first=False) for rid in uses},
+        }
     )
     require_identifier_cases = {}
     for name in ["id", "external_ids", "a b", "1x", ""]:
