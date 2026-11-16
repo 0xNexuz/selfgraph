@@ -234,10 +234,24 @@ def json_constants():
     }
 
 
+def tables_reference_errors():
+    """Draft a schema with each invalid column reference and return the resulting error messages.
+
+    @return (list[str]): one message per reference, including unhashable ones.
+    """
+    messages = []
+    for reference in ({"table": "users"}, ["users"], 5):
+        try:
+            Schema.from_tables([{"name": "orders", "columns": [{"name": "user_id", "references": reference}]}])
+        except ValidationError as exc:
+            messages.append(str(exc))
+    return messages
+
+
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -290,6 +304,7 @@ def schema_warnings():
         "parents": [parent_outcome(spec) for spec in parent_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
+        "tables_errors": tables_reference_errors(),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
         "neo4j_dropped": neo4j_export_warnings(),
         "json_constants": json_constants(),
