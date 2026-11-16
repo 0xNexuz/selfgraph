@@ -944,6 +944,7 @@ async def write(graph):
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    out["vault_names"] = await vault_names(graph)
     try:
         await graph.insert.facts(
             {
@@ -1286,6 +1287,27 @@ async def overflow(graph):
     tight = await g.retrieve("Ann", k=1, depth=2, budget_tokens=12)
     full = await g.retrieve("Ann", k=1, depth=2)
     return {"tight": tight.context, "full": full.context}
+
+
+async def vault_names(graph):
+    """Export a vault whose names outrun a file name, so each is cut on a character boundary and numbered.
+
+    @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+    @return (list): the sorted note paths.
+    """
+    g = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_vault")
+    names = [
+        "B" * 300,
+        "\ufeff" + "C" * 300,
+        "\u00e9" * 150,
+        "B" * 199 + "\u00e9" + "B" * 50,
+        "\u5317" * 150,
+        "z" * 210 + "a",
+        "z" * 210 + "b",
+    ]
+    for name in names:
+        await g.entities.create(name, "Thing")
+    return sorted(await g.export_obsidian())
 
 
 async def all_evidence(list_fn, oid):

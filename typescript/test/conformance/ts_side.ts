@@ -969,6 +969,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  out.vault_names = await vaultNames(graph);
   try {
     await graph.insert.facts(
       {
@@ -1159,6 +1160,21 @@ async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string
   const tight = await g.retrieve("Ann", { k: 1, depth: 2, budget_tokens: 12 });
   const full = await g.retrieve("Ann", { k: 1, depth: 2 });
   return { tight: tight.context, full: full.context };
+}
+
+async function vaultNames(graph: SelfGraph): Promise<string[]> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_vault` });
+  const names = [
+    "B".repeat(300),
+    `\uFEFF${"C".repeat(300)}`,
+    "\u00e9".repeat(150),
+    `${"B".repeat(199)}\u00e9${"B".repeat(50)}`,
+    "\u5317".repeat(150),
+    `${"z".repeat(210)}a`,
+    `${"z".repeat(210)}b`,
+  ];
+  for (const name of names) await g.entities.create(name, "Thing");
+  return Object.keys(await g.exportObsidian()).sort(comparePy);
 }
 
 async function allEvidence(list: (cursor: string | null) => Promise<Page<Evidence>>): Promise<Evidence[]> {
