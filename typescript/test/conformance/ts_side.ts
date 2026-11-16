@@ -1,5 +1,5 @@
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
-import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable } from "../../src/index.js";
+import { FalkorDBStore, fromTables, ids, KuzuStore, SelfGraph, toJsonable, ValidationError } from "../../src/index.js";
 import { comparePy } from "../../src/internal/py.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
@@ -256,21 +256,6 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
-/**
- * Run a write that should be refused and report what happened, so the two SDKs must agree on the refusal.
- *
- * @param fn (() => Promise<unknown>): the write to attempt.
- * @return (Promise<string>): "accepted" when it went through, otherwise the error message.
- */
-async function refusal(fn: () => Promise<unknown>): Promise<string> {
-  try {
-    await fn();
-    return "accepted";
-  } catch (exc) {
-    return `refused: ${(exc as Error).message}`;
-  }
-}
-
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -306,9 +291,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   await graph.entities.create("Temp Thing", "Thing", { properties: { k: "v" } });
   await graph.relations.create("thing:temp-thing", "TOUCHES", "company:acme");
   await graph.preferences.create("thing:temp-thing", "color", "company:acme", { strength: 1.0 });
-  out.unsafe_integer = await refusal(() =>
-    graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never),
-  );
+  try {
+    await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
+    out.unsafe_integer = "accepted";
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.unsafe_integer = exc.message;
+  }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
   return out;
