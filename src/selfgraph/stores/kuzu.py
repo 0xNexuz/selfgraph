@@ -164,7 +164,6 @@ class KuzuStore(AutoCommitStore):
                 _DATABASES[key] = kuzu.Database(path, **db_kwargs)
             except Exception as exc:  # noqa: BLE001
                 raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
-        self._path = path
         self._cache_key = key
         self._db = _DATABASES[key]
         self._connect = partial(kuzu.Connection, self._db)

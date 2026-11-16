@@ -331,7 +331,10 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
    * @param path (string): the database path.
    */
   static async closeDatabase(path: string): Promise<void> {
-    const key = databasePath(path);
+    await KuzuStore.closeCachedDatabase(databasePath(path));
+  }
+
+  private static async closeCachedDatabase(key: string | symbol): Promise<void> {
     const db = DATABASES.get(key);
     DATABASES.delete(key);
     await db?.close?.();
@@ -347,9 +350,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       if (open > 0) OPEN_STORES.set(this.cacheKey, open);
       else {
         OPEN_STORES.delete(this.cacheKey);
-        const db = DATABASES.get(this.cacheKey);
-        DATABASES.delete(this.cacheKey);
-        await db?.close?.();
+        await KuzuStore.closeCachedDatabase(this.cacheKey);
       }
     });
   }
