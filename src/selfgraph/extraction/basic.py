@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import functools
 import logging
 import re
+import sys
+import unicodedata
 
 from ..errors import LLM_HINT
 from ..models import EntityInput, Extraction, InsertWarning, ParsedDocument
@@ -27,7 +30,35 @@ _TYPE_MAP = {
     "LAW": "Law",
     "LANGUAGE": "Language",
 }
-_CAP = re.compile(r"[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*)*")
+
+
+@functools.cache
+def _marks() -> str:
+    """Build a character-class body of every combining mark, since `re` has no Unicode property classes.
+
+    @return (str): ranges of code points in the Mn, Mc, and Me categories.
+    """
+    out, start = [], None
+    for cp in range(sys.maxunicode + 2):
+        mark = cp <= sys.maxunicode and unicodedata.category(chr(cp))[0] == "M"
+        if mark and start is None:
+            start = cp
+        elif not mark and start is not None:
+            out.append(f"{chr(start)}-{chr(cp - 1)}" if cp - 1 > start else chr(start))
+            start = None
+    return "".join(out)
+
+
+@functools.cache
+def _cap() -> re.Pattern[str]:
+    """Compile the capitalised-name pattern, letting combining marks continue a name so NFD text is not cut.
+
+    @return (re.Pattern[str]): the compiled pattern.
+    """
+    word = rf"[\w&.'\-{_marks()}]"
+    return re.compile(rf"[A-Z]{word}*(?:\s+[A-Z]{word}*)*")
+
+
 _SENT = re.compile(r"(?<=[.!?])\s+")
 _STOPNAMES = frozenset(
     {
@@ -106,7 +137,7 @@ def _spacy_extract(nlp, text: str):
 def _regex_extract(text: str):
     entities, relations = [], []
     for sentence in _SENT.split(text):
-        found = (m.group(0) for line in sentence.splitlines() for m in _CAP.finditer(line))
+        found = (m.group(0) for line in sentence.splitlines() for m in _cap().finditer(line))
         raw = (" ".join(n.split()).strip(".,;:!?") for n in found)
         names = list(dict.fromkeys(n for n in raw if n and n.lower() not in _STOPNAMES))
         entities.extend(EntityInput(type=_FALLBACK_TYPE, name=name) for name in names)

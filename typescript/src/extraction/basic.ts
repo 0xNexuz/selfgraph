@@ -5,7 +5,7 @@ import { insertWarning, type ParsedDocument, type ParsedExtraction } from "../mo
 import type { Extractor } from "../protocols.js";
 import { assembleExtraction, FALLBACK_TYPE, type RawEntity, type RawRelation, WarningSink } from "./extractor.js";
 
-const WORD = "[\\p{L}\\p{N}_&.'\\-]";
+const WORD = "[\\p{L}\\p{N}\\p{M}_&.'\\-]";
 const CAP = new RegExp(`[A-Z]${WORD}*(?:[${PY_WS_CLASS}]+[A-Z]${WORD}*)*`, "gu");
 const SENT = new RegExp(`(?<=[.!?])[${PY_WS_CLASS}]+`, "u");
 const STOPNAMES = new Set(

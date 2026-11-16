@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 
 import pytest
 from helpers import FakeLLM, extracting_llm, fresh_graph, new_graph, run
@@ -110,6 +111,21 @@ def test_regex_extraction_stops_names_at_line_breaks(text, names):
     res = run(fresh_graph("lines", extraction="regex").insert.text(text))
     assert sorted(e.name for e in res.entities) == sorted(names)
     assert [w.code for w in res.warnings] == ["basic_extraction"]
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD"])
+def test_regex_extraction_keeps_names_with_combining_marks_whole(form):
+    text = unicodedata.normalize(form, "Zoë met José García at Café Société in São Paulo.")
+    res = run(fresh_graph("marks", extraction="regex").insert.text(text))
+    names = ["Zoë", "José García", "Café Société", "São Paulo"]
+    assert sorted(e.name for e in res.entities) == sorted(names)
+
+
+def test_regex_extraction_keeps_a_mark_with_no_precomposed_form():
+    res = run(fresh_graph("marks", extraction="regex").insert.text("Ann met Q\u0307ing Lee at Acme."))
+    assert sorted(e.name for e in res.entities) == sorted(
+        ["Ann", unicodedata.normalize("NFC", "Q\u0307ing Lee"), "Acme"]
+    )
 
 
 def test_regex_extraction_still_relates_names_in_a_sentence_wrapped_across_lines():

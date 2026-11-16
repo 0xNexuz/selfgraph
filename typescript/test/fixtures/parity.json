@@ -3381,6 +3381,7 @@
   "The rain fell. A Storm hit Paris; Berlin, Rome: Madrid! Done?": "926e2e0443af7a1aec0beea5",
   "# Acme Handbook\n\nAcme was founded in 2019 by Jane Doe.\nCompany Handbook\nAnn works at Acme.": "a8e4af8e260111cef200e124",
   "Jane Doe met\nBob Smith at Acme.": "63b309d13b6549122a3aa3d8",
+  "Zoe\u0308 met Jose\u0301 Garci\u0301a at Cafe\u0301 Socie\u0301te\u0301 in Sa\u0303o Paulo. E\u0301mile Zola met Bo\u0302b Lee.": "db14fe8d154ef9bde8adc176",
   "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing": "5926862df84c66dca48c94df",
   "Acme Report\u2028Ann works at Acme\u0085Bob Lee\u2029Initech Inc\u001cGlobex\u001dHooli\u001eSoylent\rUmbrella\u000bStark\n": "337e62b5897ce948dcacc368"
  },
@@ -3729,6 +3730,20 @@
    "jane",
    "met",
    "smith"
+  ],
+  "Zoe\u0308 met Jose\u0301 Garci\u0301a at Cafe\u0301 Socie\u0301te\u0301 in Sa\u0303o Paulo. E\u0301mile Zola met Bo\u0302b Lee.": [
+   "b\u00f4b",
+   "caf\u00e9",
+   "garc\u00eda",
+   "jos\u00e9",
+   "lee",
+   "met",
+   "paulo",
+   "soci\u00e9t\u00e9",
+   "s\u00e3o",
+   "zola",
+   "zo\u00eb",
+   "\u00e9mile"
   ],
   "Attendees:\r\nAnn Smith\r\nBob  Lee\fCarol\tKing": [
    "ann",
@@ -5081,6 +5096,7 @@
    17,
    26,
    10,
+   38,
    13,
    40
   ]
@@ -5624,6 +5640,101 @@
       "from_entity": "thing:bob-smith",
       "type": "RELATED_TO",
       "to_entity": "thing:acme",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     }
+    ],
+    "preferences": [],
+    "decisions": []
+   }
+  },
+  {
+   "text": "Zoe\u0308 met Jose\u0301 Garci\u0301a at Cafe\u0301 Socie\u0301te\u0301 in Sa\u0303o Paulo. E\u0301mile Zola met Bo\u0302b Lee.",
+   "facts": {
+    "entities": [
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Zoe\u0308",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Jose\u0301 Garci\u0301a",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Cafe\u0301 Socie\u0301te\u0301",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Sa\u0303o Paulo",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "E\u0301mile Zola",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     },
+     {
+      "id": null,
+      "type": "Thing",
+      "name": "Bo\u0302b Lee",
+      "aliases": [],
+      "external_ids": {},
+      "properties": {}
+     }
+    ],
+    "relations": [
+     {
+      "id": null,
+      "from_entity": "thing:zo\u00eb",
+      "type": "RELATED_TO",
+      "to_entity": "thing:jos\u00e9-garc\u00eda",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:jos\u00e9-garc\u00eda",
+      "type": "RELATED_TO",
+      "to_entity": "thing:caf\u00e9-soci\u00e9t\u00e9",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:caf\u00e9-soci\u00e9t\u00e9",
+      "type": "RELATED_TO",
+      "to_entity": "thing:s\u00e3o-paulo",
+      "properties": {},
+      "event_time": null,
+      "evidence": []
+     },
+     {
+      "id": null,
+      "from_entity": "thing:\u00e9mile-zola",
+      "type": "RELATED_TO",
+      "to_entity": "thing:b\u00f4b-lee",
       "properties": {},
       "event_time": null,
       "evidence": []
