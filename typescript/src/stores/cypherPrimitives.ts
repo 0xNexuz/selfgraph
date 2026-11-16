@@ -200,6 +200,7 @@ type AbstractConstructor<T> = abstract new (...args: any[]) => T;
 export interface AutoCommit {
   lockNode(ns: string, label: string, id: string): Promise<void>;
   transaction<T>(this: GraphPrimitives, fn: (tx: GraphPrimitives) => Promise<T>): Promise<T>;
+  writeQueueKey(): object;
 }
 
 const inWrite = new AsyncLocalStorage<boolean>();
@@ -216,11 +217,21 @@ export function autoCommit<B extends AbstractConstructor<object>>(Base: B): B & 
   abstract class AutoCommitted extends Base implements AutoCommit {
     async lockNode(_ns: string, _label: string, _id: string): Promise<void> {}
 
+    /**
+     * The object whose queue this store's writes join; a store that shares a backend overrides it.
+     *
+     * @return (object): the key whose write queue this store joins, which is the store itself by default.
+     */
+    writeQueueKey(): object {
+      return this;
+    }
+
     async transaction<T>(this: GraphPrimitives, fn: (tx: GraphPrimitives) => Promise<T>): Promise<T> {
       if (inWrite.getStore()) return fn(this);
-      const run = (writeQueues.get(this) ?? Promise.resolve()).then(() => inWrite.run(true, () => fn(this)));
+      const key = (this as unknown as AutoCommit).writeQueueKey();
+      const run = (writeQueues.get(key) ?? Promise.resolve()).then(() => inWrite.run(true, () => fn(this)));
       writeQueues.set(
-        this,
+        key,
         run.catch(() => undefined),
       );
       return run;
