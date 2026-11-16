@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any, NamedTuple, TypeVar, get_args
 
@@ -29,7 +30,6 @@ from ._serde import (
     R_RESULTED_IN,
     R_TO,
     _dumps,
-    _iso_text,
     _loads,
     aware,
     child_edge_id,
@@ -102,8 +102,14 @@ DECISION_CLEARABLE = (
     "event_time",
 )
 _MAX_ID_BYTES = 1024
+_ISO_TIME = re.compile(
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:[Tt ]([0-9]{2})(?::([0-9]{2})(?::([0-9]{2})(?:[.,]([0-9]{1,9}))?)?)?)?"
+    r"(?:[ \t\n\r\f\v]*(Z|z|[+-][0-9]{2}(?::?[0-9]{2}(?::?[0-9]{2})?)?))?"
+)
 _PAGE = 500
 _BATCH = 1000
+_RELATION_ID_BATCH = 256
 
 SchemaCheck = Callable[..., Awaitable[None]]
 
@@ -241,8 +247,37 @@ def _require_datetime(field: str, value: Any) -> None:
         raise ValidationError(f"{field} is outside the representable datetime range") from exc
 
 
+def _parse_iso(text: str) -> datetime:
+    """Parse the ISO 8601 forms both SDKs accept, with one grammar on every Python version.
+
+    The text is YYYY-MM-DD, then optionally T, t, or a space and HH, HH:MM, or HH:MM:SS with a 1 to 9 digit
+    fraction after '.' or ',', truncated to microseconds. Then optional ASCII whitespace and Z, z, or an offset of
+    +HH, +HHMM, +HH:MM, +HHMMSS, or +HH:MM:SS below 24 hours. No offset means UTC.
+
+    @param text (str): the ISO text.
+    @return (datetime): the timezone-aware datetime; raises ValueError when the text does not match or a field is
+        out of range.
+    """
+    m = _ISO_TIME.fullmatch(text)
+    if m is None:
+        raise ValueError(f"not an ISO 8601 date or time: {text!r}")
+    year, month, day, hour, minute, second, fraction, tz = m.groups()
+    offset = timezone.utc
+    if tz and tz not in ("Z", "z"):
+        digits = tz[1:].replace(":", "")
+        hours, minutes, seconds = int(digits[:2]), int(digits[2:4] or 0), int(digits[4:6] or 0)
+        if hours > 23 or minutes > 59 or seconds > 59:
+            raise ValueError(f"UTC offset out of range: {tz!r}")
+        sign = -1 if tz[0] == "-" else 1
+        offset = timezone(sign * timedelta(hours=hours, minutes=minutes, seconds=seconds))
+    micro = int(fraction[:6].ljust(6, "0")) if fraction else 0
+    return datetime(
+        int(year), int(month), int(day), int(hour or 0), int(minute or 0), int(second or 0), micro, tzinfo=offset
+    )
+
+
 def parse_time(value: Any, field: str) -> datetime | None:
-    """Accept a datetime or ISO 8601 text; a trailing Z or an offset is honored, none means UTC.
+    """Accept a datetime or ISO 8601 text in the grammar of _parse_iso; a Z or an offset is honored, none is UTC.
 
     @param value (Any): a datetime, ISO 8601 text, or None.
     @param field (str): the parameter name, for the error.
@@ -251,10 +286,9 @@ def parse_time(value: Any, field: str) -> datetime | None:
     if not isinstance(value, str):
         _require_datetime(field, value)
         return value
-    text = _iso_text(value)
     try:
-        parsed = aware(datetime.fromisoformat(text))
-    except (TypeError, ValueError) as exc:
+        parsed = _parse_iso(value)
+    except ValueError as exc:
         raise ValidationError(
             f"invalid {field}: {value!r} is not an ISO 8601 date or time (e.g. 2024-01-02T03:04:05Z)"
         ) from exc
@@ -1714,7 +1748,9 @@ async def _precheck_write(runner: Any, props: Mapping[str, Any]) -> None:
         check(props)
 
 
-async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, RelationInput]]) -> dict[str, dict]:
+async def _current_relations(
+    runner: Any, ns: str, keyed: list[tuple[str, RelationInput]], *, all_ids: bool = False
+) -> dict[str, dict]:
     """Fetch the current version of many relations, or the newest version of one that has no current version.
 
     A derived relation id fixes its endpoints, so its stored versions are among its source entity's relations; an
@@ -1726,29 +1762,69 @@ async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, Relati
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param keyed (list[tuple[str, RelationInput]]): (relation id, input) pairs.
+    @param all_ids (bool): look up every id across all endpoints, since an explicit id can match a generated id.
     @return (dict[str, dict]): each found relation's current edge row, else its newest edge row, by id.
     """
     wanted = {rid for rid, _ in keyed}
     found: dict[str, dict] = {}
     by_id = getattr(runner, "edge_versions", None)
-    versions = None if by_id is None else await by_id(ns, L_ENTITY, L_ENTITY, _dedup_list(rid for rid, _ in keyed))
+    ids = _dedup_list(rid for rid, _ in keyed)
+    versions = None
+    if by_id is not None:
+        if all_ids:
+            versions = []
+            for batch in _batches(ids, _RELATION_ID_BATCH):
+                rows = await by_id(ns, L_ENTITY, L_ENTITY, batch)
+                if rows is None:
+                    versions = None
+                    break
+                versions.extend(rows)
+        else:
+            versions = await by_id(ns, L_ENTITY, L_ENTITY, ids)
     for current_only in (True, False):
         pending = _dedup_list(rel.from_entity for rid, rel in keyed if rid not in found)
         if versions is None:
             edges = await _edges_into(runner, ns, L_ENTITY, L_ENTITY, "from_in", pending, current_only=current_only)
         else:
             sources = set(pending)
-            edges = [e for e in versions if e["from_id"] in sources and (e["props"]["is_current"] or not current_only)]
+            edges = [
+                e
+                for e in versions
+                if (all_ids or e["from_id"] in sources) and (e["props"]["is_current"] or not current_only)
+            ]
         for edge in edges:
             if edge["props"]["id"] in wanted and _is_relation_type(edge["type"]):
                 _keep_newest(found, edge)
         wanted -= set(found)
-    for rid, rel in keyed:
-        if rel.id is not None and rid not in found:
+    if all_ids and versions is not None:
+        return found
+    for rid in _dedup_list(rid for rid, rel in keyed if all_ids or rel.id is not None):
+        if rid not in found:
             edge = await _newest_edge(runner, ns, rid, _is_relation_type)
             if edge is not None:
                 found[rid] = edge
     return found
+
+
+async def require_relation_identities(runner: Any, ns: str, relations: list[RelationInput]) -> None:
+    """Reject conflicting relation ids before the insert writes any facts or provenance.
+
+    @param runner (Any): the graph runner.
+    @param ns (str): namespace.
+    @param relations (list[RelationInput]): the final canonical relations to write.
+    @return (None): nothing; raises ValidationError if a relation id names different endpoints or types.
+    """
+    if not relations:
+        return
+    keyed = []
+    for relation in relations:
+        rtype = _ids.normalize_rel_type(relation.type)
+        rid = relation.id or _ids.relation_id(relation.from_entity, rtype, relation.to_entity)
+        keyed.append((rid, relation, (relation.from_entity, rtype, relation.to_entity)))
+    stored = await _current_relations(runner, ns, [(rid, relation) for rid, relation, _ in keyed], all_ids=True)
+    identities = {rid: (edge["from_id"], edge["type"], edge["to_id"]) for rid, edge in stored.items()}
+    for rid, _, identity in keyed:
+        _require_same_ends(rid, identities.setdefault(rid, identity), identity)
 
 
 class RelationCap(NamedTuple):

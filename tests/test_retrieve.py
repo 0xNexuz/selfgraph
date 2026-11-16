@@ -79,6 +79,89 @@ def test_retrieve_strategies_and_depth_bound_traversal():
         run(g.retrieve("team", strategy="sideways"))
 
 
+@pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
+@pytest.mark.parametrize("depth", [0, 1])
+def test_retrieve_collects_relations_between_boundary_entities(strategy, depth):
+    g = fresh_graph("boundary")
+    run(
+        g.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": n} for n in ["Ada", "Bob", "Cy"]],
+                "relations": [
+                    {"id": "relation:ab", "from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:bob"},
+                    {"id": "relation:ac", "from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:cy"},
+                    {"id": "relation:bc", "from_entity": "thing:bob", "type": "KNOWS", "to_entity": "thing:cy"},
+                ],
+                "decisions": [{"title": "Choose Cy", "steps": ["relation:bc"]}],
+            }
+        )
+    )
+    result = run(g.retrieve("Ada" if depth else "Ada Bob Cy", k=1 if depth else 3, depth=depth, strategy=strategy))
+    assert {e.id for e in result.subgraph.entities} == {"thing:ada", "thing:bob", "thing:cy"}
+    assert {r.id for r in result.subgraph.relations} == {"relation:ab", "relation:ac", "relation:bc"}
+    assert [d.title for d in result.subgraph.decisions] == ["Choose Cy"]
+
+
+@pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
+def test_retrieve_marks_boundary_hubs_without_expanding_them(strategy):
+    g = fresh_graph("boundary-hub")
+    names = ["Ada", *(f"Leaf{i}" for i in range(HUB_DEGREE - 1))]
+    run(
+        g.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": n} for n in ["Hub", *names]],
+                "relations": [
+                    {"from_entity": "thing:hub", "type": "HAS", "to_entity": f"thing:{n.lower()}"} for n in names
+                ],
+            }
+        )
+    )
+    result = run(g.retrieve("Ada", k=1, depth=1, skip_hubs=True, strategy=strategy))
+    assert {e.id for e in result.subgraph.entities} == {"thing:ada", "thing:hub"}
+    assert result.hubs == ["thing:hub"]
+    assert "GRAPH (via hub) | Hub -[HAS]-> Ada" in result.context.splitlines()
+
+
+@pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
+def test_boundary_completion_obeys_relation_time_filters(strategy):
+    g = fresh_graph("boundary-time")
+    run(
+        g.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": n} for n in ["Ada", "Bob", "Cy"]],
+                "relations": [
+                    {
+                        "id": f"relation:{b}",
+                        "from_entity": "thing:ada",
+                        "type": "LINKS",
+                        "to_entity": f"thing:{b}",
+                        "event_time": "2020-01-01",
+                    }
+                    for b in ["bob", "cy"]
+                ]
+                + [
+                    {
+                        "id": "relation:bc",
+                        "from_entity": "thing:bob",
+                        "type": "KNOWS",
+                        "to_entity": "thing:cy",
+                        "event_time": "2030-01-01",
+                    }
+                ],
+            }
+        )
+    )
+    for when, expected in [
+        ("2025-01-01", {"relation:bob", "relation:cy"}),
+        ("2035-01-01", {"relation:bob", "relation:cy", "relation:bc"}),
+    ]:
+        result = run(g.retrieve("Ada", k=1, depth=1, strategy=strategy, as_of=when))
+        assert {r.id for r in result.subgraph.relations} == expected
+    result = run(g.retrieve("Ada", k=1, depth=1, strategy=strategy, as_of="2035-01-01", known_at="2000-01-01"))
+    assert result.subgraph.entities == []
+    assert result.subgraph.relations == []
+
+
 def test_retrieve_includes_source_passage():
     llm = extracting_llm([("Person", "Soham"), ("Company", "HydraDB")])
     g = new_graph(llm=llm)
@@ -94,6 +177,44 @@ def test_retrieve_surfaces_preferences():
     res = run(g.retrieve("what database does Soham prefer"))
     assert any(p.subject_entity == "person:soham" for p in res.subgraph.preferences)
     assert "Soham prefers HydraDB (database)" in res.context
+
+
+@pytest.mark.parametrize("strategy", ["bfs", "dfs", "ppr"])
+def test_self_relations_count_once_toward_hub_threshold(strategy):
+    for loops in (24, 48):
+        g = fresh_graph("self-loop-hub")
+        run(
+            g.insert.facts(
+                {
+                    "entities": [{"type": "Thing", "name": n} for n in ["Ada", "Middle", "Bob"]],
+                    "relations": [
+                        {"id": "relation:am", "from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                        {"id": "relation:mb", "from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                        *[
+                            {
+                                "id": f"relation:self{i}",
+                                "from_entity": "thing:middle",
+                                "type": "SELF",
+                                "to_entity": "thing:middle",
+                            }
+                            for i in range(loops)
+                        ],
+                    ],
+                }
+            )
+        )
+        assert len(run(g.relations.list()).items) == loops + 2
+        is_hub = loops + 2 >= 50
+        result = run(g.retrieve("Ada", k=1, depth=3, skip_hubs=True, strategy=strategy))
+        assert result.hubs == (["thing:middle"] if is_hub else [])
+        assert {e.id for e in result.subgraph.entities} == (
+            {"thing:ada", "thing:middle"} if is_hub else {"thing:ada", "thing:middle", "thing:bob"}
+        )
+        assert ("(via hub)" in result.context) == is_hub
+        report = run(g.check_answerable("Ada Bob"))
+        assert report.connected
+        assert report.verdict == ("uncertain" if is_hub else "answerable")
+        assert report.hub_only == ([["ada", "bob"]] if is_hub else [])
 
 
 def test_stopword_query_returns_nothing_and_an_empty_query_is_rejected():

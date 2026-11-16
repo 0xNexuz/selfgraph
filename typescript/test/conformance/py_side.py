@@ -29,6 +29,23 @@ LENIENT_EVENT_TIMES = [
     None,
 ]
 
+ISO_TIMES = [
+    "2021-03-04T10:15:00Z",
+    "2021-03-04 10:15",
+    "2021-03-04T10:15:00.5",
+    "2021-03-04T10:15:00,123456789",
+    "2021-03-04T10:15:00+0530",
+    "2021-03-04T10:15:00+05",
+    "2021-03-04T10:15:00 -05:30:15",
+    "20210304",
+    "2021-W09-4",
+    "2021-03-04T1015",
+    "2021-03-04X10:15:00",
+    "2021-03-04T10:15:00+24:00",
+    "2021-03-04T10:15:00+05:60",
+    "2021-02-29",
+]
+
 TERMS_SPEC = {
     "entities": [
         {
@@ -362,6 +379,7 @@ def schema_warnings():
             for q in TERM_QUESTIONS
         ],
         "datetime_errors": datetime_errors(),
+        "iso_times": iso_times(),
         "terms_subtypes": [
             sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
             for sub_schema in [
@@ -399,6 +417,20 @@ def datetime_errors():
         except ValidationError as exc:
             errors.append(str(exc))
     return errors
+
+
+def iso_times():
+    """Parse each ISO_TIMES string as a time argument.
+
+    @return (list[str]): each time in UTC, or the validation error.
+    """
+    out = []
+    for text in ISO_TIMES:
+        try:
+            out.append(json_iso(parse_time(text, "as_of")))
+        except ValidationError as exc:
+            out.append(str(exc))
+    return out
 
 
 STORES = {
@@ -955,6 +987,26 @@ async def write(graph):
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    try:
+        await graph.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": "Rejected"}],
+                "relations": [
+                    {
+                        "id": works_at,
+                        "type": "WORKS_AT",
+                        "from_entity": "person:jane-doe",
+                        "to_entity": "thing:rejected",
+                    }
+                ],
+            },
+            source_id="rejected",
+        )
+    except ValidationError as exc:
+        out["rejected_relation"] = str(exc)
+    else:
+        raise AssertionError("relation id was accepted with a different destination")
+    assert await graph.entities.get("thing:rejected") is None
     out["context_boundary"] = await context_boundary(graph)
     capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
     await capped.insert.facts(
@@ -1367,12 +1419,51 @@ async def dump(graph, ns):
         walk: await graph.retrieve("Grace Hopper COBOL Jane acme", strategy=walk, k=1, depth=4, max_nodes=3)
         for walk in ("bfs", "dfs")
     }
+    loops = SelfGraph(store=store, namespace=f"{ns}_loops")
+    await loops.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Middle", "Bob")],
+            "relations": [
+                {"from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                {"from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                *[
+                    {
+                        "id": f"relation:self{i}",
+                        "from_entity": "thing:middle",
+                        "type": "SELF",
+                        "to_entity": "thing:middle",
+                    }
+                    for i in range(24)
+                ],
+            ],
+        }
+    )
+    loop_result = await loops.retrieve("Ada", k=1, depth=3, skip_hubs=True)
+    loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
     seeded = {
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
     }
+    boundary = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_boundary")
+    await boundary.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Bob", "Cy")],
+            "relations": [
+                {"id": f"relation:{a}{b}", "from_entity": f"thing:{a}", "type": "LINKS", "to_entity": f"thing:{b}"}
+                for a, b in (("ada", "bob"), ("ada", "cy"), ("bob", "cy"))
+            ],
+            "decisions": [{"title": "Choose Cy", "steps": ["relation:bobcy"]}],
+        }
+    )
+    boundary_results = {}
+    for walk in ("bfs", "dfs", "ppr"):
+        result = await boundary.retrieve("Ada", k=1, depth=1, strategy=walk)
+        boundary_results[walk] = {
+            "relations": sorted(r.id for r in result.subgraph.relations),
+            "decisions": [d.title for d in result.subgraph.decisions],
+        }
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
@@ -1385,6 +1476,7 @@ async def dump(graph, ns):
                 "counts": {e.id: e.source_count for e in historical.subgraph.entities},
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
+            "retrieval_boundary": boundary_results,
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
@@ -1392,6 +1484,12 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "self_loop_hubs": {
+                "entities": sorted(e.id for e in loop_result.subgraph.entities),
+                "hubs": loop_result.hubs,
+                "verdict": loop_report.verdict,
+                "hub_only": loop_report.hub_only,
+            },
             "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "filters": filters,

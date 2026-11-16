@@ -152,7 +152,8 @@ _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MARK = re.compile(f"[{MARK_CLASS}]")
 _PUNCT = re.compile(rf"[^\w\s{MARK_CLASS}]+")
 _NON_IDENT = re.compile(rf"[^\w{MARK_CLASS}]+")
-_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_DIGIT_LETTER = re.compile(r"(?<=[0-9])(?=[A-Z])")
 _ENTITY_SUFFIXES = frozenset(
     {
         "inc",
@@ -338,11 +339,16 @@ def canonical_entity_id(eid: str) -> str:
 def normalize_rel_type(type: str) -> str:
     """Canonicalise a relation type to UPPER_SNAKE so case, spacing, and camelCase variants collapse.
 
+    A lower-to-upper case change splits words in the raw type. A digit and the letter after it split on the
+    uppercased result, so 'uses k8s' and 'USES_K8S' agree, and the result is NFC. Normalizing the result again
+    returns it unchanged.
+
     @param type (str): the raw relation type.
     @return (str): the canonical relation type.
     """
     _require_str("relation type", type)
     normalized = _NON_IDENT.sub("_", _CAMEL.sub("_", normalize_text(type).strip()).lower()).strip("_").upper()
+    normalized = normalize_text(_DIGIT_LETTER.sub("_", normalized))
     if not normalized:
         raise ValidationError("relation type cannot be empty; use a verb phrase, e.g. 'works at' or 'WORKS_AT'")
     return normalized

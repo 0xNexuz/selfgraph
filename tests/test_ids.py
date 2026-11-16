@@ -62,6 +62,16 @@ def test_relation_types_split_camel_case():
     assert ids.relation_id("a:b", "worksAt", "c:d") == ids.relation_id("a:b", "WORKS_AT", "c:d")
 
 
+def test_a_normalized_relation_type_normalizes_to_itself():
+    assert ids.normalize_rel_type("uses k8s") == ids.normalize_rel_type("USES_K8S") == "USES_K8_S"
+    assert ids.normalize_rel_type("has 3d model") == "HAS_3_D_MODEL"
+    assert ids.normalize_rel_type("Has2FA") == "HAS2_FA"
+    for raw in ["uses k8s", "has 2fa", "isPartOf2Things", "x2ß", "ß\u0307", "56İ", "OAuth2Token", "élève de"]:
+        once = ids.normalize_rel_type(raw)
+        assert ids.normalize_rel_type(once) == once, raw
+        assert ids.relation_id("a:b", raw, "c:d") == ids.relation_id("a:b", once, "c:d")
+
+
 def test_combining_marks_stay_in_derived_ids():
     names = ["राम", "रीमा", "रोम", "กิน", "กัน", "কাল", "কুল", "கவி", "கவு", "דָּוִד", "דּוֹד"]
     derived = [ids.entity_id("Person", name) for name in names]

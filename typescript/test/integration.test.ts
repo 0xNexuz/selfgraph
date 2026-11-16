@@ -174,6 +174,71 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it.each(["stored", "batch", "generated", "generated-other-source"])(
+    "rejects conflicting relation ids before writing (%s)",
+    async (collision) => {
+      const g = fresh();
+      await g.entities.create("Ada", "Person");
+      await g.entities.create("Bob", "Person");
+      const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
+      const conflicting = {
+        ...original,
+        id: collision.startsWith("generated") ? undefined : original.id,
+        to_entity: "person:cy",
+      };
+      if (collision.startsWith("generated")) {
+        original.id = ids.relationId("person:ada", "KNOWS", "person:cy");
+        if (collision === "generated-other-source") original.from_entity = "person:bob";
+      }
+      const stored = collision !== "batch";
+      if (stored) await g.relations.create(original.from_entity, "KNOWS", "person:bob", { id: original.id });
+
+      await expect(
+        g.insert.facts(
+          { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
+          { source_id: "bad-import" },
+        ),
+      ).rejects.toThrow(/already exists with different endpoints\/type/);
+
+      expect(await g.entities.get("person:cy")).toBeNull();
+      expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
+      const relation = await g.relations.get(original.id);
+      if (stored) expect(relation?.to_entity).toBe("person:bob");
+      else expect(relation).toBeNull();
+    },
+  );
+
+  it.runIf(spec.name === "kuzu")("batches relation ID preflight reads", async () => {
+    const g = fresh();
+    await g.entities.create("Ada", "Person");
+    const runner = g.store as unknown as {
+      _run(query: string, params?: Record<string, unknown>): Promise<unknown>;
+    };
+    const execute = vi.spyOn(runner, "_run");
+    try {
+      const contacts = Array.from({ length: 257 }, (_, i) => i);
+      const result = await g.insert.facts({
+        entities: contacts.map((i) => ({ type: "Person", name: `Contact ${i}` })),
+        relations: contacts.map((i) => ({
+          from_entity: "person:ada",
+          type: "KNOWS",
+          to_entity: `person:contact-${i}`,
+        })),
+      });
+      expect(result.relations).toHaveLength(257);
+      expect(
+        execute.mock.calls
+          .filter(([query]) => query.includes("r.sid IN $ids"))
+          .map(([, params]) => (Array.isArray(params?.ids) ? params.ids.length : 0)),
+      ).toEqual([256, 1]);
+      expect(
+        execute.mock.calls.filter(([query]) => query.includes("r.sid = $sid") && query.includes("RETURN r.doc")),
+      ).toEqual([]);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   it("reports a bad stance or status with the Python text, after the id check", async () => {
     const g = fresh();
     await g.entities.create("X", "T", { id: "t:x" });
@@ -232,6 +297,16 @@ function suite(spec: StoreSpec) {
     expect(result.preferences.map((p) => [p.id, p.strength])).toEqual([
       [ids.preferenceId("person:jane-doe", "preference", "database", "database:hydradb"), 0.7],
     ]);
+  });
+
+  it("reads back and reinserts a type with a digit before a letter", async () => {
+    const g = fresh();
+    await g.insert.facts({ entities: ["App", "Cluster"].map((name) => ({ type: "Thing", name })) });
+    const rel = await g.relations.create("thing:app", "uses k8s", "thing:cluster");
+    expect(rel.type).toBe("USES_K8_S");
+    expect((await g.relations.list({ type: rel.type })).items.map((r) => r.id)).toEqual([rel.id]);
+    const facts = { relations: [{ from_entity: "thing:app", type: "uses k8s", to_entity: "thing:cluster" }] };
+    expect((await g.insert.facts(facts)).relations.map((r) => r.id)).toEqual([rel.id]);
   });
 
   it("creates, conflicts on, reads, pages, merges updates, and deletes entities", async () => {
@@ -647,6 +722,81 @@ function suite(spec: StoreSpec) {
     await expect(graph.insert.text("bad\u0000text")).rejects.toBeInstanceOf(ValidationError);
   });
 
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    for (const depth of [0, 1]) {
+      it(`collects boundary relations and their decisions: ${strategy}, depth ${depth}`, async () => {
+        const g = fresh();
+        await g.insert.facts({
+          entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+          relations: [
+            { id: "relation:ab", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:bob" },
+            { id: "relation:ac", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:cy" },
+            { id: "relation:bc", from_entity: "thing:bob", type: "KNOWS", to_entity: "thing:cy" },
+          ],
+          decisions: [{ title: "Choose Cy", steps: ["relation:bc"] }],
+        });
+        const result = await g.retrieve(depth ? "Ada" : "Ada Bob Cy", { k: depth ? 1 : 3, depth, strategy });
+        expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(["thing:ada", "thing:bob", "thing:cy"]);
+        expect(result.subgraph.relations.map((r) => r.id).sort()).toEqual([
+          "relation:ab",
+          "relation:ac",
+          "relation:bc",
+        ]);
+        expect(result.subgraph.decisions.map((d) => d.title)).toEqual(["Choose Cy"]);
+      });
+    }
+    it(`marks boundary hubs without expanding them: ${strategy}`, async () => {
+      const g = fresh();
+      const names = ["Ada", ...Array.from({ length: HUB_DEGREE - 1 }, (_, i) => `Leaf${i}`)];
+      await g.insert.facts({
+        entities: ["Hub", ...names].map((name) => ({ type: "Thing", name })),
+        relations: names.map((n) => ({ from_entity: "thing:hub", type: "HAS", to_entity: `thing:${n.toLowerCase()}` })),
+      });
+      const result = await g.retrieve("Ada", { k: 1, depth: 1, skip_hubs: true, strategy });
+      expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(["thing:ada", "thing:hub"]);
+      expect(result.hubs).toEqual(["thing:hub"]);
+      expect(result.context.split("\n")).toContain("GRAPH (via hub) | Hub -[HAS]-> Ada");
+    });
+    it(`obeys time filters when completing boundary relations: ${strategy}`, async () => {
+      const g = fresh();
+      await g.insert.facts({
+        entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+        relations: [
+          ...["bob", "cy"].map((b) => ({
+            id: `relation:${b}`,
+            from_entity: "thing:ada",
+            type: "LINKS",
+            to_entity: `thing:${b}`,
+            event_time: "2020-01-01",
+          })),
+          {
+            id: "relation:bc",
+            from_entity: "thing:bob",
+            type: "KNOWS",
+            to_entity: "thing:cy",
+            event_time: "2030-01-01",
+          },
+        ],
+      });
+      for (const [as_of, expected] of [
+        ["2025-01-01", ["relation:bob", "relation:cy"]],
+        ["2035-01-01", ["relation:bc", "relation:bob", "relation:cy"]],
+      ] as const) {
+        const result = await g.retrieve("Ada", { k: 1, depth: 1, strategy, as_of });
+        expect(result.subgraph.relations.map((r) => r.id).sort()).toEqual(expected);
+      }
+      const unknown = await g.retrieve("Ada", {
+        k: 1,
+        depth: 1,
+        strategy,
+        as_of: "2035-01-01",
+        known_at: "2000-01-01",
+      });
+      expect(unknown.subgraph.entities).toEqual([]);
+      expect(unknown.subgraph.relations).toEqual([]);
+    });
+  }
+
   describe("retrieval context", () => {
     const ENTITIES = [
       { type: "Person", name: "Ann" },
@@ -890,6 +1040,39 @@ function suite(spec: StoreSpec) {
       }
     });
   });
+
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    it(`counts self relations once toward hub threshold: ${strategy}`, async () => {
+      for (const loops of [24, 48]) {
+        const g = fresh();
+        await g.insert.facts({
+          entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+          relations: [
+            { id: "relation:am", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+            { id: "relation:mb", from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+            ...Array.from({ length: loops }, (_, i) => ({
+              id: `relation:self${i}`,
+              from_entity: "thing:middle",
+              type: "SELF",
+              to_entity: "thing:middle",
+            })),
+          ],
+        });
+        expect((await g.relations.list()).items.length).toBe(loops + 2);
+        const isHub = loops + 2 >= 50;
+        const result = await g.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true, strategy });
+        expect(result.hubs).toEqual(isHub ? ["thing:middle"] : []);
+        expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(
+          isHub ? ["thing:ada", "thing:middle"] : ["thing:ada", "thing:bob", "thing:middle"],
+        );
+        expect(result.context.includes("(via hub)")).toBe(isHub);
+        const report = await g.checkAnswerable("Ada Bob");
+        expect(report.connected).toBe(true);
+        expect(report.verdict).toBe(isHub ? "uncertain" : "answerable");
+        expect(report.hub_only).toEqual(isHub ? [["ada", "bob"]] : []);
+      }
+    });
+  }
 
   it("retrieves context by keyword seeds and traversal", async () => {
     const result = await graph.retrieve("what did Grace Hopper write", { depth: 2 });

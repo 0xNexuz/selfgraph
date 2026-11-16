@@ -87,6 +87,16 @@ def test_list_filters():
     assert len(by_from.items) == 2
 
 
+def test_a_type_with_a_digit_before_a_letter_reads_back_and_reinserts():
+    g = new_graph()
+    create_entities(g, "Thing:App", "Thing:Cluster")
+    rel = run(g.relations.create("thing:app", "uses k8s", "thing:cluster"))
+    assert rel.type == "USES_K8_S"
+    assert [r.id for r in run(g.relations.list(type=rel.type)).items] == [rel.id]
+    facts = {"relations": [{"from_entity": "thing:app", "type": "uses k8s", "to_entity": "thing:cluster"}]}
+    assert [r.id for r in run(g.insert.facts(facts)).relations] == [rel.id]
+
+
 def test_multiple_relations_same_endpoints():
     g = new_graph()
     seed(g)

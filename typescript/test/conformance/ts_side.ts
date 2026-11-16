@@ -40,6 +40,23 @@ const LENIENT_EVENT_TIMES = [
   null,
 ] as const;
 
+const ISO_TIMES = [
+  "2021-03-04T10:15:00Z",
+  "2021-03-04 10:15",
+  "2021-03-04T10:15:00.5",
+  "2021-03-04T10:15:00,123456789",
+  "2021-03-04T10:15:00+0530",
+  "2021-03-04T10:15:00+05",
+  "2021-03-04T10:15:00 -05:30:15",
+  "20210304",
+  "2021-W09-4",
+  "2021-03-04T1015",
+  "2021-03-04X10:15:00",
+  "2021-03-04T10:15:00+24:00",
+  "2021-03-04T10:15:00+05:60",
+  "2021-02-29",
+];
+
 const TERMS_SPEC = {
   entities: [
     {
@@ -325,6 +342,7 @@ export function schemaWarnings(): {
   term_forms: unknown;
   terms: unknown[];
   datetime_errors: string[];
+  iso_times: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -447,6 +465,14 @@ export function schemaWarnings(): {
       try {
         parseTime(text, "event_time");
         return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
+    iso_times: ISO_TIMES.map((text) => {
+      try {
+        return jsonIso(parseTime(text, "as_of"));
       } catch (exc) {
         if (!(exc instanceof ValidationError)) throw exc;
         return exc.message;
@@ -983,6 +1009,22 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  try {
+    await graph.insert.facts(
+      {
+        entities: [{ type: "Thing", name: "Rejected" }],
+        relations: [{ id: worksAt, type: "WORKS_AT", from_entity: "person:jane-doe", to_entity: "thing:rejected" }],
+      },
+      { source_id: "rejected" },
+    );
+    throw new Error("relation id was accepted with a different destination");
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.rejected_relation = exc.message;
+  }
+  if ((await graph.entities.get("thing:rejected")) !== null) {
+    throw new Error("rejected relation left an entity in the graph");
+  }
   out.context_boundary = await contextBoundary(graph);
   const capped = new SelfGraph(graph.store, {
     namespace: graph.namespace,
@@ -1228,6 +1270,22 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await graph.retrieve("Grace Hopper COBOL Jane acme", { strategy: walk, k: 1, depth: 4, max_nodes: 3 });
     tight[walk] = { entities: r.subgraph.entities.map((e) => e.id), relations: r.subgraph.relations.map((x) => x.id) };
   }
+  const loops = new SelfGraph(store, { namespace: `${ns}_loops` });
+  await loops.insert.facts({
+    entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      { from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+      { from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+      ...Array.from({ length: 24 }, (_, i) => ({
+        id: `relation:self${i}`,
+        from_entity: "thing:middle",
+        type: "SELF",
+        to_entity: "thing:middle",
+      })),
+    ],
+  });
+  const loopResult = await loops.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true });
+  const loopReport = await loops.checkAnswerable("Ada Bob");
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
@@ -1235,6 +1293,29 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   for (const tier of ["bm25", "synonyms"] as const) {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
+  }
+  const boundary = new SelfGraph(graph.store, { namespace: `${graph.namespace}_boundary` });
+  await boundary.insert.facts({
+    entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      ["ada", "bob"],
+      ["ada", "cy"],
+      ["bob", "cy"],
+    ].map(([a, b]) => ({
+      id: `relation:${a}${b}`,
+      from_entity: `thing:${a}`,
+      type: "LINKS",
+      to_entity: `thing:${b}`,
+    })),
+    decisions: [{ title: "Choose Cy", steps: ["relation:bobcy"] }],
+  });
+  const boundaryResults: Record<string, { relations: string[]; decisions: string[] }> = {};
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    const result = await boundary.retrieve("Ada", { k: 1, depth: 1, strategy });
+    boundaryResults[strategy] = {
+      relations: result.subgraph.relations.map((r) => r.id).sort(),
+      decisions: result.subgraph.decisions.map((d) => d.title),
+    };
   }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
@@ -1255,6 +1336,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
     },
     retrieval_seeded: seeded,
+    retrieval_boundary: boundaryResults,
     tiers: termed.tiers,
     entities,
     relations,
@@ -1262,6 +1344,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    self_loop_hubs: {
+      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
+      hubs: loopResult.hubs,
+      verdict: loopReport.verdict,
+      hub_only: loopReport.hub_only,
+    },
     raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,
