@@ -1,3 +1,4 @@
+import { kv } from "../../src/cli.js";
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
 import {
   FalkorDBStore,
@@ -14,6 +15,7 @@ import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
+import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
@@ -199,10 +201,32 @@ export function neo4jExportWarnings(): string {
   return lines.join("\n");
 }
 
+const JSON_INPUTS = ["NaN", "Infinity", "-Infinity", "1.5", "[1]", "nope"];
+
+/**
+ * Parse each input as a KEY=VALUE flag value and inside a JSON document, as the CLI and settings do.
+ *
+ * @return ({ flags: unknown[]; documents: unknown[] }): each input's flag value, and each document's parsed value or its error up to the first colon, since the two JSON parsers word a syntax error differently.
+ */
+function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
+  const document = (text: string): unknown => {
+    try {
+      return parseJson(text, " in --metadata");
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      return exc.message.split(":")[0];
+    }
+  };
+  return {
+    flags: JSON_INPUTS.map((x) => kv([`v=${x}`], "--prop").v),
+    documents: JSON_INPUTS.map((x) => document(`{"v": ${x}}`)),
+  };
+}
+
 /**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, and the fields the Neo4j export drops.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
@@ -211,6 +235,7 @@ export function schemaWarnings(): {
   term_forms: unknown;
   terms: unknown[];
   neo4j_dropped: string;
+  json_constants: { flags: unknown[]; documents: unknown[] };
 } {
   const terms = Schema.parse(TERMS_SPEC);
   const schema = Schema.parse(SCHEMA_SPEC);
@@ -224,6 +249,7 @@ export function schemaWarnings(): {
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     neo4j_dropped: neo4jExportWarnings(),
+    json_constants: jsonConstants(),
     term_forms: Object.fromEntries(
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
