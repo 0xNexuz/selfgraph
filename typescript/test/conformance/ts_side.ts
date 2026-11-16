@@ -327,7 +327,27 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  out.retrieval_overflow = await overflow(graph);
   return out;
+}
+
+/**
+ * Retrieve under a budget where a near line fits, the next overflows under any counter, and short lines remain.
+ *
+ * @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+ * @return (Promise<{ tight: string; full: string }>): the context at the tight budget and at the default one.
+ */
+async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string }> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_budget` });
+  for (const name of ["Ann", "Bob", "Cid"])
+    await g.entities.create(name, "Person", { id: `person:${name.toLowerCase()}` });
+  await g.relations.create("person:ann", "KNOWS", "person:bob");
+  await g.relations.create("person:bob", "KNOWS", "person:cid", {
+    properties: { note: "met at the old harbour ".repeat(20) },
+  });
+  const tight = await g.retrieve("Ann", { k: 1, depth: 2, budget_tokens: 12 });
+  const full = await g.retrieve("Ann", { k: 1, depth: 2 });
+  return { tight: tight.context, full: full.context };
 }
 
 async function allEvidence(list: (cursor: string | null) => Promise<Page<Evidence>>): Promise<Evidence[]> {
