@@ -255,13 +255,14 @@ def _export_type(label: str, spec: Any, scope: str, constraints: list, dropped: 
         {"type": "EXISTENCE", "property_names": [p.name], scope: label} for p in spec.properties if p.required
     )
     dropped.extend(f"{label}.{p.name} json type (exported as STRING)" for p in spec.properties if p.type == "json")
-    for field, value in (("synonyms", spec.synonyms), ("mappings", getattr(spec, "mappings", None))):
+    for field, value in (
+        ("synonyms", spec.synonyms),
+        ("mappings", getattr(spec, "mappings", None)),
+        ("definitions", getattr(spec, "definitions", None)),
+        ("certified flag", spec.certified),
+    ):
         if value:
             dropped.append(f"{label}.{field}")
-    if getattr(spec, "definitions", None):
-        dropped.append(f"{label}.definitions")
-    if spec.certified:
-        dropped.append(f"{label}.certified flag")
     return out
 
 
