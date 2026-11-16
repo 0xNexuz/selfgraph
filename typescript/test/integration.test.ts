@@ -173,6 +173,26 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it("reports a bad stance or status with the Python text, after the id check", async () => {
+    const g = fresh();
+    await g.entities.create("X", "T", { id: "t:x" });
+    await g.entities.create("Y", "T", { id: "t:y" });
+    const rel = await g.relations.create("t:x", "KNOWS", "t:y");
+    const stance = new ValidationError("preference stance must be one of ['disinterest', 'preference'], got 'meh'");
+    await expect(g.preferences.create("t:x", "likes", "t:y", { stance: "meh" as never })).rejects.toThrow(stance);
+    await expect(g.preferences.list({ stance: "meh" as never })).rejects.toThrow(stance);
+    const status = new ValidationError(
+      "decision status must be one of ['active', 'completed', 'reversed'], got 'weird'",
+    );
+    await expect(g.decisions.create("T", { steps: [rel.id], status: "weird" as never })).rejects.toThrow(status);
+    await expect(g.decisions.list({ status: "weird" as never })).rejects.toThrow(status);
+    await g.decisions.create("D", { steps: [rel.id], id: "decision:d" });
+    await expect(g.decisions.update("decision:d", { status: "weird" as never })).rejects.toThrow(status);
+    await expect(g.decisions.update("decision:nope", { status: "weird" as never })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
   it("canonicalizes explicit entity ids on every input path", async () => {
     const g = fresh();
     expect((await g.entities.create("X", "T", { id: "T:X" })).id).toBe("t:x");
