@@ -173,6 +173,26 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it("reports a bad stance or status with the Python text, after the id check", async () => {
+    const g = fresh();
+    await g.entities.create("X", "T", { id: "t:x" });
+    await g.entities.create("Y", "T", { id: "t:y" });
+    const rel = await g.relations.create("t:x", "KNOWS", "t:y");
+    const stance = new ValidationError("preference stance must be one of ['disinterest', 'preference'], got 'meh'");
+    await expect(g.preferences.create("t:x", "likes", "t:y", { stance: "meh" as never })).rejects.toThrow(stance);
+    await expect(g.preferences.list({ stance: "meh" as never })).rejects.toThrow(stance);
+    const status = new ValidationError(
+      "decision status must be one of ['active', 'completed', 'reversed'], got 'weird'",
+    );
+    await expect(g.decisions.create("T", { steps: [rel.id], status: "weird" as never })).rejects.toThrow(status);
+    await expect(g.decisions.list({ status: "weird" as never })).rejects.toThrow(status);
+    await g.decisions.create("D", { steps: [rel.id], id: "decision:d" });
+    await expect(g.decisions.update("decision:d", { status: "weird" as never })).rejects.toThrow(status);
+    await expect(g.decisions.update("decision:nope", { status: "weird" as never })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
   it("canonicalizes explicit entity ids on every input path", async () => {
     const g = fresh();
     expect((await g.entities.create("X", "T", { id: "T:X" })).id).toBe("t:x");
@@ -899,6 +919,27 @@ describe("store setup errors", () => {
     }
   });
 
+  it.each(["", ":memory:", "file"])("keeps Kuzu database identity and close semantics for %j", async (path) => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-identity-"));
+    const shared = path === "file";
+    if (shared) path = join(dir, "shared.kuzu");
+    try {
+      await using first = new SelfGraph(new KuzuStore(path));
+      const entity = await first.entities.create("Jane", "Person");
+      {
+        await using second = new SelfGraph(new KuzuStore(path));
+        expect((await second.entities.get(entity.id)) !== null).toBe(shared);
+        if (!shared) await second.entities.create("Jane", "Person");
+        await second.entities.delete(entity.id);
+        expect((await first.entities.get(entity.id)) === null).toBe(shared);
+      }
+      expect((await first.entities.get(entity.id)) === null).toBe(shared);
+      await first.entities.create("Ann", "Person");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
     for (const size of [-1, 0, 1.5]) {
       expect(() => new KuzuStore("x.kuzu", { max_db_size: size })).toThrow(
@@ -986,6 +1027,34 @@ describe("store setup errors", () => {
 
 describe("property values", () => {
   const open = freshGraphs(KUZU_SPEC, "props");
+
+  it("matches and deletes a nested object property", async () => {
+    const g = open();
+    await g.initialize();
+    const { store, namespace: ns } = g;
+    const value = { profile: { name: "Zoë", tags: ["a", "b"] }, active: true };
+    await store.upsertNode(ns, "Entity", "a", { id: "a", value });
+    await store.upsertNode(ns, "Entity", "b", { id: "b", value: "different" });
+    await store.createEdge(ns, "KNOWS", "Entity", "a", "Entity", "b", {
+      id: "edge:a",
+      revision: 1,
+      is_current: true,
+      value,
+    });
+    const rows = await store.matchNodes(ns, "Entity", { equals: { value } });
+    expect(rows.map((row) => row.id)).toEqual(["a"]);
+    const candidates = await store.matchNodes(ns, "Entity", {
+      equals: { id: "a" },
+      any_of: { value: ["not a match", value], id: ["a", "b"] },
+    });
+    expect(candidates.map((row) => row.id)).toEqual(["a"]);
+    expect(await store.matchNodes(ns, "Entity", { equals: { value }, any_of: { id: [] } })).toEqual([]);
+    const edges = await store.matchEdges(ns, { from_label: "Entity", equals: { value } });
+    expect(edges.map((row) => row.props.id)).toEqual(["edge:a"]);
+    expect(await store.deleteNodesBy(ns, "Entity", { value })).toBe(1);
+    expect(await store.getNode(ns, "Entity", "a")).toBeNull();
+    expect(await store.getNode(ns, "Entity", "b")).not.toBeNull();
+  });
 
   it("clears null property keys, rejects unsafe values and blank keys, and trims aliases", async () => {
     const g = open();

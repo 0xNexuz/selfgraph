@@ -10,6 +10,7 @@ import {
   StoreError,
   ValidationError,
 } from "../src/index.js";
+import { jsonIso } from "../src/internal/time.js";
 import type { ContradictionMode, Schema, SchemaMode } from "../src/schema.js";
 import { captureWarnings, forEachStore, freshGraphs, type StoreSpec, worksAt } from "./helpers.js";
 
@@ -44,6 +45,44 @@ async function instant(): Promise<Date> {
 
 function suite(spec: StoreSpec): void {
   const open = freshGraphs(spec, "temporal");
+
+  for (const side of ["from", "to"] as const) {
+    for (const defaultTime of [false, true]) {
+      it(`strict retired historical replay at ${side}, default time ${defaultTime}`, async () => {
+        const schema: Schema = {
+          entities: [{ name: "Person" }, { name: "Company" }],
+          relations: [{ type: "WORKS_AT", [side]: { max_count: 1 } }],
+        };
+        const g = open({ schema, schema_mode: "strict" });
+        const fact = (company: string, year: number) => {
+          const rel = annAt(company, year);
+          return side === "from" ? rel : { ...rel, from_entity: rel.to_entity, to_entity: rel.from_entity };
+        };
+        const old = fact("acme", 2020);
+        await g.insert.facts({ entities: PEOPLE, relations: [old] });
+        await g.insert.facts({ relations: [fact("globex", 2023)] }, { contradiction: "supersede" });
+        const rid = ids.relationId(old.from_entity, old.type, old.to_entity);
+        const before = await g.relations.versions(rid);
+        const { event_time: _time, ...undated } = old;
+        const replay = defaultTime ? undated : old;
+        const result = await g.insert.facts(
+          { relations: [replay, replay] },
+          defaultTime ? { event_time: "2020-01-01" } : {},
+        );
+        expect(result.warnings).toEqual([]);
+        expect(result.relations).toEqual(before);
+        expect(await g.relations.versions(rid)).toEqual(before);
+        expect(await g.relations.get(rid)).toBeNull();
+        expect((await g.relations.list()).items).toHaveLength(1);
+        for (const year of [2023, 2024]) {
+          for (const batch of [[fact("acme", year)], [old, fact("acme", year)], [fact("acme", year), old]]) {
+            await expect(g.insert.facts({ relations: batch })).rejects.toThrow(/would exceed max_count/);
+            expect(await g.relations.versions(rid)).toEqual(before);
+          }
+        }
+      });
+    }
+  }
 
   it.each([
     "0001-01-01T00:00:00+01:00",
@@ -738,6 +777,72 @@ function suite(spec: StoreSpec): void {
       expect([ended!.invalidated_by, ended!.invalidated_at], JSON.stringify(batches)).toEqual([bobAcme, at(2022)]);
       expect((await g.relations.get(bobAcme))?.is_current).toBe(true);
     }
+
+    const subms = open({ schema: spec, contradiction: "supersede" });
+    await subms.insert.facts({
+      entities,
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000100Z",
+        },
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:globex",
+          event_time: "2024-01-01T00:00:00.000300Z",
+        },
+        {
+          from_entity: "person:bob",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000200Z",
+        },
+      ],
+    });
+    const [subEnded] = await subms.relations.versions(annAcme);
+    expect([subEnded!.invalidated_by, jsonIso(subEnded!.invalidated_at!)]).toEqual([
+      bobAcme,
+      "2024-01-01T00:00:00.000200Z",
+    ]);
+
+    const lateSubms = open({ schema: spec, contradiction: "supersede" });
+    await lateSubms.insert.facts({
+      entities,
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000100Z",
+        },
+        {
+          from_entity: "person:bob",
+          type: "WORKS_AT",
+          to_entity: "company:acme",
+          event_time: "2024-01-01T00:00:00.000300Z",
+        },
+      ],
+    });
+    await lateSubms.insert.facts({
+      relations: [
+        {
+          from_entity: "person:ann",
+          type: "WORKS_AT",
+          to_entity: "company:initech",
+          event_time: "2024-01-01T00:00:00.000200Z",
+        },
+      ],
+    });
+    const annInitech = ids.relationId("person:ann", "WORKS_AT", "company:initech");
+    const [corrected] = await lateSubms.relations.versions(annAcme);
+    expect([corrected!.revision, corrected!.invalidated_by, jsonIso(corrected!.invalidated_at!)]).toEqual([
+      2,
+      annInitech,
+      "2024-01-01T00:00:00.000200Z",
+    ]);
   });
 
   it("source-withdrawn relations stay out of supersede history", async () => {
@@ -915,6 +1020,95 @@ function suite(spec: StoreSpec): void {
     expect([newest!.revision, first!.invalidated_by]).toEqual([first!.revision + 1, GLOBEX]);
     const valid = await g.retrieve("Ann", { as_of: new Date(Date.UTC(2021, 5, 1)) });
     expect(valid.subgraph.relations.map((r) => r.id)).toEqual([ACME]);
+  });
+
+  for (const how of ["insert", "update"] as const) {
+    const backdate = (g: SelfGraph, rid: string, rel: { event_time?: string }) =>
+      how === "insert" ? insert(g, [rel]) : g.relations.update(rid, { event_time: rel.event_time });
+
+    it(`moving the superseding fact earlier by ${how} reinstates the relation it retired`, async () => {
+      const g = await graph("supersede");
+      await insert(g, [annAt("acme", 2020)]);
+      await insert(g, [annAt("globex", 2022)]);
+      const learned = await instant();
+      const moved = await backdate(g, GLOBEX, annAt("globex", 2019));
+      if (!("warnings" in moved))
+        expect([moved.id, moved.is_current, moved.invalidated_by]).toEqual([GLOBEX, false, ACME]);
+      const [acme, old] = await g.relations.versions(ACME);
+      const [globex] = await g.relations.versions(GLOBEX);
+      expect([acme!.is_current, acme!.revision, acme!.event_time, acme!.invalidated_by]).toEqual([
+        true,
+        2,
+        at(2020),
+        null,
+      ]);
+      expect([old!.is_current, old!.invalidated_by, old!.invalidated_at]).toEqual([false, GLOBEX, at(2022)]);
+      expect([globex!.is_current, globex!.invalidated_by, globex!.invalidated_at]).toEqual([false, ACME, at(2020)]);
+      expect((await g.relations.list()).items.map((r) => r.id)).toEqual([ACME]);
+      const valid = async (when: Date, options: object = {}) =>
+        (await g.retrieve("Ann", { as_of: when, ...options })).subgraph.relations.map((r) => r.id);
+      expect(await valid(new Date(Date.UTC(2019, 5, 1)))).toEqual([GLOBEX]);
+      expect([await valid(at(2021)), await valid(at(2023))]).toEqual([[ACME], [ACME]]);
+      expect(await valid(at(2023), { known_at: learned })).toEqual([GLOBEX]);
+    });
+
+    for (const successor of [false, true]) {
+      const name = successor
+        ? "stays retired when the other end displaces it"
+        : "is reinstated when no end displaces it";
+      it(`a relation capped at both ends ${name}, moved by ${how}`, async () => {
+        const spec: Schema = {
+          entities: [{ name: "Person" }, { name: "Company" }],
+          relations: [
+            { type: "WORKS_AT", from: { types: ["Person"], max_count: 1 }, to: { types: ["Company"], max_count: 1 } },
+          ],
+        };
+        const link = (person: string, company: string, year: number) =>
+          worksAt(`person:${person}`, `company:${company}`, year);
+        const [annAcme, bobAcme, annGlobex] = [
+          ["ann", "acme"],
+          ["bob", "acme"],
+          ["ann", "globex"],
+        ].map(([person, company]) => ids.relationId(`person:${person}`, "WORKS_AT", `company:${company}`));
+        const g = open({ schema: spec, contradiction: "supersede" });
+        await g.insert.facts({ entities: PEOPLE });
+        await insert(g, [link("ann", "acme", 2020)]);
+        await insert(g, [link("ann", "globex", 2022)]);
+        if (successor) await insert(g, [link("bob", "acme", 2024)]);
+        await backdate(g, annGlobex!, link("ann", "globex", 2018));
+        const [held] = await g.relations.versions(annAcme!);
+        const [moved] = await g.relations.versions(annGlobex!);
+        expect([moved!.invalidated_by, moved!.invalidated_at]).toEqual([annAcme, at(2020)]);
+        expect([held!.is_current, held!.invalidated_by, held!.invalidated_at]).toEqual(
+          successor ? [false, bobAcme, at(2024)] : [true, null, null],
+        );
+        const valid = async (when: Date) =>
+          (await g.retrieve("Ann", { as_of: when })).subgraph.relations.map((r) => r.id);
+        expect([await valid(at(2019)), await valid(at(2023))]).toEqual([[annGlobex], [annAcme]]);
+      });
+    }
+  }
+
+  it("an insert that moves a fact reports what it stored", async () => {
+    const g = await graph("supersede");
+    await insert(g, [annAt("acme", 2020)]);
+    await insert(g, [annAt("globex", 2022)]);
+    const result = await insert(g, [annAt("acme", 2020), annAt("globex", 2019)]);
+    const stored = [(await g.relations.versions(ACME))[0]!, (await g.relations.versions(GLOBEX))[0]!];
+    expect(result.relations).toEqual(stored);
+    expect(stored.map((r) => [r.is_current, r.invalidated_by])).toEqual([
+      [true, null],
+      [false, ACME],
+    ]);
+  });
+
+  it("updating the superseding fact to a later time moves the retirement it caused", async () => {
+    const g = await graph("supersede");
+    await insert(g, [annAt("acme", 2020)]);
+    await insert(g, [annAt("globex", 2022)]);
+    expect((await g.relations.update(GLOBEX, { event_time: at(2025) })).is_current).toBe(true);
+    const [acme] = await g.relations.versions(ACME);
+    expect([acme!.is_current, acme!.invalidated_by, acme!.invalidated_at]).toEqual([false, GLOBEX, at(2025)]);
   });
 
   it("rejects an invalid as_of and a closed graph", async () => {

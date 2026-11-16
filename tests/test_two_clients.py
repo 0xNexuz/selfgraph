@@ -9,35 +9,12 @@ import pytest
 from helpers import KUZU, run
 
 from selfgraph import KuzuStore, SelfGraph, SyncSelfGraph
-from selfgraph.stores.kuzu import _LOCKS, _WRITE_LOCKS
+from selfgraph.stores.kuzu import _DATABASES, _LOCKS, _OPEN_STORES, _WRITE_LOCKS
 
 MAX_ONE = {
     "entities": [{"name": "Person"}, {"name": "Company"}],
     "relations": [{"type": "WORKS_AT", "from": {"types": ["Person"], "max_count": 1}}],
 }
-
-MANY_WRITERS = 64
-MANY_WRITERS_SCRIPT = f"""
-import asyncio, tempfile
-from pathlib import Path
-
-from selfgraph import KuzuStore, SelfGraph
-
-
-async def main():
-    path = str(Path(tempfile.mkdtemp()) / "graph.kuzu")
-    graph = SelfGraph(store=KuzuStore(path), namespace="pool")
-    await graph.initialize()
-
-    async def one(i):
-        await graph.entities.create(f"Thing {{i}}", "Thing")
-
-    await asyncio.wait_for(asyncio.gather(*(one(i) for i in range({MANY_WRITERS}))), timeout=45)
-    print(len((await graph.entities.list(limit={MANY_WRITERS} + 5)).items))
-
-
-asyncio.run(main())
-"""
 
 
 def a_path() -> str:
@@ -78,10 +55,33 @@ def test_two_clients_on_one_database_serialize_their_writes():
 def test_the_shared_locks_are_dropped_with_the_database():
     path = a_path()
     store = KuzuStore(path)
+    assert store._cache_key == path  # noqa: SLF001
     assert path in _LOCKS and path in _WRITE_LOCKS
     run(store.close())
     assert path not in _LOCKS, "the lock outlived the database"
     assert path not in _WRITE_LOCKS, "the write lock outlived the database"
+
+
+@pytest.mark.skipif(not KUZU, reason="anonymous stores each get their own cache key")
+def test_two_in_memory_stores_share_neither_data_nor_locks():
+    first = KuzuStore(":memory:")
+    second = KuzuStore(":memory:")
+    assert first._lock is not second._lock  # noqa: SLF001
+    assert first._write_lock is not second._write_lock  # noqa: SLF001
+    run(first.initialize())
+    run(second.initialize())
+    run(first.upsert_node("mem", "Thing", "only-first", {"name": "one"}))
+    assert run(second.get_node("mem", "Thing", "only-first")) is None
+    first_key = first._cache_key  # noqa: SLF001
+    second_key = second._cache_key  # noqa: SLF001
+    assert first_key is not second_key
+    run(first.close())
+    run(second.close())
+    for key in (first_key, second_key):
+        assert key not in _LOCKS
+        assert key not in _WRITE_LOCKS
+        assert key not in _DATABASES
+        assert key not in _OPEN_STORES
 
 
 @pytest.mark.skipif(not KUZU, reason="one embedded database per path")

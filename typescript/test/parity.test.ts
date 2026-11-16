@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import UPPERCASE from "@unicode/unicode-15.0.0/Binary_Property/Uppercase/code-points.mjs";
 import { describe, expect, it } from "vitest";
 import { chunkByChars, chunkText, loadTokenizer } from "../src/chunking.js";
 import { errorReason, ValidationError } from "../src/errors.js";
@@ -152,6 +153,10 @@ describe("extraction, chunking, and retrieval helpers match Python", () => {
     );
     expect(chunkText(fx.chunks.text, { max_tokens: 1 }).length).toBeGreaterThan(0);
     expect(fx.extract.map((c: { text: string }) => countTokens(c.text))).toEqual(fx.chunks.count_tokens);
+  });
+
+  it("the regex extractor starts names at the same pinned Unicode 15.0 uppercase letters", () => {
+    expect(String.fromCodePoint(...UPPERCASE)).toBe(fx.uppercase);
   });
 
   it("the LLM-free regex extractor assembles the same facts", async () => {

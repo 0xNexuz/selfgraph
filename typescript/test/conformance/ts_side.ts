@@ -6,6 +6,7 @@ import {
   ids,
   KuzuStore,
   SelfGraph,
+  SelfGraphError,
   toJsonable,
   toNeo4jOntology,
   ValidationError,
@@ -394,7 +395,14 @@ export const FACTS = {
       type: "Person",
       name: "Jane Doe",
       aliases: ["JD", "J. Doe"],
-      properties: { title: "CTO", score: 1.5, tags: ["a", "é"], meta: { x: null, ok: true } },
+      properties: {
+        title: "CTO",
+        score: 1.5,
+        weight: 2.0,
+        ratios: [1.0, 0.5, -0.0, 1e-7],
+        tags: ["a", "é"],
+        meta: { x: null, ok: true, level: 3.0 },
+      },
     },
     { type: "Company", name: "Acme, Inc.", external_ids: { crunchbase: "acme-inc" } },
     { type: "Database", name: "HydraDB" },
@@ -408,7 +416,7 @@ export const FACTS = {
       from_entity: "person:jane-doe",
       type: "works at",
       to_entity: "company:acme",
-      properties: { since: 2020, note: "x" },
+      properties: { since: 2020, note: "x", weight: 2.0 },
     },
     {
       from_entity: "company:acme",
@@ -471,12 +479,63 @@ const USES_SPEC = {
   relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
 };
 
+class Opaque {}
+
+/**
+ * Run a call that should fail and return its error class and message.
+ *
+ * @param call (() => Promise<unknown>): the call.
+ * @return (Promise<string[]>): the error class name and message, or ["accepted"] when the call succeeds.
+ */
+async function errorOf(call: () => Promise<unknown>): Promise<string[]> {
+  try {
+    await call();
+  } catch (exc) {
+    if (!(exc instanceof SelfGraphError)) throw exc;
+    return [exc.name, exc.message];
+  }
+  return ["accepted"];
+}
+
+/**
+ * Pass a bad stance, status, or evidence shape to each resource method that takes one.
+ *
+ * An Opaque instance stands in for bad evidence because both SDKs name a class instance by its class.
+ *
+ * @param graph (SelfGraph): the conformance graph.
+ * @return (Promise<Record<string, string[]>>): each case's error class and message.
+ */
+async function choiceErrors(graph: SelfGraph): Promise<Record<string, string[]>> {
+  const worksAt = ids.relationId("person:jane-doe", "WORKS_AT", "company:acme");
+  const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
+  const bad = new Opaque() as never;
+  return {
+    pref_create_stance: await errorOf(() =>
+      graph.preferences.create("person:jane-doe", "database", "database:hydradb", { stance: "meh" as never }),
+    ),
+    pref_list_stance: await errorOf(() => graph.preferences.list({ stance: "meh" as never })),
+    dec_create_status: await errorOf(() => graph.decisions.create("Bad status", { status: "weird" as never })),
+    dec_list_status: await errorOf(() => graph.decisions.list({ status: "weird" as never })),
+    dec_update_status: await errorOf(() => graph.decisions.update(dec, { status: "weird" as never })),
+    dec_update_missing: await errorOf(() => graph.decisions.update("decision:nope", { status: "weird" as never })),
+    rel_create_evidence: await errorOf(() =>
+      graph.relations.create("person:jane-doe", "KNOWS", "company:acme", { evidence: bad }),
+    ),
+    rel_create_evidence_item: await errorOf(() =>
+      graph.relations.create("person:jane-doe", "KNOWS", "company:acme", { evidence: [bad] }),
+    ),
+    rel_update_evidence: await errorOf(() => graph.relations.update(worksAt, { evidence: bad })),
+    rel_update_evidence_item: await errorOf(() => graph.relations.update(worksAt, { evidence: [bad] })),
+  };
+}
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
   out.text = toJsonable(
     await graph.insert.text(TEXT, { source_id: "notes", metadata: { author: "conformance", n: 1, f: 0.5 } }),
   );
+  out.unicode_text = toJsonable(await graph.insert.text("Émile Zola met Łukasz Nowak.", { source_id: "unicode" }));
   const worksAt = ids.relationId("person:jane-doe", "WORKS_AT", "company:acme");
   out.rel_update = toJsonable(
     await graph.relations.update(worksAt, {
@@ -604,8 +663,28 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.schema_null_required = exc.message;
   }
+  out.choice_errors = await choiceErrors(graph);
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  const pruneGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:prune`,
+    schema: {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [{ type: "WORKS_AT", aliases: ["employed_by"] }],
+    },
+  });
+  await pruneGraph.initialize();
+  const person = await pruneGraph.entities.create("Alice", "Person");
+  const company = await pruneGraph.entities.create("Acme", "Company");
+  const relation = await pruneGraph.relations.create(person.id, "employed_by", company.id);
+  await pruneGraph.maintenance.decay({ now: new Date(), half_life_days: 1e-9, dry_run: false });
+  const byAlias = await pruneGraph.maintenance.prune({ min_relevance: 1.0, relation_types: ["employed_by"] });
+  const byCanonical = await pruneGraph.maintenance.prune({ min_relevance: 1.0, relation_types: ["WORKS_AT"] });
+  out.prune_relation_alias = {
+    relation_id: relation.id,
+    alias: byAlias.relation_ids,
+    canonical: byCanonical.relation_ids,
+  };
   await graph.insert.facts(
     { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
     { source_id: "merge-seed" },
@@ -629,6 +708,48 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     relations: undone.relations.map((r) => r.id),
     preferences: undone.preferences.map((p) => p.id),
     decisions: undone.decisions.map((d) => d.id),
+  };
+  const stepsGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:unmerge-steps`,
+    resolver: "fuzzy",
+  });
+  await stepsGraph.initialize();
+  const ibm = ids.entityId("Company", "International Business Machines");
+  const bigBlue = ids.entityId("Company", "Big Blue");
+  const bob = ids.entityId("Person", "Bob");
+  const loop1 = ids.relationId(bigBlue, "OWNS", ibm);
+  const loop2 = ids.relationId(bigBlue, "PARENT_OF", ibm);
+  const bobRel = ids.relationId(bob, "WORKS_AT", ibm);
+  const mergedSteps = await stepsGraph.insert.facts({
+    entities: [
+      { type: "Company", name: "International Business Machines", external_ids: { ticker: "IBM" } },
+      { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+      { type: "Person", name: "Robert", aliases: ["Bob"] },
+      { type: "Person", name: "Bob" },
+    ],
+    relations: [
+      { from_entity: bigBlue, type: "OWNS", to_entity: ibm },
+      { from_entity: bigBlue, type: "PARENT_OF", to_entity: ibm },
+      { from_entity: bob, type: "WORKS_AT", to_entity: ibm },
+    ],
+    decisions: [{ title: "acquisition", steps: [loop1, loop2, bobRel] }],
+  });
+  const mergeBB = mergedSteps.merges.find((m) => m.absorbed_id === bigBlue)!;
+  const mergeBob = mergedSteps.merges.find((m) => m.absorbed_id === bob)!;
+  const [decision] = mergedSteps.decisions;
+  const decisionSteps = async (did: string): Promise<string[]> =>
+    (await stepsGraph.decisions.get(did))!.steps.map((s) => s.relation_id);
+  const afterMerge = await decisionSteps(decision!.id);
+  const afterBbMerge = await stepsGraph.entities.unmerge(mergeBB.id);
+  const afterBb = await decisionSteps(decision!.id);
+  const afterBobMerge = await stepsGraph.entities.unmerge(mergeBob.id);
+  const afterBob = await decisionSteps(decision!.id);
+  out.unmerge_decision_steps = {
+    after_merge: afterMerge,
+    after_bb: afterBb,
+    after_bob: afterBob,
+    returned_after_bb: afterBbMerge.decisions[0]!.steps.map((s) => s.relation_id),
+    returned_after_bob: afterBobMerge.decisions[0]!.steps.map((s) => s.relation_id),
   };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
@@ -665,6 +786,56 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  const reciprocal = new SelfGraph(graph.store, { namespace: `${graph.namespace}_reciprocal`, resolver: "default" });
+  await reciprocal.entities.create("Robert", "Person", { aliases: ["Bob"] });
+  for (const [source, target] of [
+    ["person:bob", "person:robert"],
+    ["person:robert", "person:bob"],
+    ["person:bob", "person:robert"],
+  ] as const) {
+    await reciprocal.insert.facts({
+      entities: [{ type: "Person", name: "Bob" }],
+      relations: [{ from_entity: source, type: "KNOWS", to_entity: target }],
+    });
+  }
+  const reciprocalRecord = (await reciprocal.entities.merges("person:robert")).items[0]!;
+  const reciprocalRestored = await reciprocal.entities.unmerge(reciprocalRecord.id);
+  out.reciprocal_merge = {
+    rewrites: reciprocalRecord.rewrites.length,
+    relations: reciprocalRestored.relations.map((r) => r.id).sort(),
+  };
+  const mixed = new SelfGraph(graph.store, { namespace: `${graph.namespace}_mixed_case`, resolver: "fuzzy" });
+  await mixed.insert.facts({ entities: [{ type: "Person", name: "Jane Doe", aliases: ["JD"] }] });
+  const mixedFuzzy = await mixed.insert.facts({
+    entities: [
+      { type: "person", name: "Jane Does" },
+      { type: "thing", name: "JD" },
+    ],
+  });
+  const orgSchema = {
+    entities: [
+      { name: "Organization", aliases: ["Org"] },
+      { name: "Company", parent: "Organization" },
+    ],
+  };
+  const mixedSchema = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_mixed_schema`,
+    resolver: "default",
+    schema: orgSchema,
+  });
+  await mixedSchema.insert.facts({
+    entities: [{ type: "Organization", name: "International Business Machines", aliases: ["IBM"] }],
+  });
+  const mixedOrg = await mixedSchema.insert.facts({
+    entities: [
+      { type: "company", name: "IBM" },
+      { type: "org", name: "Big Blue", aliases: ["IBM"] },
+    ],
+  });
+  out.mixed_case_merges = [
+    mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+    mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
+  ];
   await graph.insert.facts(
     {
       entities: [
@@ -696,6 +867,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const moved = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_moved`,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  await moved.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const use = (name: string, year: number) => ({
+    from_entity: "person:ann",
+    type: "USES",
+    to_entity: `tool:${name}`,
+    event_time: `${year}-01-01T00:00:00+00:00`,
+  });
+  await moved.insert.facts({ relations: [use("a", 2020), use("b", 2021), use("c", 2022)] });
+  const updated = await moved.relations.update(uses[2]!, { event_time: "2019-01-01T00:00:00+00:00" });
+  await moved.insert.facts({ relations: [use("d", 2023)] });
+  await moved.insert.facts({ relations: [use("d", 2018)] });
+  const movedVersions: Record<string, unknown> = {};
+  for (const rid of uses) movedVersions[rid] = await moved.relations.versions(rid, { newest_first: false });
+  out.resettle_moved = toJsonable({
+    updated: [updated.revision, updated.is_current, updated.invalidated_by],
+    versions: movedVersions,
+  });
   const requireIdentifierCases: Record<string, string> = {};
   for (const name of ["id", "external_ids", "a b", "1x", ""]) {
     try {
@@ -705,6 +900,59 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }
   }
   out.require_identifier = requireIdentifierCases;
+  const replayGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}-strict-replay`,
+    schema: { relations: [{ type: "WORKS_AT", from: { max_count: 1 } }] },
+    schema_mode: "strict",
+  });
+  const old = {
+    from_entity: "person:ann",
+    type: "WORKS_AT",
+    to_entity: "company:acme",
+    event_time: "2020-01-01",
+  };
+  await replayGraph.insert.facts({
+    entities: [
+      { type: "Person", name: "Ann" },
+      { type: "Company", name: "Acme" },
+      { type: "Company", name: "Globex" },
+    ],
+    relations: [old],
+  });
+  await replayGraph.insert.facts(
+    { relations: [{ ...old, to_entity: "company:globex", event_time: "2023-01-01" }] },
+    { contradiction: "supersede" },
+  );
+  const replayed = await replayGraph.insert.facts({ relations: [old] });
+  out.strict_retired_replay = {
+    relations: replayed.relations.map((r) => [r.id, r.revision, r.is_current]),
+    warnings: replayed.warnings.map((w) => w.code),
+  };
+  const extraNs = `${graph.namespace}:extra`;
+  await graph.store.upsertNodes(
+    extraNs,
+    "Extra",
+    [
+      ["extra:batch-1", { id: "extra:batch-1", name: "batch-1" }],
+      ["extra:batch-2", { id: "extra:batch-2", name: "batch-2" }],
+    ],
+    { extra_label: "CustomLabel" },
+  );
+  await graph.store.upsertNode(
+    extraNs,
+    "Extra",
+    "extra:single",
+    { id: "extra:single", name: "single" },
+    { extra_label: "CustomLabel" },
+  );
+  const primaryNode = await graph.store.getNode(extraNs, "Extra", "extra:batch-1");
+  const extraBatchNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:batch-2");
+  const extraSingleNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:single");
+  out.extra_label = {
+    primary: primaryNode ? (primaryNode.id as string) : null,
+    batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
+    single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
+  };
   return out;
 }
 
@@ -801,6 +1049,14 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     answerable,
+    filters:
+      store instanceof KuzuStore
+        ? {
+            aliases_equals: await store.matchNodes(ns, "Entity", { equals: { aliases: ["JD", "J. Doe"] } }),
+            aliases_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [["JD", "J. Doe"]] } }),
+            empty_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [] } }),
+          }
+        : {},
     prune_types: pruned,
     known_at_sources: {
       seeds: historical.seeds.map((s) => s.id),
@@ -911,6 +1167,67 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
   const delete_versions = (
     await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
   ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  await graph.insert.facts({
+    entities: [
+      ...["Frank", "Grace", "Heidi", "Ivan"].map((name) => ({ type: "Person", name })),
+      ...["Cyberdyne", "Tyrell", "Soylent", "Vandelay"].map((name) => ({ type: "Company", name })),
+    ],
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:tyrell",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+      {
+        from_entity: "person:grace",
+        type: "WORKS_AT",
+        to_entity: "company:cyberdyne",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000100Z",
+      },
+      {
+        from_entity: "person:ivan",
+        type: "WORKS_AT",
+        to_entity: "company:soylent",
+        event_time: "2024-01-01T00:00:00.000300Z",
+      },
+    ],
+  });
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:heidi",
+        type: "WORKS_AT",
+        to_entity: "company:vandelay",
+        event_time: "2024-01-01T00:00:00.000200Z",
+      },
+    ],
+  });
+  const subms: Record<string, unknown> = {};
+  for (const [person, company] of [
+    ["frank", "cyberdyne"],
+    ["heidi", "soylent"],
+  ]) {
+    const rid = ids.relationId(`person:${person}`, "WORKS_AT", `company:${company}`);
+    subms[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
   return {
     warnings,
     versions,
@@ -918,5 +1235,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     withdrawn_versions,
     delete_restored: deleted.restored_relations,
     delete_versions,
+    subms,
   };
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
 from datetime import datetime
 from functools import partial
@@ -360,8 +361,28 @@ def _require_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
     _ids._require_clean_json(name, value, safe_ints=safe_ints)
 
 
-def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
-    """Validate an optional mapping has string keys and JSON-serializable values, up front.
+def _whole_floats_as_ints(value: Any) -> Any:
+    """Turn each whole float within the safe integer range, other than -0.0, into an int, as TypeScript stores it.
+
+    @param value (Any): a JSON-like value, searched through mappings, lists, and tuples.
+    @return (Any): the value with those floats as ints.
+    """
+    if isinstance(value, float):
+        whole = (
+            value.is_integer()
+            and abs(value) <= _ids.MAX_SAFE_INTEGER
+            and not (value == 0 and math.copysign(1, value) < 0)
+        )
+        return int(value) if whole else value
+    if isinstance(value, Mapping):
+        return {k: _whole_floats_as_ints(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_whole_floats_as_ints(v) for v in value]
+    return value
+
+
+def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> dict[str, Any] | None:
+    """Validate an optional mapping has string keys and JSON-serializable values, up front, and return it to store.
 
     Callers that supersede a version before encoding must reject a non-serializable value here,
     before the supersede write, or a mid-write encode failure leaves no current version.
@@ -369,14 +390,16 @@ def _require_json_mapping(name: str, value: Any, *, safe_ints: bool = True) -> N
     @param name (str): the field name for the error message.
     @param value (Any): the value to check, or None.
     @param safe_ints (bool): reject integers outside +/-(2**53 - 1); stored values must round-trip in TypeScript.
-    @return (None): nothing; raises ValidationError when not a JSON string-keyed mapping or a key is blank.
+    @return (dict[str, Any] | None): the mapping with whole-number floats as ints, as TypeScript stores them, or
+        None for None; raises ValidationError when not a JSON string-keyed mapping or a key is blank.
     """
     if value is None:
-        return
+        return None
     _require_mapping(name, value, safe_ints=safe_ints)
     if any(not key.strip() for key in value):
         raise ValidationError(f"{name} keys cannot be empty or whitespace")
     _dumps(dict(value))
+    return _whole_floats_as_ints(value)
 
 
 def _canon_props(props: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -882,7 +905,7 @@ async def validate_facts(
     for item in (*facts.entities, *facts.relations, *facts.preferences):
         if item.properties is None:
             raise ValidationError("properties must be a mapping, got NoneType")
-        _require_json_mapping("properties", item.properties)
+        item.properties = _require_json_mapping("properties", item.properties)
     for ent in facts.entities:
         _require_str_mapping("external_ids", ent.external_ids)
         _require_list("entity aliases", ent.aliases)
@@ -1085,8 +1108,7 @@ async def create_entity(
         _require_list("aliases", aliases)
     if external_ids is not None:
         _require_str_mapping("external_ids", external_ids)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     if schema_check is not None:
         subject = EntityInput(id=eid if id else None, type=type, name=name, properties=properties)
         await schema_check(runner, Extraction(entities=[subject]))
@@ -1148,7 +1170,7 @@ async def update_entity(
         if key in fields:
             _require_list(key, fields[key])
     if "properties" in fields:
-        _require_json_mapping("properties", fields["properties"])
+        fields["properties"] = _require_json_mapping("properties", fields["properties"])
     if "external_ids" in fields:
         _require_str_mapping("external_ids", fields["external_ids"])
     if "type" in fields:
@@ -1395,7 +1417,7 @@ async def delete_entities(
     pointing at them, their evidence, and the merge records they survived or were absorbed in. A considered
     alternative is dropped from a decision that is kept, and a kept preference about a deleted entity loses its
     about_entity in a new version. The max_count endpoints a deleted relation sat at are settled again after (see
-    resettle_after_delete). Ids that are not stored are skipped.
+    resettle_endpoints). Ids that are not stored are skipped.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -1463,7 +1485,7 @@ async def delete_entities(
     newest: dict[str, dict] = {}
     for edge in versions:
         _keep_newest(newest, edge)
-    counts["restored_relations"] = await resettle_after_delete(runner, ns, newest.values(), caps, now())
+    counts["restored_relations"] = await resettle_endpoints(runner, ns, newest.values(), caps, now())
     return counts
 
 
@@ -1760,6 +1782,16 @@ def _restated_event_time(named: datetime | None, *, stored: datetime | None, kee
     return stored if keep_stored else None
 
 
+def _reasserts(prev: Relation, effective: datetime) -> bool:
+    """Tell whether a write at an effective time brings a retired relation back as current.
+
+    @param prev (Relation): the stored version.
+    @param effective (datetime): the write's effective time.
+    @return (bool): True when prev is retired and the write is not earlier than its invalidation.
+    """
+    return not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+
+
 def _rank(rel: Relation) -> tuple[datetime, int, datetime]:
     """Order a relation among others at one endpoint: by effective time, then revision, then creation time.
 
@@ -1963,7 +1995,12 @@ class Contradictions:
 
 
 async def require_max_count(
-    runner: Any, ns: str, caps: Mapping[str, RelationCap] | None, relations: Iterable[RelationInput]
+    runner: Any,
+    ns: str,
+    caps: Mapping[str, RelationCap] | None,
+    relations: Iterable[RelationInput],
+    default_event_time: datetime | None,
+    created_at: datetime,
 ) -> None:
     """Reject relations that would exceed a schema max_count, against the stored graph or each other, before writing.
 
@@ -1973,6 +2010,8 @@ async def require_max_count(
     @param ns (str): namespace.
     @param caps (Mapping[str, RelationCap] | None): the max_count limits, or None without a schema.
     @param relations (Iterable[RelationInput]): the relations about to be written.
+    @param default_event_time (datetime | None): fallback event time.
+    @param created_at (datetime): timestamp of the planned write.
     @return (None): nothing; raises ValidationError on the first relation over a max_count.
     """
     keyed = []
@@ -1982,9 +2021,19 @@ async def require_max_count(
     tracker, _ = await _contradiction_check(
         runner, ns, "strict", caps, [(rtype, rel.from_entity, rel.to_entity) for _, rtype, rel in keyed]
     )
-    at = now()
-    for rid, rtype, rel in keyed if tracker is not None else ():
-        tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (at, 0, at))
+    if tracker is None:
+        return
+    stored = await _current_relations(runner, ns, [(rid, rel) for rid, _, rel in keyed])
+    admitted: set[str] = set()
+    for rid, rtype, rel in keyed:
+        effective = aware(rel.event_time or default_event_time or created_at)
+        edge = stored.get(rid)
+        if edge is not None and rid not in admitted:
+            prev = _relation_of(edge)
+            if not prev.is_current and not _reasserts(prev, effective):
+                continue
+        tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (effective, 0, created_at))
+        admitted.add(rid)
 
 
 def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
@@ -2137,10 +2186,10 @@ async def retire_relations(
     return [_relation_of(e) for e in gone.values()]
 
 
-async def resettle_after_delete(
-    runner: Any, ns: str, deleted: Iterable[dict], caps: Mapping[str, RelationCap] | None, at: datetime
+async def resettle_endpoints(
+    runner: Any, ns: str, moved: Iterable[dict], caps: Mapping[str, RelationCap] | None, at: datetime
 ) -> int:
-    """Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
+    """Settle again each max_count endpoint a deleted or moved relation sat at, as supersede would settle it now.
 
     Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
     Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
@@ -2149,27 +2198,28 @@ async def resettle_after_delete(
     retired, or a retired one whose invalidation settle corrects, takes a new revision naming the relation and time
     that now displace it, so known_at reads still see the earlier retirement. A current one settle retires is retired
     as a supersede retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so
-    it is left as it is. Both endpoints of each deleted relation are locked before they are read.
+    it is left as it is. Both endpoints of each deleted or moved relation are locked before they are read.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
-    @param deleted (Iterable[dict]): the edge rows of the deleted relations, read before they were deleted.
+    @param moved (Iterable[dict]): the edge rows of the deleted relations, read before they were deleted, or of the
+        new versions of the moved ones.
     @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
-    @param at (datetime): the delete's timestamp, the created_at of each restored revision.
+    @param at (datetime): the write's timestamp, the created_at of each restored revision.
     @return (int): how many relations came back.
     """
     caps = caps or {}
-    deleted = [e for e in deleted if _cap_slots(caps, e["type"], e["from_id"], e["to_id"])]
-    if not deleted:
+    moved = [e for e in moved if _cap_slots(caps, e["type"], e["from_id"], e["to_id"])]
+    if not moved:
         return 0
-    for eid in _dedup_list(end for edge in deleted for end in (edge["from_id"], edge["to_id"])):
+    for eid in _dedup_list(end for edge in moved for end in (edge["from_id"], edge["to_id"])):
         await runner.lock_node(ns, L_ENTITY, eid)
-    found = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in deleted])
+    found = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in moved])
     members: dict[tuple[str, str, str], set[str]] = {}
-    for edge in [*deleted, *found.values()]:
+    for edge in [*moved, *found.values()]:
         for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"]):
             members.setdefault(key, set()).add(edge["props"]["id"])
-    freed = {key for edge in deleted for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])}
+    freed = {key for edge in moved for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])}
     stale = [
         edge
         for edge in found.values()
@@ -2301,6 +2351,7 @@ async def upsert_relations(
     writes: dict[tuple[str, int], dict] = {}
     retires: dict[tuple[str, int], dict] = {}
     out: list[tuple[str, int, Relation]] = []
+    moved: dict[str, None] = {}
     for rid, rtype, rel, _ in keyed:
         named = rel.event_time if rel.event_time is not None else default_event_time
         edge = current.get(rid)
@@ -2327,10 +2378,12 @@ async def upsert_relations(
             effective = aware(event_time or created_at)
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
-            reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+            reassert = _reasserts(prev, effective)
             unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
                 event_time
             )
+            if event_time is not None and to_iso(prev.event_time) != to_iso(event_time):
+                moved[rid] = None
             if unchanged and not reassert:
                 write = sources != prev.source_count
                 props = {**edge["props"], "source_count": sources}
@@ -2384,6 +2437,12 @@ async def upsert_relations(
         if rows:
             await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
     await _write_evidence(runner, ns, records, created_at)
+    if contradiction == "supersede" and moved:
+        await resettle_endpoints(runner, ns, [current[rid] for rid in moved], caps, created_at)
+        stored = {
+            rid: await _newest_edge(runner, ns, rid, _is_relation_type) for rid in _dedup_list(r for r, _, _ in out)
+        }
+        return [_relation_of(stored[rid]) for rid, _, _ in out]
     final = {**writes, **retires}
     result = []
     for rid, revision, rel in out:
@@ -2434,8 +2493,7 @@ async def create_relation(
     _require_text("relation type", type)
     _require_text("relation to_entity", to_entity)
     from_entity, to_entity = _ids._canonical_id(from_entity), _ids._canonical_id(to_entity)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     event_time = parse_time(event_time, "event_time")
     rtype = _ids.normalize_rel_type(type)
     _validate_own_id("relation", id)
@@ -2504,8 +2562,10 @@ async def update_relation(
     event_time: datetime | None,
     evidence: list[Evidence] | None,
     schema_check: SchemaCheck | None = None,
+    contradiction: str = "off",
+    caps: Mapping[str, RelationCap] | None = None,
 ) -> Relation:
-    """Create a new version of a relation with changed properties.
+    """Create a new version of a relation, settling its max_count endpoints again when supersede moves its event_time.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2516,9 +2576,13 @@ async def update_relation(
     @param evidence (list[Evidence] | None): evidence to merge.
     @param schema_check (SchemaCheck | None): checks the resulting relation against the schema before the write, given
         the stored version too so only violations the update introduces count.
-    @return (Relation): the new current version; raises ValidationError for a relation a contradiction invalidated.
+    @param contradiction (str): "supersede" settles the endpoints again when event_time moves; any other mode leaves
+        them as they are, since an update adds no relation.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @return (Relation): the new version, current unless supersede retired it; raises ValidationError for a relation a
+        contradiction invalidated.
     """
-    _require_json_mapping("set_properties", set_properties)
+    set_properties = _require_json_mapping("set_properties", set_properties)
     _require_list("remove_properties", remove_properties)
     given = {
         "set_properties": set_properties,
@@ -2568,6 +2632,10 @@ async def update_relation(
         runner, ns, current.from_entity, current.type, current.to_entity, props, retire=True
     )
     await _write_evidence(runner, ns, records, created_at)
+    if contradiction == "supersede" and to_iso(new_event_time) != to_iso(current.event_time):
+        edge = {"type": rel.type, "from_id": rel.from_entity, "to_id": rel.to_entity, "props": props}
+        await resettle_endpoints(runner, ns, [edge], caps, created_at)
+        rel = _relation_of(await _newest_edge(runner, ns, rid, _is_relation_type))
     return rel
 
 
@@ -2792,7 +2860,7 @@ async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preferenc
 async def delete_relation(
     runner: Any, ns: str, rid: str, caps: Mapping[str, RelationCap] | None = None
 ) -> dict[str, int]:
-    """Delete a relation and all of its versions, then settle its max_count endpoints again (see resettle_after_delete).
+    """Delete a relation and all of its versions, then settle its max_count endpoints again (see resettle_endpoints).
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2808,7 +2876,7 @@ async def delete_relation(
     n = await runner.delete_edges(ns, rid)
     await _delete_evidence(runner, ns, rid)
     deleted_decisions = sum([await _delete_trace_quietly(runner, ns, tid) for tid in trace_ids])
-    restored = await resettle_after_delete(runner, ns, [newest], caps, now())
+    restored = await resettle_endpoints(runner, ns, [newest], caps, now())
     return {
         **_NO_DELETES,
         "deleted_relation_versions": n,
@@ -3122,8 +3190,7 @@ async def create_preference(
     _require_text("preference value_entity", value_entity)
     subject_entity, value_entity, about_entity = map(_ids._canonical_id, (subject_entity, value_entity, about_entity))
     key = _ids.normalize_text(key)
-    _require_json_mapping("properties", properties)
-    properties = _merge_props(None, properties)
+    properties = _merge_props(None, _require_json_mapping("properties", properties))
     event_time = parse_time(event_time, "event_time")
     _validate_own_id("preference", id)
     pid = id or _ids.preference_id(subject_entity, stance, key, value_entity)
@@ -3173,7 +3240,7 @@ async def update_preference(
     @return (Preference): the new current version.
     """
     _validate_strength(strength)
-    _require_json_mapping("properties", properties)
+    properties = _require_json_mapping("properties", properties)
     _require_list("remove_properties", remove_properties)
     event_time = parse_time(event_time, "event_time")
     cleared = _require_clear(

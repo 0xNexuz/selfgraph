@@ -45,7 +45,7 @@ _SCHEMA = (
     "CREATE REL TABLE IF NOT EXISTS R(FROM N TO N, sid STRING, ns STRING, etype STRING, "
     "is_current BOOLEAN, revision INT64, doc STRING)",
 )
-_DATABASES: dict[str, Any] = {}
+_DATABASES: dict[object, Any] = {}
 
 
 _PENDING: ContextVar[tuple[Future[None], ...]] = ContextVar("selfgraph_kuzu_locks", default=())
@@ -96,9 +96,9 @@ class _PathLock:
 
 
 _CACHE_LOCK = threading.Lock()
-_LOCKS: dict[str, _PathLock] = {}
-_WRITE_LOCKS: dict[str, _PathLock] = {}
-_OPEN_STORES: dict[str, int] = {}
+_LOCKS: dict[object, _PathLock] = {}
+_WRITE_LOCKS: dict[object, _PathLock] = {}
+_OPEN_STORES: dict[object, int] = {}
 _MAX_SKIP = 10_000_000
 _RECONNECT_EVERY = 500
 _NOW = "RETURN current_timestamp()"
@@ -160,7 +160,7 @@ def _where_doc_equals(alias: str, equals: dict | None, where: list[str], params:
     @return (None): nothing.
     """
     for i, (key, value) in enumerate(sorted((equals or {}).items())):
-        where.append(f"json_extract({alias}.doc, $k{i}) = $v{i}")
+        where.append(f"json_extract({alias}.doc, $k{i}) = json($v{i})")
         params[f"k{i}"] = require_identifier(key)
         params[f"v{i}"] = _jv(value)
 
@@ -175,12 +175,15 @@ def _where_doc_any_of(ns: str, any_of: dict | None, where: list[str], params: di
     @return (None): nothing.
     """
     for i, (key, values) in enumerate(sorted((any_of or {}).items())):
-        if key == "id":
+        key = require_identifier(key)
+        if not values:
+            where.append("false")
+        elif key == "id":
             where.append(f"n.pk IN $in{i}")
             params[f"in{i}"] = [_pk(ns, v) for v in values]
         else:
-            where.append(f"CAST(json_extract(n.doc, $ik{i}) AS STRING) IN $in{i}")
-            params[f"ik{i}"] = require_identifier(key)
+            where.append(f"CAST(json_extract(n.doc, $ik{i}) AS STRING) IN list_transform($in{i}, x -> json(x))")
+            params[f"ik{i}"] = key
             params[f"in{i}"] = [_jv(v) for v in values]
 
 
@@ -198,18 +201,19 @@ class KuzuStore(AutoCommitStore):
         path = os.path.expanduser(path)
         if path not in ("", ":memory:"):
             path = os.path.abspath(path)
+        key = object() if path in ("", ":memory:") else path
         with _CACHE_LOCK:
-            db = _DATABASES.get(path)
+            db = _DATABASES.get(key)
             if db is None:
                 os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
                 try:
-                    db = _DATABASES[path] = kuzu.Database(path, **db_kwargs)
+                    db = _DATABASES[key] = kuzu.Database(path, **db_kwargs)
                 except Exception as exc:  # noqa: BLE001
                     raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
-            _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
-            self._lock = _LOCKS.setdefault(path, _PathLock())
-            self._write_lock = _WRITE_LOCKS.setdefault(path, _PathLock())
-        self._path = path
+            _OPEN_STORES[key] = _OPEN_STORES.get(key, 0) + 1
+            self._lock = _LOCKS.setdefault(key, _PathLock())
+            self._write_lock = _WRITE_LOCKS.setdefault(key, _PathLock())
+        self._cache_key = key
         self._db = db
         self._connect = partial(kuzu.Connection, db)
         self._conn = self._connect()
@@ -275,12 +279,12 @@ class KuzuStore(AutoCommitStore):
             self._closed = True
             self._conn.close()
             with _CACHE_LOCK:
-                _OPEN_STORES[self._path] -= 1
-                if _OPEN_STORES[self._path] == 0:
-                    del _OPEN_STORES[self._path]
-                    _DATABASES.pop(self._path).close()
-                    _LOCKS.pop(self._path, None)
-                    _WRITE_LOCKS.pop(self._path, None)
+                _OPEN_STORES[self._cache_key] -= 1
+                if _OPEN_STORES[self._cache_key] == 0:
+                    del _OPEN_STORES[self._cache_key]
+                    _DATABASES.pop(self._cache_key).close()
+                    _LOCKS.pop(self._cache_key, None)
+                    _WRITE_LOCKS.pop(self._cache_key, None)
 
     async def get_node(self, ns: str, label: str, id: str) -> dict | None:
         res = await self._run(

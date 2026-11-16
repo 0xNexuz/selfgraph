@@ -15,7 +15,7 @@ const PY = process.env.SELFGRAPH_PY;
 const SCRIPT = fileURLToPath(new URL("./conformance/py_side.py", import.meta.url));
 const KUZU = tempKuzu("selfgraph-conf-");
 
-function py(cmd: "write" | "dump" | "schema" | "supersede", store: string, ns: string): unknown {
+function py(cmd: "write" | "dump" | "schema" | "supersede" | "kuzu_isolation", store: string, ns: string): unknown {
   const out = execFileSync(PY!, [SCRIPT, cmd, store, ns, KUZU], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(out);
 }
@@ -95,6 +95,21 @@ const live = new Map<string, boolean>();
 for (const spec of specs) live.set(spec.name, await reachable(spec));
 
 describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
+  it.skipIf(!live.get("kuzu"))("isolates anonymous Kuzu databases in both languages", async () => {
+    const result: boolean[] = [];
+    for (const path of ["", ":memory:"]) {
+      await using first = new SelfGraph(new KuzuStore(path));
+      await using second = new SelfGraph(new KuzuStore(path));
+      const entity = await first.entities.create("Jane", "Person");
+      result.push((await second.entities.get(entity.id)) === null);
+      await second.insert.facts({ entities: [{ name: "Jane", type: "Person" }] });
+      await second.entities.delete(entity.id);
+      result.push((await first.entities.get(entity.id))?.id === entity.id);
+    }
+    expect(result).toEqual([true, true, true, true]);
+    expect(py("kuzu_isolation", "-", "-")).toEqual(result);
+  });
+
   it("schema validation produces identical warnings in both languages", () => {
     expect(schemaWarnings()).toEqual(py("schema", "-", "-"));
   });
@@ -121,6 +136,12 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
         const tsOps = await ts(store, nsTs, write);
         expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
         expect(tsOps.facts_none).toBe("invalid facts: expected object");
+        for (const ops of [pyOps, tsOps]) {
+          const names = (ops as { unicode_text: { entities: { name: string }[] } }).unicode_text.entities.map(
+            (entity) => entity.name,
+          );
+          expect(names).toEqual(expect.arrayContaining(["Émile Zola", "Łukasz Nowak"]));
+        }
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));
@@ -130,6 +151,17 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
 
         const tsReadsTs = await ts(store, nsTs, (g) => dump(g, nsTs));
         const pyReadsTs = py("dump", store, nsTs);
+        if (store === "kuzu") {
+          for (const snapshot of [pyReadsPy, tsReadsPy, tsReadsTs, pyReadsTs]) {
+            expect(snapshot).toMatchObject({
+              filters: {
+                aliases_equals: [{ id: "person:jane-doe" }],
+                aliases_any_of: [{ id: "person:jane-doe" }],
+                empty_any_of: [],
+              },
+            });
+          }
+        }
 
         const evidence = mkdtempSync(join(tmpdir(), `selfgraph-conformance-${store}-`));
         const keep = { pyOps, tsOps, pyReadsPy, tsReadsPy, tsReadsTs, pyReadsTs };
@@ -160,6 +192,15 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
             ],
             unchanged: true,
           });
+        }
+        if (store === "hydradb") {
+          for (const ops of [pyOps, tsOps]) {
+            expect((ops as { extra_label: unknown }).extra_label).toEqual({
+              primary: "extra:batch-1",
+              batch_extra: "extra:batch-2",
+              single_extra: "extra:single",
+            });
+          }
         }
         rmSync(evidence, { recursive: true, force: true });
       },
