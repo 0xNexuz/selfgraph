@@ -32,7 +32,7 @@ import * as ops from "./ops.js";
 import type { GraphPrimitives, Props } from "./protocols.js";
 import type { ParsedSchema } from "./schema.js";
 import { decodeEntity } from "./serde.js";
-import { expandTokens, groundedTerms, schemaForms, stem } from "./terms.js";
+import { definitionForms, expandTokens, groundedTerms, schemaForms, stem } from "./terms.js";
 import type { SeedTier } from "./tiers.js";
 import { checkOptions, keysOf, requireBool, requireInt, typeName } from "./validate.js";
 
@@ -1255,6 +1255,7 @@ export function answerability(
   depth: number,
 ): AnswerabilityReport {
   const found = schemaForms(schema);
+  const definitions = definitionForms(schema);
   const asked =
     terms ??
     questionTerms(question, [
@@ -1265,6 +1266,9 @@ export function answerability(
     schema,
     entities.map((e) => e.type),
     relations.map((r) => r.type),
+  );
+  const liveDefinitions = new Set(
+    [...definitions].filter(([, owners]) => owners.some(([owner]) => held.type.has(owner))).map(([form]) => form),
   );
   const isHeld = (kind: TermCoverage["status"], term: string): boolean =>
     !(kind in held) || held[kind as keyof typeof held].has(term);
@@ -1291,7 +1295,12 @@ export function answerability(
       let declared: Array<readonly [string, boolean]> = [];
       for (const [kind, named] of kinds) {
         const hits = words.length ? [...named].filter(([form]) => covers(words, form)).map(([, hit]) => hit) : [];
-        const live = hits.filter(([t]) => isHeld(kind, t));
+        const live =
+          kind === "definition"
+            ? [...named]
+                .filter(([form]) => words.length && covers(words, form) && liveDefinitions.has(form))
+                .map(([, hit]) => hit)
+            : hits.filter(([t]) => isHeld(kind, t));
         if (live.length) {
           status = kind;
           matched = live.map(([t]) => t);

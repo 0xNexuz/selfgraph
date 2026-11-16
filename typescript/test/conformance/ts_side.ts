@@ -35,6 +35,18 @@ const TERMS_SPEC = {
   ],
   relations: [{ type: "WORKS_AT", synonyms: ["employed by"], certified: true }],
 };
+const SHARED_DEFINITION_SPEC = {
+  entities: [
+    {
+      name: "Employee",
+      definitions: [{ name: "status", expression: "active", synonyms: ["employment state"], certified: false }],
+    },
+    {
+      name: "Project",
+      definitions: [{ name: "status", expression: "phase", synonyms: ["project state"], certified: true }],
+    },
+  ],
+};
 const TERM_QUESTIONS = [
   "What is the staff size of the firm Acme by ad spend?",
   "users employed by employers",
@@ -266,7 +278,7 @@ function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
 /**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; shared_term_forms: unknown; shared_terms: string[][]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the forms and expansion of a definition shared by two entities, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
@@ -277,12 +289,15 @@ export function schemaWarnings(): {
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  shared_term_forms: unknown;
+  shared_terms: string[][];
   datetime_errors: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
 } {
   const terms = Schema.parse(TERMS_SPEC);
+  const sharedSchema = Schema.parse(SHARED_DEFINITION_SPEC);
   const subSchema = Schema.parse({
     entities: [
       {
@@ -369,6 +384,12 @@ export function schemaWarnings(): {
     json_constants: jsonConstants(),
     term_forms: Object.fromEntries(
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
+    ),
+    shared_term_forms: Object.fromEntries(
+      Object.entries(schemaForms(sharedSchema)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
+    ),
+    shared_terms: ["employment state", "project state", "status"].map((q) =>
+      [...expandTokens(tokens(q), sharedSchema, tokens)].sort(comparePy),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
     datetime_errors: ["0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"].map((text) => {

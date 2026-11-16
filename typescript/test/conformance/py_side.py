@@ -26,6 +26,22 @@ TERMS_SPEC = {
     ],
     "relations": [{"type": "WORKS_AT", "synonyms": ["employed by"], "certified": True}],
 }
+SHARED_DEFINITION_SPEC = {
+    "entities": [
+        {
+            "name": "Employee",
+            "definitions": [
+                {"name": "status", "expression": "active", "synonyms": ["employment state"], "certified": False}
+            ],
+        },
+        {
+            "name": "Project",
+            "definitions": [
+                {"name": "status", "expression": "phase", "synonyms": ["project state"], "certified": True}
+            ],
+        },
+    ]
+}
 TERM_QUESTIONS = [
     "What is the staff size of the firm Acme by ad spend?",
     "users employed by employers",
@@ -236,7 +252,7 @@ def json_constants():
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the forms and expansion of a definition shared by two entities, the fields the Neo4j export drops, and how NaN and Infinity parse.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -290,6 +306,12 @@ def schema_warnings():
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
+        "shared_term_forms": to_jsonable(schema_forms(Schema.model_validate(SHARED_DEFINITION_SPEC))),
+        "shared_terms": [
+            sorted(expand_tokens(_tokens(q), shared_schema, _tokens))
+            for shared_schema in [Schema.model_validate(SHARED_DEFINITION_SPEC)]
+            for q in ("employment state", "project state", "status")
+        ],
         "neo4j_dropped": neo4j_export_warnings(),
         "json_constants": json_constants(),
         "terms": [

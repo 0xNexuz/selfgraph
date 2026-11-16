@@ -5,6 +5,7 @@ import { canonicalEntityType, canonicalRelationType, entityIndex, lineage, type 
 export type Tokenize = (text: string) => Set<string>;
 
 export type SchemaTermKind = "type" | "definition" | "relation";
+export type DefinitionEntry = readonly [string, string, boolean];
 
 const SINGULARS = new Map([
   ["calories", "calorie"],
@@ -82,6 +83,27 @@ function forms(names: readonly string[]): string[] {
 }
 
 /**
+ * Map each definition surface form to every entity that declares it.
+ *
+ * Definitions are keyed by entity and name, so one name shared by several entities keeps all of its owners.
+ *
+ * @param schema (ParsedSchema | null): the schema, or null for no definitions.
+ * @return (Map<string, DefinitionEntry[]>): each form's declaring entity name, definition name, and certified flag.
+ */
+export function definitionForms(schema: ParsedSchema | null): Map<string, DefinitionEntry[]> {
+  const found = new Map<string, DefinitionEntry[]>();
+  if (schema === null) return found;
+  for (const entity of schema.entities) {
+    for (const definition of entity.definitions) {
+      for (const form of forms([definition.name, ...definition.synonyms])) {
+        found.set(form, [...(found.get(form) ?? []), [entity.name, definition.name, definition.certified]]);
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * List the terms the stored graph holds instances of, by kind, so a schema term alone never grounds a question.
  *
  * A type is held when an entity of it or of a subtype is stored, a definition when its entity type is held, and a relation type when a relation of it is stored. The stored types themselves are held too.
@@ -134,7 +156,11 @@ export function schemaForms(
   };
   if (schema === null) return found;
   const note = (kind: SchemaTermKind, term: string, names: readonly string[], certified: boolean): void => {
-    for (const form of forms(names)) if (!found[kind].has(form)) found[kind].set(form, [term, certified]);
+    for (const form of forms(names)) {
+      const previous = found[kind].get(form);
+      if (previous === undefined) found[kind].set(form, [term, certified]);
+      else if (kind === "definition") found[kind].set(form, [term, previous[1] && certified]);
+    }
   };
   for (const entity of schema.entities) {
     note("type", entity.name, [entity.name, ...entity.aliases, ...entity.synonyms], entity.certified);
@@ -151,7 +177,7 @@ export function schemaForms(
 /**
  * Add the words of each entity type and its subtypes when a question names the type or a definition.
  *
- * A definition adds the words of the entity type it belongs to and that type's subtypes.
+ * A definition adds the words of every entity type that declares it and those types' subtypes.
  *
  * @param tokens (ReadonlySet<string>): the question's content tokens.
  * @param schema (ParsedSchema | null): the schema, or null for no expansion.
@@ -166,16 +192,24 @@ export function expandTokens(
   const out = new Set(tokens);
   if (schema === null) return out;
   const index = entityIndex(schema);
-  const owner = new Map(schema.entities.flatMap((e) => e.definitions.map((d) => [d.name, e.name] as const)));
+  const definitions = definitionForms(schema);
   const stems = new Set([...tokens].map(stem));
   const found = schemaForms(schema);
-  for (const kind of ["type", "definition"] as const) {
-    for (const [form, [term]] of found[kind]) {
-      const words = [...tokenize(form)].map(stem);
-      if (!words.length || !words.every((w) => stems.has(w))) continue;
-      const root = kind === "type" ? term : owner.get(term)!;
+  for (const [form, [term]] of found.type) {
+    const words = [...tokenize(form)].map(stem);
+    if (!words.length || !words.every((w) => stems.has(w))) continue;
+    for (const entity of schema.entities) {
+      if ([...lineage(entity, index)].some((t) => t.name === term)) {
+        for (const token of tokenize(entity.name)) out.add(token);
+      }
+    }
+  }
+  for (const [form, owners] of definitions) {
+    const words = [...tokenize(form)].map(stem);
+    if (!words.length || !words.every((w) => stems.has(w))) continue;
+    for (const [owner] of owners) {
       for (const entity of schema.entities) {
-        if ([...lineage(entity, index)].some((t) => t.name === root)) {
+        if ([...lineage(entity, index)].some((t) => t.name === owner)) {
           for (const token of tokenize(entity.name)) out.add(token);
         }
       }

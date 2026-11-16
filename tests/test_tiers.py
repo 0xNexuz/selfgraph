@@ -185,6 +185,27 @@ def test_check_answerable_grounds_schema_synonyms_definitions_and_plurals():
     assert run(fresh_graph("tier").check_answerable("anything")).verdict == "not_answerable"
 
 
+def test_definition_terms_keep_their_entity_owners():
+    schema = {
+        "entities": [
+            {
+                "name": "Employee",
+                "definitions": [{"name": "status", "expression": "active", "synonyms": ["employment state"]}],
+            },
+            {
+                "name": "Project",
+                "definitions": [{"name": "status", "expression": "phase", "synonyms": ["project state"]}],
+            },
+        ]
+    }
+    g = fresh_graph("tier", schema=schema)
+    run(g.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]}))
+    report = run(g.check_answerable("project state", terms=["project state"]))
+    assert report.verdict == "not_answerable"
+    assert [(t.status, t.matches) for t in report.terms] == [("schema_only", ["status"])]
+    assert [seed.id for seed in run(g.retrieve("employment state", depth=0)).seeds] == ["employee:alice"]
+
+
 def test_check_answerable_ignores_possessive_and_contraction_endings():
     spec = {
         "entities": [{"name": "Person"}, {"name": "Company"}],

@@ -9,6 +9,7 @@ from .schema import Schema, _entity_index, _lineage, canonical_entity_type, cano
 __all__ = ["expand_tokens", "grounded_terms", "schema_forms", "stem"]
 
 Tokenize = Callable[[str], set[str]]
+DefinitionForm = tuple[str, str, bool]
 
 _SINGULARS = {
     "calories": "calorie",
@@ -83,6 +84,24 @@ def _forms(names: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(form for name in names for form in (name, _spaced(name))))
 
 
+def _definition_forms(schema: Schema | None) -> dict[str, list[DefinitionForm]]:
+    """Map each definition surface form to every entity that declares it.
+
+    Definitions are keyed by entity and name, so one name shared by several entities keeps all of its owners.
+
+    @param schema (Schema | None): the schema, or None for no definitions.
+    @return (dict[str, list[DefinitionForm]]): each form's declaring entity name, definition name, and certified flag.
+    """
+    forms: dict[str, list[DefinitionForm]] = {}
+    if schema is None:
+        return forms
+    for entity in schema.entities:
+        for definition in entity.definitions:
+            for form in _forms([definition.name, *definition.synonyms]):
+                forms.setdefault(form, []).append((entity.name, definition.name, definition.certified))
+    return forms
+
+
 def schema_forms(schema: Schema | None) -> dict[str, dict[str, tuple[str, bool]]]:
     """Map every surface form of the schema's terms, by kind, to the term it names and whether it is certified.
 
@@ -99,7 +118,11 @@ def schema_forms(schema: Schema | None) -> dict[str, dict[str, tuple[str, bool]]
 
     def note(kind: str, term: str, names: Iterable[str], certified: bool) -> None:
         for form in _forms(names):
-            found[kind].setdefault(form, (term, certified))
+            previous = found[kind].get(form)
+            if previous is None:
+                found[kind][form] = (term, certified)
+            elif kind == "definition":
+                found[kind][form] = (term, previous[1] and certified)
 
     for entity in schema.entities:
         note("type", entity.name, [entity.name, *entity.aliases, *entity.synonyms], entity.certified)
@@ -141,7 +164,7 @@ def grounded_terms(
 def expand_tokens(tokens: set[str], schema: Schema | None, tokenize: Tokenize) -> set[str]:
     """Add the words of each entity type and its subtypes when a question names the type or a definition.
 
-    A definition adds the words of the entity type it belongs to and that type's subtypes.
+    A definition adds the words of every entity type that declares it and those types' subtypes.
 
     @param tokens (set[str]): the question's content tokens.
     @param schema (Schema | None): the schema, or None for no expansion.
@@ -151,16 +174,21 @@ def expand_tokens(tokens: set[str], schema: Schema | None, tokenize: Tokenize) -
     if schema is None:
         return tokens
     index = _entity_index(schema)
-    owner = {d.name: e.name for e in schema.entities for d in e.definitions}
+    definitions = _definition_forms(schema)
     stems = {stem(t) for t in tokens}
     out = set(tokens)
     forms = schema_forms(schema)
-    for kind, named in (("type", lambda term: term), ("definition", owner.__getitem__)):
-        for form, (term, _) in forms[kind].items():
-            words = {stem(t) for t in tokenize(form)}
-            if words and words <= stems:
-                root = named(term)
+    for form, (term, _) in forms["type"].items():
+        words = {stem(t) for t in tokenize(form)}
+        if words and words <= stems:
+            for entity in schema.entities:
+                if any(t.name == term for t in _lineage(entity, index)):
+                    out |= tokenize(entity.name)
+    for form, owners in definitions.items():
+        words = {stem(t) for t in tokenize(form)}
+        if words and words <= stems:
+            for owner, _, _ in owners:
                 for entity in schema.entities:
-                    if any(t.name == root for t in _lineage(entity, index)):
+                    if any(t.name == owner for t in _lineage(entity, index)):
                         out |= tokenize(entity.name)
     return out

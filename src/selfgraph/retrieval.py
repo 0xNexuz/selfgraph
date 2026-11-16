@@ -38,7 +38,7 @@ from .models import (
     Subgraph,
     TermCoverage,
 )
-from .terms import expand_tokens, grounded_terms, schema_forms, stem
+from .terms import _definition_forms, expand_tokens, grounded_terms, schema_forms, stem
 
 _log = logging.getLogger("selfgraph")
 
@@ -1181,10 +1181,14 @@ def answerability(
     @return (AnswerabilityReport): the coverage of each term, the connectivity, and the verdict.
     """
     forms = schema_forms(schema)
+    definitions = _definition_forms(schema)
     if terms is None:
         names = [n for e in entities for n in (e.name, *e.aliases)]
         terms = _question_terms(question, [*names, *(f for named in forms.values() for f in named)])
     held = grounded_terms(schema, (e.type for e in entities), (r.type for r in relations))
+    live_definitions = {
+        form for form, owners in definitions.items() if any(owner in held["type"] for owner, _, _ in owners)
+    }
     kinds: tuple[tuple[str, dict[str, tuple[str, bool]]], ...] = (
         ("type", {**{e.type: (e.type, False) for e in entities}, **forms["type"]}),
         ("definition", forms["definition"]),
@@ -1203,7 +1207,12 @@ def answerability(
             status, declared = "missing", []
             for kind, named in kinds:
                 hits = [named[form] for form in named if words and _covers(words, form)]
-                live = [(t, c) for t, c in hits if kind not in held or t in held[kind]]
+                if kind == "definition":
+                    live = [
+                        named[form] for form in named if words and _covers(words, form) and form in live_definitions
+                    ]
+                else:
+                    live = [(t, c) for t, c in hits if kind not in held or t in held[kind]]
                 if live:
                     status, found, certified = kind, {t for t, _ in live}, any(c for _, c in live)
                     break
