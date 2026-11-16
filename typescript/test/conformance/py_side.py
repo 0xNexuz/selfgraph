@@ -911,6 +911,19 @@ async def dump(graph, ns):
 
 async def main():
     cmd = sys.argv[1]
+    if cmd == "kuzu_isolation":
+        from selfgraph import KuzuStore
+
+        result = []
+        for path in ("", ":memory:"):
+            async with SelfGraph(KuzuStore(path)) as first, SelfGraph(KuzuStore(path)) as second:
+                entity = await first.entities.create("Jane", "Person")
+                result.append(await second.entities.get(entity.id) is None)
+                await second.insert.facts({"entities": [{"name": "Jane", "type": "Person"}]})
+                await second.entities.delete(entity.id)
+                result.append(await first.entities.get(entity.id) == entity)
+        json.dump(result, sys.stdout)
+        return
     if cmd == "schema":
         json.dump(schema_warnings(), sys.stdout, sort_keys=True, ensure_ascii=False)
         return
