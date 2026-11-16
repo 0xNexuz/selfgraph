@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
 from selfgraph.cli import _kv
+from selfgraph.errors import SelfGraphError
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -467,6 +468,53 @@ NEO4J_LOSS_SPEC = {
 }
 
 
+class Opaque:
+    pass
+
+
+async def error_of(call):
+    """Await a call that should fail and return its error class and message.
+
+    @param call (Awaitable): the pending call.
+    @return (list): the error class name and message, or ["accepted"] when the call succeeds.
+    """
+    try:
+        await call
+    except SelfGraphError as exc:
+        return [type(exc).__name__, str(exc)]
+    return ["accepted"]
+
+
+async def choice_errors(graph):
+    """Pass a bad stance, status, or evidence shape to each resource method that takes one.
+
+    An Opaque instance stands in for bad evidence because both SDKs name a class instance by its class.
+
+    @param graph (SelfGraph): the conformance graph.
+    @return (dict): each case's error class and message.
+    """
+    works_at = ids.relation_id("person:jane-doe", "WORKS_AT", "company:acme")
+    dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
+    return {
+        "pref_create_stance": await error_of(
+            graph.preferences.create("person:jane-doe", "database", "database:hydradb", stance="meh")
+        ),
+        "pref_list_stance": await error_of(graph.preferences.list(stance="meh")),
+        "dec_create_status": await error_of(graph.decisions.create("Bad status", status="weird")),
+        "dec_list_status": await error_of(graph.decisions.list(status="weird")),
+        "dec_update_status": await error_of(graph.decisions.update(dec, status="weird")),
+        "dec_update_missing": await error_of(graph.decisions.update("decision:nope", status="weird")),
+        "rel_create_evidence": await error_of(
+            graph.relations.create("person:jane-doe", "KNOWS", "company:acme", evidence=Opaque())
+        ),
+        "rel_create_evidence_item": await error_of(
+            graph.relations.create("person:jane-doe", "KNOWS", "company:acme", evidence=[Opaque()])
+        ),
+        "rel_update_evidence": await error_of(graph.relations.update(works_at, evidence=Opaque())),
+        "rel_update_evidence_item": await error_of(graph.relations.update(works_at, evidence=[Opaque()])),
+    }
+
+
 async def write(graph):
     out = {}
     out["facts"] = to_jsonable(await graph.insert.facts(FACTS, source_id="spec"))
@@ -619,6 +667,7 @@ async def write(graph):
         out["schema_null_required"] = "accepted"
     except ValidationError as exc:
         out["schema_null_required"] = str(exc)
+    out["choice_errors"] = await choice_errors(graph)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
     prune_graph = SelfGraph(
