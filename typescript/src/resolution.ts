@@ -1145,6 +1145,19 @@ async function writeMerges(
 }
 
 /**
+ * Keep distinct originals of dropped self-loops without duplicating a repeated original.
+ *
+ * @param rw (MergeRewrite): the recorded rewrite.
+ * @return (string): its deduplication key.
+ */
+function rewriteKey(rw: MergeRewrite): string {
+  const key: unknown[] = [rw.kind, rw.id];
+  if (rw.kind === "relation" && rw.dropped)
+    key.push(...["from_entity", "type", "to_entity"].map((name) => rw.original[name] ?? null));
+  return dumps(key);
+}
+
+/**
  * Write one record per merge, folding a repeat of the same merge into its live record so inserts stay idempotent.
  *
  * @param runner (Runner): the graph runner.
@@ -1191,7 +1204,7 @@ export async function saveMerges(
     const prevProps = stored.get(mid);
     const prev = prevProps === undefined ? null : decodeMerge(prevProps, entries.get(mid));
     if (prev !== null && prev.reverted_at === null) {
-      const seen = new Set(prev.rewrites.map((r) => `${r.kind}\u0000${r.id}`));
+      const seen = new Set(prev.rewrites.map(rewriteKey));
       rec = {
         ...prev,
         source_ids: ops.dedupList([...prev.source_ids, ...rec.source_ids]),
@@ -1199,7 +1212,7 @@ export async function saveMerges(
         added_aliases: ops.dedupList([...prev.added_aliases, ...merge.added_aliases]),
         added_external_ids: ops.dedupList([...prev.added_external_ids, ...merge.added_external_ids]),
         added_properties: ops.dedupList([...prev.added_properties, ...merge.added_properties]),
-        rewrites: [...prev.rewrites, ...merge.rewrites.filter((r) => !seen.has(`${r.kind}\u0000${r.id}`))],
+        rewrites: [...prev.rewrites, ...merge.rewrites.filter((r) => !seen.has(rewriteKey(r)))],
       };
     }
     records.push(rec);
@@ -1288,9 +1301,11 @@ async function forwardSiblings(
   mergeId: string,
   moved: Moved,
   restored: Map<string, string>,
+  liveMerges?: Props[] | null,
+  liveEntries?: Map<string, Props[]> | null,
 ): Promise<void> {
-  const live = (await scanLiveMerges(runner, ns)).filter((props) => props.id !== mergeId);
-  const entries = await loadEntries(runner, ns, live);
+  const live = liveMerges ?? (await scanLiveMerges(runner, ns)).filter((props) => props.id !== mergeId);
+  const entries = liveEntries ?? (await loadEntries(runner, ns, live));
   for (const props of live) {
     const own = entries.get(props.id as string) ?? [];
     const sib = decodeMerge(props, own);
@@ -1359,6 +1374,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   };
 
   const restored = new Map<string, string>();
+  const origRestored = new Map<string, string>();
   const moved: Moved = [];
   const relations: Relation[] = [];
   for (const rw of rec.rewrites.filter((r) => r.kind === "relation")) {
@@ -1397,6 +1413,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       [rel] = await ops.retireRelations(runner, ns, [[edge!, latest.invalidated_by!, latest.invalidated_at!]], at);
     }
     restored.set(rw.id, rel!.id);
+    origRestored.set(ridOf(original), rel!.id);
     relations.push(rel!);
     moved.push([rw, { ...rw, id: rel!.id, rewritten: dumpRelation(back), existed, dropped: false }]);
     await ops.repointSteps(runner, ns, touching, restored);
@@ -1429,7 +1446,32 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
   }
 
   const decisions: DecisionTrace[] = [];
-  for (const rw of rec.rewrites.filter((r) => r.kind === "decision")) {
+  const decisionRws = rec.rewrites.filter((r) => r.kind === "decision");
+  const droppedSiblingIds = new Set<string>();
+  const siblingStepMap = new Map<string, string>();
+  let liveMerges: Props[] | null = null;
+  let liveEntries: Map<string, Props[]> | null = null;
+  if (decisionRws.length > 0) {
+    liveMerges = (await scanLiveMerges(runner, ns)).filter((props) => props.id !== mergeId);
+    liveEntries = await loadEntries(runner, ns, liveMerges);
+    for (const props of liveMerges) {
+      const own = liveEntries.get(props.id as string) ?? [];
+      const sib = decodeMerge(props, own);
+      for (const srw of sib.rewrites) {
+        if (srw.kind === "relation") {
+          const sorig = parseOrThrow(RelationInput, srw.original, "relation");
+          const sorigId = ridOf(sorig);
+          if (srw.dropped) {
+            droppedSiblingIds.add(sorigId);
+          } else {
+            siblingStepMap.set(sorigId, restored.get(srw.id) ?? srw.id);
+          }
+        }
+      }
+    }
+  }
+
+  for (const rw of decisionRws) {
     const original = parseOrThrow(DecisionTraceInput, rw.original, "decision");
     const rewritten = parseOrThrow(DecisionTraceInput, rw.rewritten, "decision");
     const actor = await end(original.actor_entity, rewritten.actor_entity);
@@ -1447,6 +1489,19 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       const alternative = await end(o, rewritten.alternative_entities[i]!);
       if (await exists(alternative)) alternatives.push(alternative);
     }
+    const restoredSteps: string[] = [];
+    for (const s of original.steps) {
+      if (droppedSiblingIds.has(s) && !origRestored.has(s)) continue;
+      if (origRestored.has(s)) {
+        restoredSteps.push(origRestored.get(s)!);
+      } else if (siblingStepMap.has(s)) {
+        restoredSteps.push(siblingStepMap.get(s)!);
+      } else if (restored.has(s)) {
+        restoredSteps.push(restored.get(s)!);
+      } else if (await ops.relationExists(runner, ns, s)) {
+        restoredSteps.push(s);
+      }
+    }
     const back: ParsedDecisionTraceInput = {
       ...original,
       title: kept.title,
@@ -1454,7 +1509,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       rationale: kept.rationale,
       status: kept.status,
       event_time: kept.event_time,
-      steps,
+      steps: restoredSteps,
       actor_entity: actor,
       outcome_entity: outcome,
       alternative_entities: alternatives,
@@ -1477,7 +1532,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     moved.push([rw, { ...rw, id: trace.id, rewritten: dumpDecision(back), existed, dropped: false }]);
   }
 
-  if (moved.length) await forwardSiblings(runner, ns, rec.id, moved, restored);
+  if (moved.length) await forwardSiblings(runner, ns, rec.id, moved, restored, liveMerges, liveEntries);
   const survivor = (await exists(rec.survivor_id))
     ? await ops.updateEntity(
         runner,

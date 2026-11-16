@@ -618,7 +618,7 @@ class SelfGraph:
             checked = await enforce_schema(tx, ns, resolved, active_schema, mode, max_count=max_count, upsert=True)
             found: list[InsertWarning] = []
             if mode == "strict" and conflicts == "warn":
-                await _ops.require_max_count(tx, ns, caps, resolved.relations)
+                await _ops.require_max_count(tx, ns, caps, resolved.relations, default_event_time, created_at)
             source_version: str | None = None
             base_evidence = []
             prior = await _ops.source_targets(tx, ns, source_id) if replace_source and source_id else set()
@@ -662,8 +662,7 @@ class SelfGraph:
                 warnings=found,
             )
             if judged and self._llm is not None:
-                fresh = [r for r in relations if r.created_at == created_at]
-                found.extend(await judge_contradictions(tx, ns, self._llm, fresh, caps, created_at))
+                found.extend(await judge_contradictions(tx, ns, self._llm, relations, caps, created_at))
 
             diff = None
             if replace_source and source_id is not None and source_version is not None:

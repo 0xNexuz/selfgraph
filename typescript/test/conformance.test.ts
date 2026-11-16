@@ -124,6 +124,10 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
       expect(mask(fromTs)).toEqual(mask(fromPy));
       const ended = Object.values((fromTs as { versions: Record<string, unknown[][]> }).versions).map((v) => v[0]![3]);
       expect(ended.filter((at) => at !== null).sort()).toEqual(["2022-01-01T00:00:00Z", "2026-01-01T00:00:00Z"]);
+      expect((fromTs as { undated_correction: unknown[][] }).undated_correction.map((v) => v[2])).toEqual([
+        true,
+        false,
+      ]);
     });
 
     it.skipIf(!live.get(store))(
@@ -136,6 +140,12 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
         const tsOps = await ts(store, nsTs, write);
         expect(tsOps.dedupe_conflicts).toEqual({ "relation:touch-b": ["active", "flags"] });
         expect(tsOps.facts_none).toBe("invalid facts: expected object");
+        for (const ops of [pyOps, tsOps]) {
+          const names = (ops as { unicode_text: { entities: { name: string }[] } }).unicode_text.entities.map(
+            (entity) => entity.name,
+          );
+          expect(names).toEqual(expect.arrayContaining(["Émile Zola", "Łukasz Nowak"]));
+        }
 
         const pyReadsPy = py("dump", store, nsPy);
         const tsReadsPy = await ts(store, nsPy, (g) => dump(g, nsPy));

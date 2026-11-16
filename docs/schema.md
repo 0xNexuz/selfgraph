@@ -215,6 +215,14 @@ included, are current afterwards, and a relation that stays retired is re-pointe
 to the one that now displaces it. A retirement by the LLM judge stays as it is
 (see [updating and deleting](resources.md#updating-and-deleting)).
 
+Moving a relation to another `event_time` settles its endpoints again the same
+way, under `supersede` and `llm`. That covers `relations.update` with a new
+`event_time` and an insert that restates a stored relation with a different
+one. A relation the moved one retired comes back when fewer than `max_count`
+newer facts remain at every endpoint that caps it, and the moved relation is
+retired when it is now the older fact. `relations.update` then returns it
+retired. The other modes leave the endpoint as it is.
+
 ```python
 graph = SelfGraph(store, schema=schema, contradiction="supersede")
 await graph.insert.facts(facts, contradiction="warn")    # per insert
