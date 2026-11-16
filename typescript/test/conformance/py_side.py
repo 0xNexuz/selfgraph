@@ -774,6 +774,7 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "evidence": evidence,
             "raw_evidence": sorted(raw_evidence, key=lambda r: r["id"]),
