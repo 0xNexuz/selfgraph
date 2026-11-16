@@ -815,13 +815,27 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
-def _escape_marks(text: str) -> str:
-    """Distinguish literal trust marks from metadata without changing line breaks.
+def _escape_marks(text: str, *, preserve_lines: bool = False) -> str:
+    """Distinguish literal trust marks from metadata and contain rendered values on one line.
 
     @param text (str): stored text rendered into context.
+    @param preserve_lines (bool): keep source passage line breaks readable.
     @return (str): text with reserved marks labeled as literal content.
     """
-    return text.replace("[certified]", "[literal: certified]").replace("(via hub)", "(literal: via hub)")
+    if not preserve_lines:
+        text = re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text)
+    text = re.sub(
+        r"[\[［][cｃＣ][eｅＥ][rｒＲ][tｔＴ][iｉＩ][fｆＦ][iｉＩ][eｅＥ][dｄＤ][\]］]",
+        "[literal: certified]",
+        text,
+        flags=re.IGNORECASE | re.ASCII,
+    )
+    return re.sub(
+        r"[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]",
+        "(literal: via hub)",
+        text,
+        flags=re.IGNORECASE | re.ASCII,
+    )
 
 
 def _assemble(
@@ -872,7 +886,7 @@ def _assemble(
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100
     for p in passages:
-        if not add(_escape_marks(p), passage_cap):
+        if not add(_escape_marks(p, preserve_lines=True), passage_cap):
             break
 
     far = len(dist) + 1

@@ -836,13 +836,20 @@ async function collectPreferences(
 }
 
 /**
- * Distinguish literal trust marks from metadata without changing line breaks.
+ * Distinguish literal trust marks from metadata and contain rendered values on one line.
  *
  * @param text (string): stored text rendered into context.
+ * @param preserveLines (boolean): keep source passage line breaks readable.
  * @return (string): text with reserved marks labeled as literal content.
  */
-function escapeMarks(text: string): string {
-  return text.replaceAll("[certified]", "[literal: certified]").replaceAll("(via hub)", "(literal: via hub)");
+function escapeMarks(text: string, preserveLines = false): string {
+  if (!preserveLines) {
+    text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
+    text = text.replace(/[\r\n\v\f\x85\u2028\u2029]+/g, " ");
+  }
+  return text
+    .replace(/[[［][cｃＣ][eｅＥ][rｒＲ][tｔＴ][iｉＩ][fｆＦ][iｉＩ][eｅＥ][dｄＤ][\]］]/gi, "[literal: certified]")
+    .replace(/[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]/gi, "(literal: via hub)");
 }
 
 /**
@@ -886,7 +893,7 @@ function assemble(
   };
 
   const passageCap = Math.floor((budgetTokens * PASSAGE_BUDGET_PERCENT) / 100);
-  for (const p of passages) if (!add(escapeMarks(p), passageCap)) break;
+  for (const p of passages) if (!add(escapeMarks(p, true), passageCap)) break;
 
   const distOf = distanceIn(dist);
   const relRank = (r: Relation): [number, number, number, number] => {
