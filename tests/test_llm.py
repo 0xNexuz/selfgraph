@@ -5,12 +5,12 @@ import re
 import pytest
 from helpers import run
 
-from selfgraph import EntityInput, LLMConfig, ValidationError
+from selfgraph import LLMConfig, ValidationError
 from selfgraph._ops import _require_text
 from selfgraph.errors import error_reason, surface_hint
 from selfgraph.extraction import chunking
 from selfgraph.extraction.chunking import _chunk_by_chars, chunk_text, count_tokens
-from selfgraph.extraction.extractor import LLMExtractor, _EntitiesOut
+from selfgraph.extraction.extractor import LLMExtractor, _EntitiesOut, _EntityOut
 from selfgraph.llm.base import _fatal, _require_provider, _sends_temperature, resolve_llm, summarize_error
 from selfgraph.models import ParsedDocument
 from selfgraph.runtime import GraphSettings, _build_llm
@@ -257,7 +257,7 @@ def test_chunks_extract_concurrently_up_to_the_setting_and_merge_in_order():
             self.active -= 1
             if output is _EntitiesOut:
                 await asyncio.sleep(0.03 if "Chunk0" in user else 0)
-                return _EntitiesOut(entities=[EntityInput(type="Word", name=re.search(r"Chunk\d+", user).group(0))])
+                return _EntitiesOut(entities=[_EntityOut(type="Word", name=re.search(r"Chunk\d+", user).group(0))])
             return output()
 
     text = " ".join(f"Chunk{i} filler words here. " * 300 for i in range(6))
