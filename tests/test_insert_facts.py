@@ -1,7 +1,7 @@
 import pytest
 from helpers import fresh_graph, new_graph, run, t_entities
 
-from selfgraph import Extraction, ValidationError
+from selfgraph import Extraction, ValidationError, relation_id
 
 PAYLOAD = {
     "entities": [
@@ -196,15 +196,21 @@ def test_insert_facts_event_time_accepts_iso_text():
     run(g.close())
 
 
-@pytest.mark.parametrize("stored", [True, False])
-def test_conflicting_relation_id_does_not_write_any_facts(stored):
+@pytest.mark.parametrize("collision", ["stored", "batch", "generated", "generated-other-source"])
+def test_conflicting_relation_id_does_not_write_any_facts(collision):
     g = fresh_graph("relation_identity")
     run(g.entities.create("Ada", "Person"))
     run(g.entities.create("Bob", "Person"))
     original = {"id": "relation:team", "from_entity": "person:ada", "type": "KNOWS", "to_entity": "person:bob"}
     conflicting = {**original, "to_entity": "person:cy"}
+    if collision.startswith("generated"):
+        original["id"] = relation_id("person:ada", "KNOWS", "person:cy")
+        del conflicting["id"]
+        if collision == "generated-other-source":
+            original["from_entity"] = "person:bob"
+    stored = collision != "batch"
     if stored:
-        run(g.relations.create("person:ada", "KNOWS", "person:bob", id="relation:team"))
+        run(g.relations.create(original["from_entity"], "KNOWS", "person:bob", id=original["id"]))
 
     with pytest.raises(ValidationError, match="already exists with different endpoints/type"):
         run(
@@ -219,7 +225,7 @@ def test_conflicting_relation_id_does_not_write_any_facts(stored):
 
     assert run(g.entities.get("person:cy")) is None
     assert run(g.store.match_nodes(g.namespace, "SourceVersion")) == []
-    relation = run(g.relations.get("relation:team"))
+    relation = run(g.relations.get(original["id"]))
     if stored:
         assert relation.to_entity == "person:bob"
     else:

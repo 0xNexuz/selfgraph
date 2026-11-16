@@ -174,27 +174,39 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
-  it.each([true, false])("rejects conflicting explicit relation ids before writing (stored=%s)", async (stored) => {
-    const g = fresh();
-    await g.entities.create("Ada", "Person");
-    await g.entities.create("Bob", "Person");
-    const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
-    const conflicting = { ...original, to_entity: "person:cy" };
-    if (stored) await g.relations.create("person:ada", "KNOWS", "person:bob", { id: "relation:team" });
+  it.each(["stored", "batch", "generated", "generated-other-source"])(
+    "rejects conflicting relation ids before writing (%s)",
+    async (collision) => {
+      const g = fresh();
+      await g.entities.create("Ada", "Person");
+      await g.entities.create("Bob", "Person");
+      const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
+      const conflicting = {
+        ...original,
+        id: collision.startsWith("generated") ? undefined : original.id,
+        to_entity: "person:cy",
+      };
+      if (collision.startsWith("generated")) {
+        original.id = ids.relationId("person:ada", "KNOWS", "person:cy");
+        if (collision === "generated-other-source") original.from_entity = "person:bob";
+      }
+      const stored = collision !== "batch";
+      if (stored) await g.relations.create(original.from_entity, "KNOWS", "person:bob", { id: original.id });
 
-    await expect(
-      g.insert.facts(
-        { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
-        { source_id: "bad-import" },
-      ),
-    ).rejects.toThrow(/already exists with different endpoints\/type/);
+      await expect(
+        g.insert.facts(
+          { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
+          { source_id: "bad-import" },
+        ),
+      ).rejects.toThrow(/already exists with different endpoints\/type/);
 
-    expect(await g.entities.get("person:cy")).toBeNull();
-    expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
-    const relation = await g.relations.get("relation:team");
-    if (stored) expect(relation?.to_entity).toBe("person:bob");
-    else expect(relation).toBeNull();
-  });
+      expect(await g.entities.get("person:cy")).toBeNull();
+      expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
+      const relation = await g.relations.get(original.id);
+      if (stored) expect(relation?.to_entity).toBe("person:bob");
+      else expect(relation).toBeNull();
+    },
+  );
 
   it("reports a bad stance or status with the Python text, after the id check", async () => {
     const g = fresh();

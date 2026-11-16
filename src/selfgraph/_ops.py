@@ -1713,7 +1713,9 @@ async def _precheck_write(runner: Any, props: Mapping[str, Any]) -> None:
         check(props)
 
 
-async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, RelationInput]]) -> dict[str, dict]:
+async def _current_relations(
+    runner: Any, ns: str, keyed: list[tuple[str, RelationInput]], *, all_ids: bool = False
+) -> dict[str, dict]:
     """Fetch the current version of many relations, or the newest version of one that has no current version.
 
     A derived relation id fixes its endpoints, so its stored versions are among its source entity's relations; an
@@ -1725,6 +1727,7 @@ async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, Relati
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param keyed (list[tuple[str, RelationInput]]): (relation id, input) pairs.
+    @param all_ids (bool): look up every id across all endpoints, since an explicit id can match a generated id.
     @return (dict[str, dict]): each found relation's current edge row, else its newest edge row, by id.
     """
     wanted = {rid for rid, _ in keyed}
@@ -1737,13 +1740,19 @@ async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, Relati
             edges = await _edges_into(runner, ns, L_ENTITY, L_ENTITY, "from_in", pending, current_only=current_only)
         else:
             sources = set(pending)
-            edges = [e for e in versions if e["from_id"] in sources and (e["props"]["is_current"] or not current_only)]
+            edges = [
+                e
+                for e in versions
+                if (all_ids or e["from_id"] in sources) and (e["props"]["is_current"] or not current_only)
+            ]
         for edge in edges:
             if edge["props"]["id"] in wanted and _is_relation_type(edge["type"]):
                 _keep_newest(found, edge)
         wanted -= set(found)
-    for rid, rel in keyed:
-        if rel.id is not None and rid not in found:
+    if all_ids and versions is not None:
+        return found
+    for rid in _dedup_list(rid for rid, rel in keyed if all_ids or rel.id is not None):
+        if rid not in found:
             edge = await _newest_edge(runner, ns, rid, _is_relation_type)
             if edge is not None:
                 found[rid] = edge
@@ -1751,25 +1760,24 @@ async def _current_relations(runner: Any, ns: str, keyed: list[tuple[str, Relati
 
 
 async def require_relation_identities(runner: Any, ns: str, relations: list[RelationInput]) -> None:
-    """Reject conflicting explicit relation ids before the insert writes any facts or provenance.
+    """Reject conflicting relation ids before the insert writes any facts or provenance.
 
     @param runner (Any): the graph runner.
     @param ns (str): namespace.
     @param relations (list[RelationInput]): the final canonical relations to write.
     @return (None): nothing; raises ValidationError if a relation id names different endpoints or types.
     """
-    explicit = [(rel.id, rel) for rel in relations if rel.id is not None]
-    if not explicit:
+    if not relations:
         return
-    ids = {rid for rid, _ in explicit}
-    stored = await _current_relations(runner, ns, explicit)
+    keyed = []
+    for relation in relations:
+        rtype = _ids.normalize_rel_type(relation.type)
+        rid = relation.id or _ids.relation_id(relation.from_entity, rtype, relation.to_entity)
+        keyed.append((rid, relation, (relation.from_entity, rtype, relation.to_entity)))
+    stored = await _current_relations(runner, ns, [(rid, relation) for rid, relation, _ in keyed], all_ids=True)
     identities = {rid: (edge["from_id"], edge["type"], edge["to_id"]) for rid, edge in stored.items()}
-    for rel in relations:
-        rtype = _ids.normalize_rel_type(rel.type)
-        rid = rel.id or _ids.relation_id(rel.from_entity, rtype, rel.to_entity)
-        if rid in ids:
-            identity = (rel.from_entity, rtype, rel.to_entity)
-            _require_same_ends(rid, identities.setdefault(rid, identity), identity)
+    for rid, _, identity in keyed:
+        _require_same_ends(rid, identities.setdefault(rid, identity), identity)
 
 
 class RelationCap(NamedTuple):
