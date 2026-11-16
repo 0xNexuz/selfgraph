@@ -44,8 +44,21 @@ from .prompts import check_prompts, effective_instruction, effective_prompt, ren
 __all__ = ["LLMExtractor"]
 
 
+class _EntityOut(BaseModel):
+    type: str
+    name: str
+    aliases: list[str] | None = None
+
+    def as_input(self) -> EntityInput:
+        """Build the insert entity; ids are always derived from type and name, and null aliases mean none.
+
+        @return (EntityInput): the entity without a caller- or model-chosen id.
+        """
+        return EntityInput(type=self.type, name=self.name, aliases=self.aliases or [])
+
+
 class _EntitiesOut(BaseModel):
-    entities: list[EntityInput] = Field(default_factory=list)
+    entities: list[_EntityOut] = Field(default_factory=list)
 
 
 class _RelOut(BaseModel):
@@ -271,7 +284,10 @@ class LLMExtractor(_WarningSink):
                 try:
                     system, user = self._messages(kind, chunk.text)
                     result = await self._llm.generate(system=system, user=user, output=schema)
-                    return getattr(_checked_output(result, schema, kind), kind)
+                    items = getattr(_checked_output(result, schema, kind), kind)
+                    if kind == "entities":
+                        return [item.as_input() for item in items]
+                    return items
                 except ExtractionError:
                     raise
                 except Exception as exc:  # noqa: BLE001
