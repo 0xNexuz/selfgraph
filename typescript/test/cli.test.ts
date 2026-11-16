@@ -95,6 +95,14 @@ describe("built CLI against Kuzu", () => {
     }
   });
 
+  it("keeps NaN and Infinity flag values as text, since they are not JSON", () => {
+    const ns = ["--namespace", "nan_flags"];
+    const props = ["--prop", "a=NaN", "--prop", "b=Infinity", "--prop", "c=-Infinity"];
+    const created = cli([...kuzu, ...ns, "entity", "create", "--name", "A", "--type", "T", ...props]);
+    expect(created.code).toBe(0);
+    expect(created.out).toMatchObject({ properties: { a: "NaN", b: "Infinity", c: "-Infinity" } });
+  });
+
   it("exits 2 on bad command input with a message in CLI words", () => {
     const noLlm = { SELFGRAPH_LLM_PROVIDER: "", SELFGRAPH_LLM_MODEL: "", SELFGRAPH_RESOLVER: "" };
     for (const [args, message, env] of [
@@ -106,6 +114,7 @@ describe("built CLI against Kuzu", () => {
       [["insert", "text", "  "], "text cannot be empty or whitespace"],
       [["insert", "text", "Ann.", "--metadata", "nope"], "--metadata expects KEY=VALUE, got 'nope'"],
       [["insert", "text", "Ann.", "--metadata", "{notjson"], "invalid JSON in --metadata"],
+      [["insert", "text", "Ann.", "--metadata", '{"n": Infinity}'], "invalid JSON in --metadata"],
       [
         ["entity", "create", "--name", "a", "--type", "T", "--prop", '{"x":1}'],
         `--prop expects KEY=VALUE, got '{"x":1}'`,
