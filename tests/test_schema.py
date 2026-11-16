@@ -149,6 +149,26 @@ def test_render_catalog():
     assert render_schema_catalog(Schema.model_validate({})) == ("", "")
 
 
+@pytest.mark.parametrize(
+    ("relation_ids", "count"),
+    [(["relation:a", "relation:a"], 1), (["relation:a", "relation:b"], 2)],
+    ids=["repeated-id-counts-once", "different-ids-count-twice"],
+)
+def test_cardinality_counts_distinct_relation_ids(relation_ids, count):
+    spec = {"relations": [{"type": "WORKS_AT", "from": {"max_count": 1}, "to": {"max_count": 1}}]}
+    facts = _o(rels=[("person:p", "WORKS_AT", "company:c", rid) for rid in relation_ids])
+    found = warnings(spec, facts)
+    assert [w.code for w in found] == ([] if count == 1 else ["cardinality_violation"] * 2)
+    assert [w.message for w in found] == (
+        []
+        if count == 1
+        else [
+            "person:p has 2 WORKS_AT (from) in this insert, above max 1",
+            "company:c has 2 WORKS_AT (to) in this insert, above max 1",
+        ]
+    )
+
+
 def test_insert_schema_modes_per_graph_and_per_call():
     g = new_graph()
     schema = {

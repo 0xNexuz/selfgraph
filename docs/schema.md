@@ -118,6 +118,9 @@ use the graph-level schema and mode.
 
 How checks are applied:
 
+- Cardinality counts distinct relation ids. Repeating a relation in one insert
+  counts it once; different explicit relation ids count separately, even when
+  their endpoints and type match.
 - An `update` is checked on the state it would produce. Only violations it
   introduces count. A violation the stored record already had, say from before
   the schema was set, neither raises nor is logged again.

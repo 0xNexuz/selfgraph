@@ -293,6 +293,30 @@ describe("validateAgainstSchema", () => {
   });
 });
 
+describe("distinct relation cardinality", () => {
+  it.each([
+    { name: "one repeated ID counts once", relationIds: ["relation:a", "relation:a"], count: 1 },
+    { name: "two different IDs count twice", relationIds: ["relation:a", "relation:b"], count: 2 },
+  ])("$name", ({ relationIds, count }) => {
+    const schema = {
+      relations: [{ type: "WORKS_AT", from: { max_count: 1 }, to: { max_count: 1 } }],
+    };
+    const facts = {
+      relations: relationIds.map((id) => ({ id, from_entity: "person:p", type: "WORKS_AT", to_entity: "company:c" })),
+    };
+    const found = check(schema, facts);
+    expect(found.map((w) => w.code)).toEqual(count === 1 ? [] : ["cardinality_violation", "cardinality_violation"]);
+    expect(found.map((w) => w.message)).toEqual(
+      count === 1
+        ? []
+        : [
+            "person:p has 2 WORKS_AT (from) in this insert, above max 1",
+            "company:c has 2 WORKS_AT (to) in this insert, above max 1",
+          ],
+    );
+  });
+});
+
 describe("renderSchemaCatalog", () => {
   it("lists entities with aliases and relations with endpoints, and nothing for an empty schema", () => {
     const [entities, relations] = renderSchemaCatalog(Schema.parse(SPEC));
