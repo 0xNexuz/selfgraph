@@ -672,6 +672,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,
     raw_evidence: rawEvidence,
