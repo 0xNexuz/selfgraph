@@ -1199,6 +1199,7 @@ async def dump(graph, ns):
     cutoff = next(s["created_at"] for s in source_versions if s["source_id"] == "spec")
     historical = await graph.retrieve("database", known_at=cutoff, k=1, depth=1)
     retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", depth=2)
+    defaults = await graph.retrieve("what did Grace Hopper write about COBOL and Jane")
     ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", strategy="ppr", depth=3, max_nodes=4)
     dfs = await graph.retrieve("Zoë ÅNGSTRÖM acme", strategy="dfs", depth=2)
     marks = await graph.retrieve("रीमा कहाँ रहती है?", depth=1)
@@ -1237,6 +1238,7 @@ async def dump(graph, ns):
             "source_versions": sorted(source_versions, key=lambda s: s["id"]),
             "chunks": dict(sorted(chunks.items())),
             "retrieval": {"seeds": retrieval.seeds, "context": retrieval.context},
+            "retrieval_defaults": {"seeds": defaults.seeds, "context": defaults.context},
             "retrieval_ppr": {
                 "seeds": ppr.seeds,
                 "context": ppr.context,

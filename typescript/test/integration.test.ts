@@ -908,6 +908,27 @@ function suite(spec: StoreSpec) {
     await expect(graph.retrieve("x", { depth: 1.5 })).rejects.toBeInstanceOf(ValidationError);
   });
 
+  it.each(["depth", "k", "max_nodes", "budget_tokens"] as const)(
+    "uses the retrieval default when %s is explicitly undefined",
+    async (option) => {
+      const g = fresh();
+      const root = await g.entities.create("Ada", "Person");
+      const neighbor = await g.entities.create("Bob", "Person");
+      await g.insert.facts({
+        entities: Array.from({ length: 21 }, (_, i) => ({ type: "Person", name: `Ada Contact ${i}` })),
+      });
+      const notes = "word ".repeat(3500);
+      await g.relations.create(root.id, "KNOWS", neighbor.id, { properties: { notes } });
+
+      const expected = await g.retrieve("Ada");
+      expect(expected.seeds).toHaveLength(20);
+      expect(expected.subgraph.relations).toHaveLength(1);
+      expect(expected.context).not.toContain(notes);
+      expect(await g.retrieve("Ada", { [option]: undefined })).toEqual(expected);
+      await expect(g.retrieve("Ada", { [option]: null })).rejects.toThrow(ValidationError);
+    },
+  );
+
   it("matches queries across case folding, NFC, and CJK", async () => {
     await graph.entities.create("Hauptstraße", "Place", { properties: { city: "Berlin" } });
     await graph.entities.create("東京タワー", "Place");
