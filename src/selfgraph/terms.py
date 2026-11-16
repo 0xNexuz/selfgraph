@@ -10,15 +10,56 @@ __all__ = ["expand_tokens", "grounded_terms", "schema_forms", "stem"]
 
 Tokenize = Callable[[str], set[str]]
 
+_SINGULARS = {
+    "calories": "calorie",
+    "cookies": "cookie",
+    "hoodies": "hoodie",
+    "movies": "movie",
+    "rookies": "rookie",
+    "selfies": "selfie",
+    "zombies": "zombie",
+    "quizzes": "quiz",
+    "buses": "bus",
+    "statuses": "status",
+    "status": "status",
+    "analysis": "analysis",
+    "news": "news",
+    "series": "series",
+    "species": "species",
+}
+_ES_AFTER = ("ss", "sh", "x", "zz", "tz")
+_VOWELS = "aeiou"
+
+
+def _takes_es(base: str) -> bool:
+    """Report whether a singular forms its plural with "es", so the plural loses both letters.
+
+    @param base (str): a plural without its final "es".
+    @return (bool): True after ss, sh, x, zz, or tz, and after a consonant followed by ch.
+    """
+    if base.endswith(_ES_AFTER):
+        return True
+    return base.endswith("ch") and len(base) > 2 and base[-3] not in _VOWELS
+
 
 def stem(token: str) -> str:
-    """Strip a plain plural ending so "customers" and "customer" compare equal.
+    """Strip a plural ending so "customers" and "customer", or "addresses" and "address", compare equal.
+
+    The suffix rules run in order: -ies becomes -y, -es is dropped where _takes_es says the singular takes it, and
+    any other final s is dropped unless the word ends in -ss. _SINGULARS holds the common words those rules get
+    wrong: -ie nouns that would read as -y plurals, quizzes and buses (doubled or -us stems), status and analysis
+    (singulars that end in s), and nouns that are the same in both numbers. A blanket -us / -is keep would leave
+    menus unchanged and would turn excuses into excus.
 
     @param token (str): a casefolded token.
-    @return (str): the token without a trailing plural s.
+    @return (str): the token in its singular form.
     """
+    if token in _SINGULARS:
+        return _SINGULARS[token]
     if token.endswith("ies") and len(token) > 4:
         return token[:-3] + "y"
+    if token.endswith("es") and len(token) > 4 and _takes_es(token[:-2]):
+        return token[:-2]
     if token.endswith("s") and not token.endswith("ss") and len(token) > 3:
         return token[:-1]
     return token
@@ -98,17 +139,18 @@ def grounded_terms(
 
 
 def expand_tokens(tokens: set[str], schema: Schema | None, tokenize: Tokenize) -> set[str]:
-    """Add the words of each entity type a question names by alias or synonym, so seeding finds entities of that type.
+    """Add the words of each entity type and its subtypes when a question names the type or a definition.
 
-    A definition adds the words of the entity type it belongs to.
+    A definition adds the words of the entity type it belongs to and that type's subtypes.
 
     @param tokens (set[str]): the question's content tokens.
     @param schema (Schema | None): the schema, or None for no expansion.
     @param tokenize (Tokenize): splits text into content tokens.
-    @return (set[str]): the tokens with the matched type names added.
+    @return (set[str]): the tokens with the matched type and subtype names added.
     """
     if schema is None:
         return tokens
+    index = _entity_index(schema)
     owner = {d.name: e.name for e in schema.entities for d in e.definitions}
     stems = {stem(t) for t in tokens}
     out = set(tokens)
@@ -117,5 +159,8 @@ def expand_tokens(tokens: set[str], schema: Schema | None, tokenize: Tokenize) -
         for form, (term, _) in forms[kind].items():
             words = {stem(t) for t in tokenize(form)}
             if words and words <= stems:
-                out |= tokenize(named(term))
+                root = named(term)
+                for entity in schema.entities:
+                    if any(t.name == root for t in _lineage(entity, index)):
+                        out |= tokenize(entity.name)
     return out

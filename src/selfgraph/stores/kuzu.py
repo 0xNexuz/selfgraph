@@ -4,12 +4,14 @@ import asyncio
 import json
 import os
 import re
+import time
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 from ..errors import StoreError, ValidationError
 from ..ids import quote_label
-from ..models import CypherResult
+from ..models import CypherResult, JsonValue
 from ._cypher import AutoCommitStore, count_of, where_after, write_batches
 from ._docrows import docs, edge_row, first_doc, merged_current_edge
 
@@ -57,6 +59,9 @@ _SCHEMA = (
 _DATABASES: dict[str, Any] = {}
 _OPEN_STORES: dict[str, int] = {}
 _MAX_SKIP = 10_000_000
+_RECONNECT_EVERY = 500
+_NOW = "RETURN current_timestamp()"
+_CLOCK_TICK = 0.02
 
 
 def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
@@ -150,6 +155,8 @@ class KuzuStore(AutoCommitStore):
         if max_db_size is not None and (type(max_db_size) is not int or max_db_size < 1):
             raise ValidationError(f"max_db_size must be a positive integer of bytes, got {max_db_size!r}")
         path = os.path.expanduser(path)
+        if path not in ("", ":memory:"):
+            path = os.path.abspath(path)
         if path not in _DATABASES:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             try:
@@ -158,11 +165,14 @@ class KuzuStore(AutoCommitStore):
                 raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
         self._path = path
         self._db = _DATABASES[path]
-        self._conn = kuzu.Connection(self._db)
+        self._connect = partial(kuzu.Connection, self._db)
+        self._conn = self._connect()
+        self._statements = 0
+        self._raw = False
         _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
         self._lock = asyncio.Lock()
 
-    async def _run(self, query: str, params: Mapping[str, Any] | None = None) -> CypherResult:
+    async def _run(self, query: str, params: Mapping[str, Any] | None = None, *, raw: bool = False) -> CypherResult:
         def _exec():
             qr = self._conn.execute(query, parameters=dict(params or {}))
             if isinstance(qr, list):
@@ -175,13 +185,35 @@ class KuzuStore(AutoCommitStore):
 
         async with self._lock:
             self._require_open()
+            self._statements += 1
             try:
+                if self._statements > _RECONNECT_EVERY:
+                    self._statements = 1
+                    if not (self._raw and await asyncio.to_thread(self._in_transaction)):
+                        self._conn = self._connect()
+                        self._raw = False
+                self._raw = self._raw or raw
                 columns, rows = await asyncio.to_thread(_exec)
                 return CypherResult(columns=columns, rows=rows)
             except StoreError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 raise _kuzu_error(exc, "Kuzu query failed") from exc
+
+    def _in_transaction(self) -> bool:
+        """Report whether a raw statement left a transaction open on the connection.
+
+        Kuzu fixes current_timestamp() when a transaction starts, so two reads a clock tick apart match only inside
+        one. Reading it never ends the transaction.
+
+        @return (bool): True when a transaction is open.
+        """
+        first = self._conn.execute(_NOW).get_next()
+        time.sleep(_CLOCK_TICK)
+        return self._conn.execute(_NOW).get_next() == first
+
+    async def run_cypher(self, query: str, params: Mapping[str, JsonValue] | None = None) -> CypherResult:
+        return await self._run(query, params, raw=True)
 
     async def initialize(self) -> None:
         """Create the node and relationship tables if they do not exist."""

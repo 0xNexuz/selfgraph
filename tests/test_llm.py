@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import re
 
 import pytest
@@ -7,6 +8,7 @@ from helpers import run
 from selfgraph import EntityInput, LLMConfig, ValidationError
 from selfgraph._ops import _require_text
 from selfgraph.errors import error_reason, surface_hint
+from selfgraph.extraction import chunking
 from selfgraph.extraction.chunking import _chunk_by_chars, chunk_text
 from selfgraph.extraction.extractor import LLMExtractor, _EntitiesOut
 from selfgraph.llm.base import _fatal, _require_provider, _sends_temperature, resolve_llm, summarize_error
@@ -150,10 +152,27 @@ def test_chunk_text_validates_sizes_defaults_the_overlap_and_splits_on_word_boun
         assert len(chunk.text) <= 40
 
 
+def test_a_tiktoken_that_cannot_load_its_encoding_warns_once_and_falls_back(monkeypatch, caplog):
+    tiktoken = pytest.importorskip("tiktoken")
+
+    def offline(name):
+        raise ConnectionError("Failed to resolve 'openaipublic.blob.core.windows.net'")
+
+    monkeypatch.setattr(tiktoken, "get_encoding", offline)
+    monkeypatch.setattr(chunking, "_ENCODER", None)
+    monkeypatch.setattr(chunking, "_ENCODER_READY", False)
+    with caplog.at_level("WARNING", logger="selfgraph"):
+        assert chunking.count_tokens("hello world, again") == 4
+        assert chunking.count_tokens("hello") == 1
+    warnings = [r.getMessage() for r in caplog.records if "cl100k_base" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "Failed to resolve 'openaipublic.blob.core.windows.net'" in warnings[0]
+
+
 def test_error_reasons_fill_empty_messages_and_strip_driver_boilerplate():
     try:
         try:
-            raise ConnectionRefusedError(111, "Connection refused")
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
         except OSError as inner:
             raise RuntimeError("Cannot connect to API: ") from inner
     except RuntimeError as exc:

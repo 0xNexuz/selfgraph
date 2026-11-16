@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -74,6 +74,102 @@ function suite(spec: StoreSpec) {
   afterAll(async () => {
     await graph?.close();
     await other?.close();
+  });
+
+  it("undated preference restatement keeps strength and event_time", async () => {
+    const g = fresh();
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Soham" },
+        { type: "Company", name: "HydraDB" },
+        { type: "Company", name: "Neo4j" },
+      ],
+    });
+    await g.insert.facts(
+      {
+        preferences: [
+          {
+            subject_entity: "person:soham",
+            key: "database",
+            value_entity: "company:hydradb",
+            strength: 0.9,
+            about_entity: "company:neo4j",
+            event_time: "2020-01-01T00:00:00+00:00",
+          },
+        ],
+      },
+      { source_id: "a" },
+    );
+    await g.insert.facts(
+      {
+        preferences: [
+          {
+            subject_entity: "person:soham",
+            key: "database",
+            value_entity: "company:hydradb",
+          },
+        ],
+      },
+      { source_id: "b" },
+    );
+    const [pref] = (await g.preferences.list()).items;
+    expect([pref!.strength, pref!.about_entity, pref!.revision]).toEqual([0.9, "company:neo4j", 1]);
+    expect(pref!.event_time).toEqual(new Date("2020-01-01T00:00:00+00:00"));
+  });
+
+  it("keeps the fields a restated decision leaves out", async () => {
+    const g = fresh();
+    await g.insert.facts({
+      entities: [
+        { id: "team:core", type: "Team", name: "Core" },
+        { id: "company:hydradb", type: "Company", name: "HydraDB" },
+        { id: "company:neo4j", type: "Company", name: "Neo4j" },
+      ],
+      relations: [
+        { id: "relation:a", from_entity: "team:core", type: "SELECTED", to_entity: "company:hydradb" },
+        { id: "relation:b", from_entity: "team:core", type: "TESTED", to_entity: "company:neo4j" },
+      ],
+    });
+    const title = { title: "Select the graph database", actor_entity: "team:core" };
+    const full = {
+      ...title,
+      steps: ["relation:a", "relation:b"],
+      summary: "embedded wins",
+      rationale: "needs temporal history",
+      outcome_entity: "company:hydradb",
+      alternative_entities: ["company:neo4j"],
+      status: "active" as const,
+      event_time: "2024-03-01T00:00:00Z",
+    };
+    await g.insert.facts({ decisions: [full] }, { source_id: "design" });
+    const [kept] = (await g.insert.facts({ decisions: [title] }, { source_id: "notes" })).decisions;
+    expect(await g.decisions.get(kept!.id)).toEqual(kept);
+    expect(kept).toMatchObject({
+      summary: "embedded wins",
+      rationale: "needs temporal history",
+      outcome_entity: "company:hydradb",
+      alternative_entities: ["company:neo4j"],
+      status: "active",
+      event_time: new Date("2024-03-01T00:00:00Z"),
+    });
+    expect(kept!.steps.map((s) => s.relation_id)).toEqual(["relation:a", "relation:b"]);
+    const given = {
+      rationale: "no server",
+      outcome_entity: "company:neo4j",
+      status: "reversed" as const,
+      steps: ["relation:b"],
+    };
+    const [changed] = (await g.insert.facts({ decisions: [{ ...title, ...given }] })).decisions;
+    expect(changed).toMatchObject({
+      summary: "embedded wins",
+      rationale: "no server",
+      outcome_entity: "company:neo4j",
+      status: "reversed",
+    });
+    expect(changed!.steps.map((s) => s.relation_id)).toEqual(["relation:b"]);
+    const [dated] = (await g.insert.facts({ decisions: [title] }, { event_time: "2025-01-01T00:00:00Z" })).decisions;
+    expect(dated!.event_time).toEqual(new Date("2025-01-01T00:00:00Z"));
+    expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
   it("canonicalizes explicit entity ids on every input path", async () => {
@@ -332,6 +428,97 @@ function suite(spec: StoreSpec) {
     });
     expect(await graph.decisions.get(t.id)).toBeNull();
   });
+
+  it.each([
+    [
+      false,
+      [
+        ["DecisionTrace", "MADE_DECISION"],
+        ["DecisionTrace", "RESULTED_IN"],
+        ["DecisionTrace", "CONSIDERED"],
+      ],
+      [],
+    ],
+    [
+      true,
+      [
+        ["DecisionStep", "FROM"],
+        ["DecisionStep", "TO"],
+      ],
+      [
+        ["CONSIDERED", "company:beta"],
+        ["CONSIDERED", "person:ann"],
+      ],
+    ],
+  ] as const)(
+    "reinserting a decision repairs links a partial write left wrong (%j, %j, %j)",
+    async (withStep, lost, extra) => {
+      const g = fresh();
+      for (const [name, type] of [
+        ["Ann", "Person"],
+        ["Acme", "Company"],
+        ["Beta", "Company"],
+        ["X", "Team"],
+        ["Y", "Team"],
+      ] as const) {
+        await g.entities.create(name, type);
+      }
+      const rel = await g.relations.create("team:x", "SELECTED", "team:y");
+      const facts = {
+        decisions: [
+          {
+            id: "decision:pick",
+            title: "Pick a vendor",
+            steps: withStep ? [rel.id] : [],
+            actor_entity: "person:ann",
+            outcome_entity: "company:acme",
+            alternative_entities: ["company:beta"],
+          },
+        ],
+      };
+      const links = async () => {
+        const ns = g.namespace;
+        const made = await g.store.matchEdges(ns, {
+          from_label: "Entity",
+          to_label: "DecisionTrace",
+          to_in: ["decision:pick"],
+        });
+        const out = await g.store.matchEdges(ns, {
+          from_label: "DecisionTrace",
+          to_label: "Entity",
+          from_in: ["decision:pick"],
+        });
+        const ends = await g.store.matchEdges(ns, {
+          from_label: "DecisionStep",
+          to_label: "Entity",
+          from_in: [ids.stepId("decision:pick", 0)],
+        });
+        return [...made, ...out, ...ends].map((e) => [e.type, e.from_id, e.to_id].join(" ")).sort();
+      };
+      await g.insert.facts(facts);
+      const whole = await links();
+      expect(whole).toHaveLength(withStep ? 5 : 3);
+      for (const [label, type] of lost) {
+        const node = label === "DecisionStep" ? ids.stepId("decision:pick", 0) : "decision:pick";
+        await g.store.deleteEdgesTouchingByType(g.namespace, label, node, type);
+      }
+      if (extra.length) {
+        await g.store.createEdges(
+          g.namespace,
+          "DecisionTrace",
+          "Entity",
+          extra.map(([type, to]) => [type, "decision:pick", to, { ns: g.namespace }]),
+        );
+      }
+      expect(await links()).not.toEqual(whole);
+      await g.insert.facts(facts);
+      expect(await links()).toEqual(whole);
+      const repaired = (await g.decisions.get("decision:pick"))!.updated_at;
+      await g.insert.facts(facts);
+      expect(await links()).toEqual(whole);
+      expect((await g.decisions.get("decision:pick"))!.updated_at).toEqual(repaired);
+    },
+  );
 
   it("unlinks what a decision clears or a deleted about_entity, and null keeps a field", async () => {
     const g = fresh();
@@ -691,6 +878,25 @@ describe("store setup errors", () => {
     expect(uniqueLabels(neo4jRows.slice(1))).toEqual(new Set(LABELS.slice(1)));
   });
 
+  it("opens relative Kuzu paths in each store's working directory", async () => {
+    const cwd = process.cwd();
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-cwd-"));
+    const other = join(dir, "other");
+    mkdirSync(other);
+    try {
+      process.chdir(dir);
+      await using first = new SelfGraph(new KuzuStore("graph.kuzu"));
+      const entity = await first.entities.create("Jane", "Person");
+      process.chdir(other);
+      await using second = new SelfGraph(new KuzuStore("graph.kuzu"));
+      expect(await second.entities.get(entity.id)).toBeNull();
+      expect(await first.entities.get(entity.id)).toEqual(entity);
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
     for (const size of [-1, 0, 1.5]) {
       expect(() => new KuzuStore("x.kuzu", { max_db_size: size })).toThrow(
@@ -719,6 +925,61 @@ describe("store setup errors", () => {
       /pass a smaller max_db_size$/,
     );
   });
+
+  it("reopens the Kuzu connection without changing results", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-reconnect-"));
+    const store = new KuzuStore(join(dir, "r.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "reconnect" });
+    try {
+      await g.initialize();
+      const first = await conn();
+      const people = Array.from({ length: 30 }, (_, i) => ({
+        id: `person:p${i}`,
+        type: "Person",
+        name: `Person ${i}`,
+      }));
+      const knows = people
+        .slice(1)
+        .map((_, i) => ({ from_entity: `person:p${i + 1}`, type: "KNOWS", to_entity: `person:p${i}` }));
+      await g.insert.facts({ entities: people, relations: knows });
+      for (let i = 0; i < 600; i++) expect((await g.runCypher("RETURN $i AS i", { i })).rows).toEqual([{ i }]);
+      await g.insert.facts({ relations: knows.map((r) => ({ ...r, properties: { since: 2020 } })) });
+      const rels = (await g.relations.list({ type: "KNOWS", limit: 100 })).items;
+      expect(await conn()).not.toBe(first);
+      expect((await g.entities.list({ limit: 100 })).items).toHaveLength(30);
+      expect(rels.map((r) => [r.revision, r.is_current, r.properties.since])).toEqual(Array(29).fill([2, true, 2020]));
+      expect((await g.retrieve("Person 7")).subgraph.entities.map((e) => e.id)).toContain("person:p7");
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the Kuzu connection while a raw transaction is open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-tx-"));
+    const store = new KuzuStore(join(dir, "t.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "tx" });
+    try {
+      await g.initialize();
+      const held = await conn();
+      await g.runCypher("BEGIN /* keep */ TRANSACTION");
+      for (let i = 0; i < 300; i++) await g.runCypher("CREATE (:N {pk: $pk, ns: 'tx'})", { pk: `p${i}` });
+      await g.entities.create("Jane", "Person");
+      for (let i = 0; i < 600; i++) await g.entities.get("person:jane");
+      await g.runCypher("ROLLBACK");
+      expect(await conn()).toBe(held);
+      const count = await g.runCypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n");
+      expect(count.rows).toEqual([{ n: 0 }]);
+      expect(await g.entities.get("person:jane")).toBeNull();
+      for (let i = 0; i < 600; i++) await g.runCypher("RETURN $i AS i", { i });
+      expect(await conn()).not.toBe(held);
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("property values", () => {
@@ -741,6 +1002,12 @@ describe("property values", () => {
 
     await expect(g.entities.create("Bob", "Person", { properties: { n: 9007199254740993n } } as never)).rejects.toThrow(
       "properties integer 9007199254740993 is outside the safe range; store it as a string",
+    );
+    expect((await g.entities.create("Max", "Person", { properties: { n: 2 ** 53 - 1 } })).properties).toEqual({
+      n: 9007199254740991,
+    });
+    await expect(g.entities.create("Bob", "Person", { properties: { n: 2 ** 53 } })).rejects.toThrow(
+      "properties integer 9007199254740992 is outside the safe range; store it as a string",
     );
     await expect(g.entities.update(e.id, { properties: { at: new Date() } } as never)).rejects.toThrow(
       "properties cannot hold Date values; use an ISO 8601 string",
@@ -774,6 +1041,59 @@ describe("property values", () => {
     expect((await g.entities.update(jane.id, { name: "JD" })).aliases).toEqual(["Annié", "Janie"]);
   });
 
+  it("keeps names that differ only in vowel signs as separate entities", async () => {
+    const g = open();
+    const [ram, reema] = [ids.entityId("Person", "राम"), ids.entityId("Person", "रीमा")];
+    expect([ram, reema]).toEqual(["person:राम", "person:रीमा"]);
+    const result = await g.insert.facts({
+      entities: [
+        { type: "Person", name: "राम" },
+        { type: "Person", name: "रीमा" },
+        { type: "शहर", name: "दिल्ली" },
+        { type: "City", name: "Mumbai" },
+      ],
+      relations: [
+        { from_entity: ram, type: "रहता है", to_entity: ids.entityId("शहर", "दिल्ली") },
+        { from_entity: reema, type: "रहती है", to_entity: "city:mumbai" },
+      ],
+    });
+    expect(result.warnings).toEqual([]);
+    const people = (await g.entities.list({ type: "Person" })).items;
+    expect(people.map((e) => [e.id, e.name, e.aliases])).toEqual([
+      [ram, "राम", []],
+      [reema, "रीमा", []],
+    ]);
+    const relations = (await g.relations.list()).items.map((r) => [r.from_entity, r.type, r.to_entity]);
+    expect(relations.sort()).toEqual([
+      [ram, "रहता_है", "शहर:दिल्ली"],
+      [reema, "रहती_है", "city:mumbai"],
+    ]);
+    const found = await g.retrieve("रीमा कहाँ रहती है?");
+    expect(found.seeds.map((s) => s.id)).toEqual([reema]);
+    expect(found.context).toContain("Mumbai");
+    expect(found.context).not.toContain("राम");
+  });
+
+  it("keeps the stored type on insert when only its case differs", async () => {
+    const g = open();
+    const ibm = { type: "Company", name: "International Business Machines", aliases: ["IBM"] };
+    const first = await g.insert.facts({
+      entities: [ibm, { type: "COMPANY", name: "International Business Machines" }],
+    });
+    expect(first.entities.map((e) => e.type)).toEqual(["Company"]);
+    const again = await g.insert.facts({ entities: [{ type: "company", name: "International Business Machines" }] });
+    expect(again.entities[0]?.type).toBe("Company");
+    expect(again.entities[0]?.updated_at).toEqual(first.entities[0]?.updated_at);
+    await g.insert.facts({ entities: [{ type: "Company", name: "IBM" }] });
+    expect((await g.entities.list()).items.map((e) => [e.id, e.type])).toEqual([
+      ["company:international-business-machines", "Company"],
+    ]);
+    await g.entities.create("Bob", "person");
+    const withSchema = { schema: { entities: [{ name: "Person" }] } };
+    const typed = await g.insert.facts({ entities: [{ type: "person", name: "Bob" }] }, withSchema);
+    expect(typed.entities[0]?.type).toBe("Person");
+  });
+
   it("checks entity types and ids, and keeps the stored type on a case-only update", async () => {
     const g = open();
     await expect(g.entities.create("X", "Person", { id: "company:x" })).rejects.toThrow(
@@ -787,6 +1107,8 @@ describe("property values", () => {
     await expect(g.insert.facts({ entities: [{ type: "Per:son", name: "A" }] })).rejects.toThrow("cannot contain ':'");
     await expect(g.entities.create("X", "bad type!")).rejects.toThrow(/can only contain letters, digits, spaces/);
     expect((await g.entities.create("Zoë", "Café Owner_v2.1-b")).type).toBe("Café Owner_v2.1-b");
+    expect((await g.entities.create("सीता", "व्यक्ति")).id).toBe("व्यक्ति:सीता");
+    await expect(g.entities.create("X", "bad\ufe0ftype")).rejects.toThrow(/can only contain letters, digits, spaces/);
     const calls = [
       (eid: string) => g.entities.get(eid),
       (eid: string) => g.entities.delete(eid),
@@ -865,6 +1187,23 @@ describe("property values", () => {
     expect(tiny.subgraph.entities.length).toBeGreaterThan(0);
     expect(tiny.context.split("\n")).toHaveLength(1);
     expect((await h.retrieve("A")).seeds.map((s) => s.id)).toEqual(["person:a"]);
+  });
+
+  it("ends the context at the first line that overflows the budget", async () => {
+    const g = open();
+    await g.entities.create("Ann", "Person", { id: "person:ann" });
+    await g.entities.create("Bob", "Person", { id: "person:bob" });
+    await g.relations.create("person:ann", "KNOWS", "person:bob", { properties: { note: "met at the old harbour" } });
+    const { countTokens } = await loadTokenizer();
+    const full = (await g.retrieve("Ann")).context;
+    let previous = "";
+    for (let budget = 1; budget < 16; budget++) {
+      const { context } = await g.retrieve("Ann", { budget_tokens: budget });
+      expect(context).not.toBe("");
+      expect(countTokens(context)).toBeLessThanOrEqual(budget);
+      expect(full.startsWith(context) && context.startsWith(previous)).toBe(true);
+      previous = context;
+    }
   });
 
   it("rejects empty updates, bad list filters, and missing endpoints, and clears named fields", async () => {

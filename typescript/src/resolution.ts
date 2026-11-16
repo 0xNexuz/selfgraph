@@ -10,6 +10,7 @@ import { L_ENTITY, L_EVIDENCE, L_MERGE, L_MERGE_ENTRY, L_SOURCE_VERSION, L_TRACE
 import { type LLMArg, resolveLlm } from "./llm/index.js";
 import { scanLiveMerges } from "./maintenance.js";
 import {
+  DEFAULT_STATUS,
   type DecisionTrace,
   DecisionTraceInput,
   type Entity,
@@ -146,7 +147,6 @@ export function nameSimilarity(a: string, b: string): number {
 }
 
 const DIGITS = /\p{Nd}+/gu;
-const WORD = /[\p{L}\p{N}]+/gu;
 
 /**
  * Collect the tokens that tell apart otherwise similar names: digit runs, single-letter words, and generations.
@@ -168,7 +168,7 @@ function distinguishers(tokens: string[]): [string[], string[], string[]] {
  * @return (string[]): the folded letter and digit runs, in order.
  */
 function words(name: string): string[] {
-  return [...folded(name).matchAll(WORD)].map((m) => m[0]);
+  return ids.wordRuns(folded(name));
 }
 
 /**
@@ -580,6 +580,22 @@ const dumpEntity = (e: ParsedEntityInput): JsonObject => ({
   properties: { ...e.properties },
 });
 
+/**
+ * Fold a repeat of a merged candidate into the input recorded for it, as an upsert of the absorbed id would.
+ *
+ * @param base (ParsedEntityInput): the absorbed input recorded so far.
+ * @param ent (ParsedEntityInput): the repeated candidate.
+ * @return (ParsedEntityInput): the input unmerge restores, keeping the recorded name and taking the repeat's aliases, external ids, and properties.
+ */
+function foldAbsorbed(base: ParsedEntityInput, ent: ParsedEntityInput): ParsedEntityInput {
+  return {
+    ...base,
+    aliases: ops.aliasList(base.name, [...base.aliases, ...ent.aliases, ent.name]),
+    external_ids: { ...base.external_ids, ...ent.external_ids },
+    properties: ops.mergeProps(base.properties, ent.properties),
+  };
+}
+
 const dumpRelation = (r: ParsedRelationInput): JsonObject => ({
   id: r.id,
   from_entity: r.from_entity,
@@ -766,6 +782,7 @@ export async function planResolution(
     if (merged !== undefined) {
       const target = pool.get(merged.survivor_id) ?? batch.get(merged.survivor_id)!;
       noteAdded(merged, absorbInto(target, ent, ename));
+      merged.candidate = foldAbsorbed(merged.candidate, ent);
       entities[i] = redirect(ent, target);
       continue;
     }
@@ -837,6 +854,34 @@ export async function planResolution(
   const warnings: InsertWarning[] = [];
   const rewritten = await rewriteRefs(runner, ns, facts, mapping, merges, warnings);
   return { facts: { ...rewritten, entities }, merges: [...merges.values()], warnings };
+}
+
+/**
+ * Drop planned merges and rewrites whose survivor or rewritten item was removed by dropOffSchema.
+ *
+ * @param resolution (Resolution): the planned resolution before schema dropping.
+ * @param kept (ParsedExtraction): the facts kept after dropOffSchema.
+ * @return (Resolution): the resolution aligned to kept.
+ */
+export function trimResolution(resolution: Resolution, kept: ParsedExtraction): Resolution {
+  const entities = new Set(kept.entities.map((ent) => ent.id || ids.entityId(ent.type, ent.name)));
+  const keptByKind = {
+    relation: new Set(kept.relations.map(ridOf)),
+    preference: new Set(kept.preferences.map(pidOf)),
+    decision: new Set(kept.decisions.map(tidOf)),
+  };
+  const merges: PendingMerge[] = [];
+  for (const merge of resolution.merges) {
+    if (!entities.has(merge.survivor_id)) continue;
+    merges.push({
+      ...merge,
+      rewrites: merge.rewrites.filter((r) => r.dropped || keptByKind[r.kind].has(r.id)),
+    });
+  }
+  const warnings = resolution.warnings.filter((w) =>
+    [...entities].some((eid) => w.message.includes(`join ${eid} to itself`)),
+  );
+  return { facts: kept, merges, warnings };
 }
 
 /**
@@ -1141,6 +1186,7 @@ export async function saveMerges(
       rec = {
         ...prev,
         source_ids: ops.dedupList([...prev.source_ids, ...rec.source_ids]),
+        absorbed: dumpEntity(foldAbsorbed(parseOrThrow(EntityInput, prev.absorbed, "entity"), merge.candidate)),
         added_aliases: ops.dedupList([...prev.added_aliases, ...merge.added_aliases]),
         added_external_ids: ops.dedupList([...prev.added_external_ids, ...merge.added_external_ids]),
         added_properties: ops.dedupList([...prev.added_properties, ...merge.added_properties]),
@@ -1399,7 +1445,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       rationale: back.rationale,
       outcome_entity: back.outcome_entity,
       alternative_entities: back.alternative_entities,
-      status: back.status,
+      status: back.status ?? DEFAULT_STATUS,
       event_time: back.event_time,
       created_at: at,
     });
