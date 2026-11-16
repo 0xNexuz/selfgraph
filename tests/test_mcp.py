@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import json
 import logging
@@ -31,6 +32,89 @@ def test_tools_build_and_read_graph():
         if RAW_CYPHER:
             rows = run(srv.run_cypher("MATCH (e:Entity {id:'company:hydradb', ns:'default'}) RETURN e.id AS id"))
             assert {"id": "company:hydradb"} in rows["rows"]
+
+
+def test_concurrent_first_calls_open_one_graph(monkeypatch):
+    opened = []
+    real = srv.build_graph
+
+    def counting(settings):
+        graph = real(settings)
+        opened.append(graph)
+        return graph
+
+    monkeypatch.setattr(srv, "build_graph", counting)
+
+    async def first_calls():
+        return await asyncio.gather(*(srv.check_readiness() for _ in range(5)))
+
+    with mcp_session():
+        results = run(first_calls())
+    assert len(opened) == 1
+    assert all(result["reachable"] for result in results)
+
+
+class _SlowGraph:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.closed = 0
+
+    async def initialize(self):
+        self.started.set()
+        await self.release.wait()
+
+    async def close(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def slow_graph(monkeypatch):
+    graph = _SlowGraph()
+    monkeypatch.setattr(srv, "build_graph", lambda settings: graph)
+    run(srv.configure(srv.GraphSettings(store="kuzu")))
+    yield graph
+    run(srv.close())
+
+
+def test_close_while_opening_closes_the_graph(slow_graph):
+    async def scenario():
+        first = asyncio.ensure_future(srv._graph_handle())
+        await slow_graph.started.wait()
+        await srv.close()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    run(scenario())
+    assert slow_graph.closed == 1
+    assert srv._graph is None
+
+
+def test_configure_while_opening_closes_the_graph(slow_graph):
+    async def scenario():
+        first = asyncio.ensure_future(srv._graph_handle())
+        await slow_graph.started.wait()
+        await srv.configure(srv.GraphSettings(store="kuzu"))
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    run(scenario())
+    assert slow_graph.closed == 1
+
+
+def test_cancelled_first_caller_keeps_the_open_for_the_next_call(slow_graph):
+    async def scenario():
+        first = asyncio.ensure_future(srv._graph_handle())
+        await slow_graph.started.wait()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        slow_graph.release.set()
+        return await srv._graph_handle()
+
+    assert run(scenario()) is slow_graph
+    run(srv.close())
+    assert slow_graph.closed == 1
 
 
 def test_build_server_contract():
