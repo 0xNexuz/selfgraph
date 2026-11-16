@@ -429,6 +429,97 @@ function suite(spec: StoreSpec) {
     expect(await graph.decisions.get(t.id)).toBeNull();
   });
 
+  it.each([
+    [
+      false,
+      [
+        ["DecisionTrace", "MADE_DECISION"],
+        ["DecisionTrace", "RESULTED_IN"],
+        ["DecisionTrace", "CONSIDERED"],
+      ],
+      [],
+    ],
+    [
+      true,
+      [
+        ["DecisionStep", "FROM"],
+        ["DecisionStep", "TO"],
+      ],
+      [
+        ["CONSIDERED", "company:beta"],
+        ["CONSIDERED", "person:ann"],
+      ],
+    ],
+  ] as const)(
+    "reinserting a decision repairs links a partial write left wrong (%j, %j, %j)",
+    async (withStep, lost, extra) => {
+      const g = fresh();
+      for (const [name, type] of [
+        ["Ann", "Person"],
+        ["Acme", "Company"],
+        ["Beta", "Company"],
+        ["X", "Team"],
+        ["Y", "Team"],
+      ] as const) {
+        await g.entities.create(name, type);
+      }
+      const rel = await g.relations.create("team:x", "SELECTED", "team:y");
+      const facts = {
+        decisions: [
+          {
+            id: "decision:pick",
+            title: "Pick a vendor",
+            steps: withStep ? [rel.id] : [],
+            actor_entity: "person:ann",
+            outcome_entity: "company:acme",
+            alternative_entities: ["company:beta"],
+          },
+        ],
+      };
+      const links = async () => {
+        const ns = g.namespace;
+        const made = await g.store.matchEdges(ns, {
+          from_label: "Entity",
+          to_label: "DecisionTrace",
+          to_in: ["decision:pick"],
+        });
+        const out = await g.store.matchEdges(ns, {
+          from_label: "DecisionTrace",
+          to_label: "Entity",
+          from_in: ["decision:pick"],
+        });
+        const ends = await g.store.matchEdges(ns, {
+          from_label: "DecisionStep",
+          to_label: "Entity",
+          from_in: [ids.stepId("decision:pick", 0)],
+        });
+        return [...made, ...out, ...ends].map((e) => [e.type, e.from_id, e.to_id].join(" ")).sort();
+      };
+      await g.insert.facts(facts);
+      const whole = await links();
+      expect(whole).toHaveLength(withStep ? 5 : 3);
+      for (const [label, type] of lost) {
+        const node = label === "DecisionStep" ? ids.stepId("decision:pick", 0) : "decision:pick";
+        await g.store.deleteEdgesTouchingByType(g.namespace, label, node, type);
+      }
+      if (extra.length) {
+        await g.store.createEdges(
+          g.namespace,
+          "DecisionTrace",
+          "Entity",
+          extra.map(([type, to]) => [type, "decision:pick", to, { ns: g.namespace }]),
+        );
+      }
+      expect(await links()).not.toEqual(whole);
+      await g.insert.facts(facts);
+      expect(await links()).toEqual(whole);
+      const repaired = (await g.decisions.get("decision:pick"))!.updated_at;
+      await g.insert.facts(facts);
+      expect(await links()).toEqual(whole);
+      expect((await g.decisions.get("decision:pick"))!.updated_at).toEqual(repaired);
+    },
+  );
+
   it("unlinks what a decision clears or a deleted about_entity, and null keeps a field", async () => {
     const g = fresh();
     for (const [name, type] of [
@@ -833,6 +924,61 @@ describe("store setup errors", () => {
     expect(kuzuError(new Error("Buffer manager exception: Mmap for size 1 failed."), "q").message).toMatch(
       /pass a smaller max_db_size$/,
     );
+  });
+
+  it("reopens the Kuzu connection without changing results", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-reconnect-"));
+    const store = new KuzuStore(join(dir, "r.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "reconnect" });
+    try {
+      await g.initialize();
+      const first = await conn();
+      const people = Array.from({ length: 30 }, (_, i) => ({
+        id: `person:p${i}`,
+        type: "Person",
+        name: `Person ${i}`,
+      }));
+      const knows = people
+        .slice(1)
+        .map((_, i) => ({ from_entity: `person:p${i + 1}`, type: "KNOWS", to_entity: `person:p${i}` }));
+      await g.insert.facts({ entities: people, relations: knows });
+      for (let i = 0; i < 600; i++) expect((await g.runCypher("RETURN $i AS i", { i })).rows).toEqual([{ i }]);
+      await g.insert.facts({ relations: knows.map((r) => ({ ...r, properties: { since: 2020 } })) });
+      const rels = (await g.relations.list({ type: "KNOWS", limit: 100 })).items;
+      expect(await conn()).not.toBe(first);
+      expect((await g.entities.list({ limit: 100 })).items).toHaveLength(30);
+      expect(rels.map((r) => [r.revision, r.is_current, r.properties.since])).toEqual(Array(29).fill([2, true, 2020]));
+      expect((await g.retrieve("Person 7")).subgraph.entities.map((e) => e.id)).toContain("person:p7");
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the Kuzu connection while a raw transaction is open", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-tx-"));
+    const store = new KuzuStore(join(dir, "t.kuzu"));
+    const conn = () => (store as unknown as { conn: { get(): Promise<unknown> } }).conn.get();
+    const g = new SelfGraph(store, { namespace: "tx" });
+    try {
+      await g.initialize();
+      const held = await conn();
+      await g.runCypher("BEGIN /* keep */ TRANSACTION");
+      for (let i = 0; i < 300; i++) await g.runCypher("CREATE (:N {pk: $pk, ns: 'tx'})", { pk: `p${i}` });
+      await g.entities.create("Jane", "Person");
+      for (let i = 0; i < 600; i++) await g.entities.get("person:jane");
+      await g.runCypher("ROLLBACK");
+      expect(await conn()).toBe(held);
+      const count = await g.runCypher("MATCH (n:N) WHERE n.ns = 'tx' RETURN count(*) AS n");
+      expect(count.rows).toEqual([{ n: 0 }]);
+      expect(await g.entities.get("person:jane")).toBeNull();
+      for (let i = 0; i < 600; i++) await g.runCypher("RETURN $i AS i", { i });
+      expect(await conn()).not.toBe(held);
+    } finally {
+      await g.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

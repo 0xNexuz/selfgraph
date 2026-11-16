@@ -564,10 +564,10 @@ def known_cases():
 
 CONTRADICTION_SCHEMA = {
     "relations": [
-        {"type": "WORKS_AT", "aliases": ["employed by", "CEO_OF"], "from": {"max_count": 1}},
+        {"type": "WORKS_AT", "aliases": ["employed by"], "from": {"max_count": 1}},
         {"type": "CEO_OF", "from": {"max_count": 1}, "to": {"max_count": 1}},
         {"type": "MEMBER_OF", "from": {"max_count": 2}},
-        {"type": "KNOWS", "aliases": ["meets"]},
+        {"type": "KNOWS"},
         {"type": "MEETS"},
     ]
 }

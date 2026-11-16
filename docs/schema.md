@@ -85,6 +85,8 @@ first problem by its path:
 | Problem | Message |
 |---------|---------|
 | Two entity types with the same name, ignoring case | `entities[1].name: duplicate entity type 'Person'` |
+| An entity alias that is another type's name or alias, ignoring case | `entities[1].aliases[0]: 'Person' is already a name or alias of entity type 'Person'` |
+| A relation alias that names another relation after normalization | `relations[1].aliases[0]: 'works at' is already a name or alias of relation type 'WORKS_AT'` |
 | A `parent` that is no entity type name or alias | `entities[1].parent: unknown type 'X'` |
 | A `parent` chain that loops back | `entities[0].parent: parent cycle 'A' -> 'B' -> 'A'` |
 | An endpoint type that is no entity type name or alias, in a schema with entities | `relations[0].to.types[1]: unknown type 'B'` |
@@ -118,6 +120,13 @@ use the graph-level schema and mode.
 
 How checks are applied:
 
+- Cardinality counts distinct relation ids. Repeating a relation in one insert
+  counts it once; different explicit relation ids count separately, even when
+  their endpoints and type match.
+- An insert checks each entity and relation after entity resolution and after
+  merging its properties with what is already stored and other entries in the
+  same batch, so restating or extending a stored item does not require
+  repeating its required properties.
 - An `update` is checked on the state it would produce. Only violations it
   introduces count. A violation the stored record already had, say from before
   the schema was set, neither raises nor is logged again.
@@ -151,7 +160,7 @@ result full of `dropped_off_schema` warnings.
 | Code | Raised when |
 |------|-------------|
 | `unknown_entity_type` | An entity's type is not in the schema, and the schema lists at least one entity type. |
-| `missing_required_property` | A required property is absent. |
+| `missing_required_property` | A required property is absent or `None` (`null`). |
 | `property_type_mismatch` | A property value does not match its declared type. |
 | `unknown_relation_type` | A relation's type is not in the schema, and the schema lists at least one relation type. |
 | `endpoint_type_violation` | A relation endpoint is not one of the allowed types. |

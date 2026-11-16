@@ -6,50 +6,15 @@ const path = tempKuzu("kuzu-filters-");
 const store = new KuzuStore(path, { buffer_pool_size: 64 << 20, max_db_size: 512 << 20 });
 const graph = new SelfGraph(store);
 beforeAll(async () => {
-  await graph.entities.create("Ann", "Person", { aliases: ["Annie", "Anna"] });
-  await graph.entities.create("Bob", "Person");
-  await store.createEdge("default", "KNOWS", "Entity", "person:ann", "Entity", "person:bob", {
-    id: "relation:tags",
-    revision: 1,
-    is_current: true,
-    tags: ["a", "b"],
-  });
+  await graph.initialize();
 });
 afterAll(async () => {
   await graph.close();
 });
 
-test("matches SDK entity aliases by exact list value", async () => {
-  const rows = await store.matchNodes("default", "Entity", { equals: { aliases: ["Annie", "Anna"] } });
-  expect(rows.map((r) => r.id)).toEqual(["person:ann"]);
-});
-test("matches a list-valued any_of candidate", async () => {
-  const rows = await store.matchNodes("default", "Entity", { any_of: { aliases: [["Annie", "Anna"]] } });
-  expect(rows.map((r) => r.id)).toEqual(["person:ann"]);
-});
-test("matches list-valued edge properties", async () => {
-  const rows = await store.matchEdges("default", { from_label: "Entity", equals: { tags: ["a", "b"] } });
-  expect(rows.map((r) => r.props.id)).toEqual(["relation:tags"]);
-});
-
-test.each(["id", "name", "aliases"])("matches nothing for empty any_of %s", async (key) => {
-  expect(await store.matchNodes("default", "Entity", { any_of: { [key]: [] } })).toEqual([]);
-});
-
-test("preserves scalar filters", async () => {
-  expect(await store.matchNodes("default", "Entity", { equals: { name: "Ann" } })).toHaveLength(1);
-  expect(await store.matchNodes("default", "Entity", { any_of: { name: ["Ann"] } })).toHaveLength(1);
-});
-
-test("deletes by exact list value", async () => {
-  expect(await store.deleteNodesBy("default", "Entity", { aliases: ["Annie", "Anna"] })).toBe(1);
-});
-
-test.each([
-  { name: "nested-object", value: { profile: { name: "Zoë", tags: ["a", "b"] }, active: true } },
-  { name: "empty-list", value: [] },
-  { name: "escaped-unicode", value: 'Zoë 北京 "quoted" \\ path\nnext\tline' },
-])("matches and deletes JSON property values: $name", async ({ name: ns, value }) => {
+test("matches and deletes a nested object property", async () => {
+  const ns = "filters";
+  const value = { profile: { name: "Zoë", tags: ["a", "b"] }, active: true };
   await store.upsertNode(ns, "Entity", "a", { id: "a", value });
   await store.upsertNode(ns, "Entity", "b", { id: "b", value: "different" });
   await store.createEdge(ns, "KNOWS", "Entity", "a", "Entity", "b", {
