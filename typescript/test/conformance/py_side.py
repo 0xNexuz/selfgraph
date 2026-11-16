@@ -1320,6 +1320,31 @@ async def supersede(graph):
     out["undated_correction"] = [
         [v.revision, v.invalidated_by, v.event_time == corrected[-1].created_at] for v in corrected
     ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Person", "name": "Judy"},
+                *({"type": "Company", "name": n} for n in ("Stark", "Wonka")),
+            ],
+            "relations": [link("judy", "stark", 2020)],
+        }
+    )
+    stark = ids.relation_id("person:judy", "WORKS_AT", "company:stark")
+    await graph.relations.certify(stark, by="hr")
+    await graph.insert.facts({"relations": [link("judy", "wonka", 2022)]})
+    await graph.relations.update(stark, set_properties={"role": "cto"})
+    out["certified_update"] = {
+        rid: [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
+        for rid in (stark, ids.relation_id("person:judy", "WORKS_AT", "company:wonka"))
+    }
     return out
 
 

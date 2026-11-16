@@ -2658,7 +2658,8 @@ async def update_relation(
     contradiction: str = "off",
     caps: Mapping[str, RelationCap] | None = None,
 ) -> Relation:
-    """Create a new version of a relation, settling its max_count endpoints again when supersede moves its event_time.
+    """Create a new version of a relation, settling its max_count endpoints again under supersede when the version
+    moves its event_time or drops a certification.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2669,8 +2670,9 @@ async def update_relation(
     @param evidence (list[Evidence] | None): evidence to merge.
     @param schema_check (SchemaCheck | None): checks the resulting relation against the schema before the write, given
         the stored version too so only violations the update introduces count.
-    @param contradiction (str): "supersede" settles the endpoints again when event_time moves; any other mode leaves
-        them as they are, since an update adds no relation.
+    @param contradiction (str): "supersede" settles the endpoints again when event_time moves or the new revision of
+        a certified relation, which starts uncertified, loses the exemption that kept it current; any other mode
+        leaves them as they are, since an update adds no relation.
     @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
     @return (Relation): the new version, current unless supersede retired it; raises ValidationError for a relation a
         contradiction invalidated.
@@ -2725,11 +2727,43 @@ async def update_relation(
         runner, ns, current.from_entity, current.type, current.to_entity, props, retire=True
     )
     await _write_evidence(runner, ns, records, created_at)
-    if contradiction == "supersede" and to_iso(new_event_time) != to_iso(current.event_time):
-        edge = {"type": rel.type, "from_id": rel.from_entity, "to_id": rel.to_entity, "props": props}
-        await resettle_endpoints(runner, ns, [edge], caps, created_at)
+    moved = to_iso(new_event_time) != to_iso(current.event_time)
+    if contradiction == "supersede" and (moved or current.certified_at is not None):
+        if current.certified_at is not None:
+            await _settle_uncertified(runner, ns, rel, caps, created_at)
+        if moved:
+            edge = {"type": rel.type, "from_id": rel.from_entity, "to_id": rel.to_entity, "props": props}
+            await resettle_endpoints(runner, ns, [edge], caps, created_at)
         rel = _relation_of(await _newest_edge(runner, ns, rid, _is_relation_type))
     return rel
+
+
+async def _settle_uncertified(
+    runner: Any, ns: str, rel: Relation, caps: Mapping[str, RelationCap] | None, at: datetime
+) -> None:
+    """Settle the max_count endpoints of a relation whose new revision dropped the certification that kept it current.
+
+    @param runner (Any): graph runner.
+    @param ns (str): namespace.
+    @param rel (Relation): the new, uncertified revision, already written.
+    @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
+    @param at (datetime): the write's timestamp, stamped on each retirement.
+    @return (None): nothing.
+    """
+    tracker, found = await _contradiction_check(
+        runner, ns, "supersede", caps, [(rel.type, rel.from_entity, rel.to_entity)]
+    )
+    if tracker is None:
+        return
+    tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, _rank(rel))
+    ended, _ = tracker.settle()
+    rows = []
+    for old, (by, when) in ended.items():
+        gone = _retired(found[old], by, when, at)
+        rows.append((gone["type"], gone["from_id"], gone["to_id"], gone["props"]))
+    if rows:
+        await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
+        await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
 
 
 async def list_relations(
