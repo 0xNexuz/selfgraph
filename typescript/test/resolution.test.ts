@@ -24,6 +24,7 @@ import { forEachStore, freshGraphs, SINGLE_EMPLOYER, type StoreSpec, storedEntit
 const IBM = entityId("Company", "International Business Machines");
 const BIG_BLUE = entityId("Company", "Big Blue");
 const ADA = entityId("Person", "Ada");
+const IBM_SEED = { type: "Company", name: "International Business Machines", external_ids: { ticker: "IBM" } };
 
 const input = (value: EntityInput) => EntityInput.parse(value);
 
@@ -267,6 +268,76 @@ function suite(spec: StoreSpec) {
     const restored2 = await g.entities.unmerge(mergeBob.id);
     expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
     expect(restored2.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
+  });
+
+  it("preserves steps when unmerging in reverse order", async () => {
+    const g = open({ resolver: "fuzzy" });
+    const ridLoop = relationId(BIG_BLUE, "OWNS", IBM);
+    const ridBob = relationId(BOB, "WORKS_AT", IBM);
+    const ridRobert = relationId(ROBERT, "WORKS_AT", IBM);
+    const batch = {
+      entities: [
+        IBM_SEED,
+        { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+        { type: "Person", name: "Robert", aliases: ["Bob"] },
+        { type: "Person", name: "Bob" },
+      ],
+      relations: [
+        { from_entity: BIG_BLUE, type: "OWNS", to_entity: IBM },
+        { from_entity: BOB, type: "WORKS_AT", to_entity: IBM },
+      ],
+      decisions: [{ title: "acquisition", steps: [ridLoop, ridBob] }],
+    };
+    const res = await g.insert.facts(batch);
+    expect(res.merges).toHaveLength(2);
+    const mergeBB = res.merges.find((m) => m.absorbed_id === BIG_BLUE)!;
+    const mergeBob = res.merges.find((m) => m.absorbed_id === BOB)!;
+    const [dec] = res.decisions;
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridRobert]);
+
+    const restored = await g.entities.unmerge(mergeBob.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridBob]);
+    expect(restored.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridBob]);
+
+    const restored2 = await g.entities.unmerge(mergeBB.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
+    expect(restored2.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridLoop, ridBob]);
+  });
+
+  it("handles unmerge with multiple dropped self-loops", async () => {
+    const g = open({ resolver: "fuzzy" });
+    const ridLoop1 = relationId(BIG_BLUE, "OWNS", IBM);
+    const ridLoop2 = relationId(BIG_BLUE, "PARENT_OF", IBM);
+    const ridBob = relationId(BOB, "WORKS_AT", IBM);
+    const ridRobert = relationId(ROBERT, "WORKS_AT", IBM);
+    const batch = {
+      entities: [
+        IBM_SEED,
+        { type: "Company", name: "Big Blue", external_ids: { ticker: "IBM" } },
+        { type: "Person", name: "Robert", aliases: ["Bob"] },
+        { type: "Person", name: "Bob" },
+      ],
+      relations: [
+        { from_entity: BIG_BLUE, type: "OWNS", to_entity: IBM },
+        { from_entity: BIG_BLUE, type: "PARENT_OF", to_entity: IBM },
+        { from_entity: BOB, type: "WORKS_AT", to_entity: IBM },
+      ],
+      decisions: [{ title: "acquisition", steps: [ridLoop1, ridLoop2, ridBob] }],
+    };
+    const res = await g.insert.facts(batch);
+    expect(res.merges).toHaveLength(2);
+    const mergeBB = res.merges.find((m) => m.absorbed_id === BIG_BLUE)!;
+    const mergeBob = res.merges.find((m) => m.absorbed_id === BOB)!;
+    const [dec] = res.decisions;
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridRobert]);
+
+    const restored = await g.entities.unmerge(mergeBob.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridBob]);
+    expect(restored.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridBob]);
+
+    const restored2 = await g.entities.unmerge(mergeBB.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([ridLoop1, ridLoop2, ridBob]);
+    expect(restored2.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([ridLoop1, ridLoop2, ridBob]);
   });
 
   const JANE = entityId("Person", "Jane Doe");

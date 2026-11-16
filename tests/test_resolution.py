@@ -289,6 +289,76 @@ def test_unmerge_restores_dropped_decision_steps_and_preserves_sibling_merge_ste
     assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop, rid_bob]
 
 
+def test_unmerge_preserves_steps_when_unmerging_in_reverse_order():
+    g = fresh_graph("res", resolver="fuzzy")
+    rid_loop = relation_id(BIG_BLUE, "OWNS", IBM)
+    rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
+    rid_robert = relation_id(ROBERT_ID, "WORKS_AT", IBM)
+    batch = {
+        "entities": [
+            IBM_SEED,
+            {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
+            ROBERT,
+            BOB,
+        ],
+        "relations": [
+            {"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM},
+            {"from_entity": BOB_ID, "type": "WORKS_AT", "to_entity": IBM},
+        ],
+        "decisions": [{"title": "acquisition", "steps": [rid_loop, rid_bob]}],
+    }
+    res = run(g.insert.facts(batch))
+    assert len(res.merges) == 2
+    merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
+    merge_bob = next(m for m in res.merges if m.absorbed_id == BOB_ID)
+    [dec] = res.decisions
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
+
+    restored = run(g.entities.unmerge(merge_bob.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_bob]
+    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_bob]
+
+    restored2 = run(g.entities.unmerge(merge_bb.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop, rid_bob]
+    assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop, rid_bob]
+
+
+def test_unmerge_with_multiple_dropped_self_loops():
+    g = fresh_graph("res", resolver="fuzzy")
+    rid_loop1 = relation_id(BIG_BLUE, "OWNS", IBM)
+    rid_loop2 = relation_id(BIG_BLUE, "PARENT_OF", IBM)
+    rid_bob = relation_id(BOB_ID, "WORKS_AT", IBM)
+    rid_robert = relation_id(ROBERT_ID, "WORKS_AT", IBM)
+    batch = {
+        "entities": [
+            IBM_SEED,
+            {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}},
+            ROBERT,
+            BOB,
+        ],
+        "relations": [
+            {"from_entity": BIG_BLUE, "type": "OWNS", "to_entity": IBM},
+            {"from_entity": BIG_BLUE, "type": "PARENT_OF", "to_entity": IBM},
+            {"from_entity": BOB_ID, "type": "WORKS_AT", "to_entity": IBM},
+        ],
+        "decisions": [{"title": "acquisition", "steps": [rid_loop1, rid_loop2, rid_bob]}],
+    }
+    res = run(g.insert.facts(batch))
+    assert len(res.merges) == 2
+    merge_bb = next(m for m in res.merges if m.absorbed_id == BIG_BLUE)
+    merge_bob = next(m for m in res.merges if m.absorbed_id == BOB_ID)
+    [dec] = res.decisions
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_robert]
+
+    restored = run(g.entities.unmerge(merge_bob.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_bob]
+    assert [s.relation_id for s in restored.decisions[0].steps] == [rid_bob]
+
+    restored2 = run(g.entities.unmerge(merge_bb.id))
+    assert [s.relation_id for s in run(g.decisions.get(dec.id)).steps] == [rid_loop1, rid_loop2, rid_bob]
+    assert [s.relation_id for s in restored2.decisions[0].steps] == [rid_loop1, rid_loop2, rid_bob]
+
+
 def test_insert_result_lists_each_entity_and_relation_once_after_a_merge():
     g = fresh_graph("res", resolver="fuzzy")
     batch = [IBM_SEED, {"type": "Company", "name": "Big Blue", "external_ids": {"ticker": "IBM"}}, BOB]
