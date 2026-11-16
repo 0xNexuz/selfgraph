@@ -91,8 +91,10 @@ describe("ids match Python byte for byte", () => {
   });
 
   it("relation types, control and surrogate characters, and quoted labels", () => {
-    for (const [input, expected] of Object.entries(fx.normalize_rel_type))
+    for (const [input, expected] of Object.entries(fx.normalize_rel_type)) {
       expect(normalizeRelType(input)).toBe(expected);
+      expect(normalizeRelType(expected as string), input).toBe(expected);
+    }
     for (const [bad, expected] of Object.entries(fx.bad_strings)) {
       expect(
         [attempt(() => entityId("Person", bad)), attempt(() => normalizeRelType(bad))],

@@ -170,7 +170,9 @@ await graph.relations.evidence(rel.id)        # Page of Evidence, all versions
 - `create` asserts the fact now, with exactly the given properties.
 - `update` writes a new version and keeps the old ones.
 - A relation type is normalized to UPPER_SNAKE, splitting camelCase. `works at`,
-  `worksAt`, and `WORKS_AT` are one type, and `HTTPServer` is `HTTP_SERVER`.
+  `worksAt`, and `WORKS_AT` are one type, and `HTTPServer` is `HTTP_SERVER`. A
+  digit and the letter after it split too, so `uses k8s` and `USES_K8S` are both
+  `USES_K8_S`. Normalizing a stored type again returns it unchanged.
 - The types `PREFERS`, `AVOIDS`, `HAS_PROFILE`, `MADE_DECISION`, `HAS_STEP`,
   `FROM`, `TO`, `RESULTED_IN`, `CONSIDERED`, `HAS_VERSION`, and `HAS_CHUNK` are
   reserved in any case. Use the preference and decision resources, or another

@@ -234,6 +234,16 @@ function suite(spec: StoreSpec) {
     ]);
   });
 
+  it("reads back and reinserts a type with a digit before a letter", async () => {
+    const g = fresh();
+    await g.insert.facts({ entities: ["App", "Cluster"].map((name) => ({ type: "Thing", name })) });
+    const rel = await g.relations.create("thing:app", "uses k8s", "thing:cluster");
+    expect(rel.type).toBe("USES_K8_S");
+    expect((await g.relations.list({ type: rel.type })).items.map((r) => r.id)).toEqual([rel.id]);
+    const facts = { relations: [{ from_entity: "thing:app", type: "uses k8s", to_entity: "thing:cluster" }] };
+    expect((await g.insert.facts(facts)).relations.map((r) => r.id)).toEqual([rel.id]);
+  });
+
   it("creates, conflicts on, reads, pages, merges updates, and deletes entities", async () => {
     const e = await graph.entities.create("Ada Lovelace", "Person", {
       aliases: ["Ada", "Ada"],
