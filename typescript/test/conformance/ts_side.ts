@@ -182,11 +182,6 @@ function unknownKeyError(kind: "facts" | "schema", value: unknown): string {
 }
 
 /**
- * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
- *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[] }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, and the expanded tokens per question.
- */
-/**
  * Export a schema holding every field the Neo4j ontology cannot carry, and return what it logs.
  *
  * @return (string): the logged warning lines joined by newlines, empty when the export logs nothing.
@@ -202,6 +197,11 @@ export function neo4jExportWarnings(): string {
   return lines.join("\n");
 }
 
+/**
+ * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
+ *
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, and the fields the Neo4j export drops.
+ */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
