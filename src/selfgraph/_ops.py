@@ -508,6 +508,17 @@ def _clean_text(value: Any) -> Any:
     return _ids.normalize_text(value).strip() if isinstance(value, str) else value
 
 
+def entity_type_key(etype: str, canonical: Callable[[str], str] | None = None) -> str:
+    """The key entity type filters compare on: the cleaned type, through canonical when given, case-folded.
+
+    @param etype (str): the entity type.
+    @param canonical (Callable[[str], str] | None): maps a type to its schema type name, or None for no schema.
+    @return (str): the comparison key.
+    """
+    etype = _clean_text(etype)
+    return (canonical(etype) if canonical is not None else etype).casefold()
+
+
 def unique_by_id(items: Iterable[Any]) -> list[Any]:
     """Keep one item per id: the last write wins, at the position the id first appeared.
 
@@ -1199,10 +1210,7 @@ async def list_entities(
     if type is None:
         return [decode_entity(r) for r in await fetch(skip=skip, limit=limit)]
 
-    def key(etype: str) -> str:
-        etype = _clean_text(etype)
-        return (canonical(etype) if canonical is not None else etype).casefold()
-
+    key = partial(entity_type_key, canonical=canonical)
     wanted = key(type)
     found: list[dict] = []
     read = 0

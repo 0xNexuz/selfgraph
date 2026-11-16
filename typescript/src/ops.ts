@@ -138,6 +138,18 @@ const MAX_ID_BYTES = 1024;
 
 export const cleanText = (s: string): string => pyStrip(ids.normalizeText(s));
 
+/**
+ * The key entity type filters compare on: the cleaned type, through canonical when given, case-folded.
+ *
+ * @param etype (string): the entity type.
+ * @param canonical ((type: string) => string | undefined): maps a type to its schema type name, or undefined for no schema.
+ * @return (string): the comparison key.
+ */
+export function entityTypeKey(etype: string, canonical?: (type: string) => string): string {
+  const clean = cleanText(etype);
+  return casefold(canonical ? canonical(clean) : clean);
+}
+
 const idOf = (props: Props): string => props.id as string;
 
 /**
@@ -1138,10 +1150,7 @@ export async function listEntities(
       await runner.matchNodes(ns, L_ENTITY, { equals, skip: args.skip, limit: args.limit, id_gt: args.after })
     ).map(decodeEntity);
   }
-  const key = (etype: string): string => {
-    const clean = cleanText(etype);
-    return casefold(args.canonical ? args.canonical(clean) : clean);
-  };
+  const key = (etype: string): string => entityTypeKey(etype, args.canonical);
   const wanted = key(args.type);
   const found: Props[] = [];
   let read = 0;
