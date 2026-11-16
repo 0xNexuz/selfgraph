@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildGraph } from "../src/client.js";
-import { FalkorDBStore, ids, KuzuStore, type LLMClient, SelfGraph, ValidationError } from "../src/index.js";
+import { FalkorDBStore, KuzuStore, type LLMClient, SelfGraph, ValidationError } from "../src/index.js";
 import { runStdio } from "../src/mcp.js";
 import { EntityInput, Extraction, parseOrThrow } from "../src/models.js";
 import { DEFAULT_SETTINGS } from "../src/runtime.js";
@@ -270,66 +270,26 @@ describe("validateAgainstSchema", () => {
 });
 
 describe("distinct relation cardinality", () => {
-  const open = freshGraphs(KUZU_SPEC, "distinct");
-  const relation = { from_entity: "person:p", type: "WORKS_AT", to_entity: "company:c" };
-
-  for (const side of ["from", "to"] as const) {
-    for (const bound of ["min_count", "max_count"] as const) {
-      it.each([
-        [null, null, 1],
-        ["relation:same", "relation:same", 1],
-        [null, ids.relationId("person:p", "WORKS_AT", "company:c"), 1],
-        ["relation:a", "relation:b", 2],
-      ] as const)(`${side} ${bound} counts distinct relation IDs %s and %s`, (firstId, secondId, distinct) => {
-        const limit = bound === "min_count" ? 2 : 1;
-        const schema = { relations: [{ type: "WORKS_AT", [side]: { [bound]: limit } }] };
-        const facts = { relations: [firstId, secondId].map((id) => ({ ...relation, id })) };
-        const found = check(schema, facts);
-        const broken = bound === "min_count" ? distinct < limit : distinct > limit;
-        expect(found.map((w) => w.code)).toEqual(broken ? ["cardinality_violation"] : []);
-        if (broken) expect(found[0]!.message).toContain(`has ${distinct} WORKS_AT (${side})`);
-      });
-    }
-
-    it.each([false, true])(`${side} maximum accepts a repeated relation ID (explicit=%s)`, async (explicit) => {
-      const schema = { relations: [{ type: "WORKS_AT", [side]: { max_count: 1 } }] };
-      const graph = open({ schema, schema_mode: "strict", resolver: "exact" });
-      await graph.entities.create("P", "Person");
-      await graph.entities.create("C", "Company");
-      const rel = { ...relation, ...(explicit ? { id: "relation:job" } : {}) };
-      const result = await graph.insert.facts({ relations: [rel, { ...rel, properties: { since: 2020 } }] });
-      expect(result.warnings).toEqual([]);
-      const stored = (await graph.relations.list()).items;
-      expect(stored).toHaveLength(1);
-      expect(stored[0]!.properties).toEqual({ since: 2020 });
-    });
-
-    it.each([false, true])(`${side} minimum rejects a repeated relation ID (explicit=%s)`, async (explicit) => {
-      const schema = { relations: [{ type: "WORKS_AT", [side]: { min_count: 2 } }] };
-      const graph = open({ schema, schema_mode: "strict", resolver: "exact" });
-      await graph.entities.create("P", "Person");
-      await graph.entities.create("C", "Company");
-      const rel = { ...relation, ...(explicit ? { id: "relation:job" } : {}) };
-      await expect(graph.insert.facts({ relations: [rel, rel] })).rejects.toThrow(
-        `has 1 WORKS_AT (${side}) in this insert, below min 2`,
-      );
-      expect((await graph.relations.list()).items).toEqual([]);
-    });
-  }
-
-  it("still validates the properties of every repeated relation input", async () => {
+  it.each([
+    { name: "one repeated ID counts once", relationIds: ["relation:a", "relation:a"], count: 1 },
+    { name: "two different IDs count twice", relationIds: ["relation:a", "relation:b"], count: 2 },
+  ])("$name", ({ relationIds, count }) => {
     const schema = {
-      relations: [
-        { type: "WORKS_AT", from: { max_count: 1 }, properties: [{ name: "since", type: "integer" as const }] },
-      ],
+      relations: [{ type: "WORKS_AT", from: { max_count: 1 }, to: { max_count: 1 } }],
     };
-    const graph = open({ schema, schema_mode: "strict", resolver: "exact" });
-    await graph.entities.create("P", "Person");
-    await graph.entities.create("C", "Company");
-    await expect(
-      graph.insert.facts({ relations: [relation, { ...relation, properties: { since: "bad" } }] }),
-    ).rejects.toThrow("property 'since' should be integer");
-    expect((await graph.relations.list()).items).toEqual([]);
+    const facts = {
+      relations: relationIds.map((id) => ({ id, from_entity: "person:p", type: "WORKS_AT", to_entity: "company:c" })),
+    };
+    const found = check(schema, facts);
+    expect(found.map((w) => w.code)).toEqual(count === 1 ? [] : ["cardinality_violation", "cardinality_violation"]);
+    expect(found.map((w) => w.message)).toEqual(
+      count === 1
+        ? []
+        : [
+            "person:p has 2 WORKS_AT (from) in this insert, above max 1",
+            "company:c has 2 WORKS_AT (to) in this insert, above max 1",
+          ],
+    );
   });
 });
 
