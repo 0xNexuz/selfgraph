@@ -887,6 +887,26 @@ describe("property values", () => {
     expect(found.context).not.toContain("राम");
   });
 
+  it("keeps the stored type on insert when only its case differs", async () => {
+    const g = open();
+    const ibm = { type: "Company", name: "International Business Machines", aliases: ["IBM"] };
+    const first = await g.insert.facts({
+      entities: [ibm, { type: "COMPANY", name: "International Business Machines" }],
+    });
+    expect(first.entities.map((e) => e.type)).toEqual(["Company"]);
+    const again = await g.insert.facts({ entities: [{ type: "company", name: "International Business Machines" }] });
+    expect(again.entities[0]?.type).toBe("Company");
+    expect(again.entities[0]?.updated_at).toEqual(first.entities[0]?.updated_at);
+    await g.insert.facts({ entities: [{ type: "Company", name: "IBM" }] });
+    expect((await g.entities.list()).items.map((e) => [e.id, e.type])).toEqual([
+      ["company:international-business-machines", "Company"],
+    ]);
+    await g.entities.create("Bob", "person");
+    const withSchema = { schema: { entities: [{ name: "Person" }] } };
+    const typed = await g.insert.facts({ entities: [{ type: "person", name: "Bob" }] }, withSchema);
+    expect(typed.entities[0]?.type).toBe("Person");
+  });
+
   it("checks entity types and ids, and keeps the stored type on a case-only update", async () => {
     const g = open();
     await expect(g.entities.create("X", "Person", { id: "company:x" })).rejects.toThrow(

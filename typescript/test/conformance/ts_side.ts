@@ -286,6 +286,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   out.ent_update = toJsonable(
     await graph.entities.update("company:acme", { aliases: ["ACME", "Acme Co"], properties: { hq: "Paris", n: 3 } }),
   );
+  out.ent_type_case = toJsonable(await graph.insert.facts({ entities: [{ type: "company", name: "Acme, Inc." }] }));
   out.rel_create = toJsonable(
     await graph.relations.create("thing:grace-hopper", "PIONEERED", "thing:cobol", {
       properties: { year: 1959 },
