@@ -294,8 +294,12 @@ def test_cli_mcp_and_settings_carry_the_level(capsys):
     g = fresh_graph("tier")
     run(g.insert.facts({"entities": [{"type": "Company", "name": "Acme"}]}))
     assert cli(g, ["retrieve", "Acme", "--seeds", "bm25"], capsys)["tiers"] == {"seeds": "bm25", "traversal": "bfs"}
-    assert build_graph(store_settings(level="light")).tiers["resolution"] == "exact"
-    assert build_graph(store_settings(max_tier="light", resolver="fuzzy")).tiers["resolution"] == "exact"
+    light = build_graph(store_settings(level="light"))
+    assert light.tiers["resolution"] == "exact"
+    run(light.close())
+    capped = build_graph(store_settings(max_tier="light", resolver="fuzzy"))
+    assert capped.tiers["resolution"] == "exact"
+    run(capped.close())
     with pytest.raises(ValidationError, match="level must be one of"):
         build_graph(store_settings(level="huge"))
     with mcp_session("tier", level="light") as srv:

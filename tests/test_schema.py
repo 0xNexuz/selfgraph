@@ -246,7 +246,10 @@ def test_settings_load_schema_from_file_or_object(tmp_path, monkeypatch):
     assert g.schema == Schema.model_validate(SPEC)
     with pytest.raises(ValidationError):
         run(g.insert.facts({"entities": [{"type": "Robot", "name": "R2"}]}))
-    assert build_graph(store_settings(schema=SPEC)).schema == Schema.model_validate(SPEC)
+    run(g.close())
+    other = build_graph(store_settings(schema=SPEC))
+    assert other.schema == Schema.model_validate(SPEC)
+    run(other.close())
     with pytest.raises(ValidationError, match="cannot read"):
         build_graph(store_settings(schema=str(tmp_path / "missing.json")))
 
