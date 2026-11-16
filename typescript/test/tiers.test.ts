@@ -224,6 +224,28 @@ function suite(spec: StoreSpec): void {
     expect((await open().checkAnswerable("anything")).verdict).toBe("not_answerable");
   });
 
+  it("check_answerable ignores possessive and contraction endings", async () => {
+    const g = open();
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Ann" },
+        { type: "Company", name: "Acme" },
+      ],
+      relations: [worksAt("person:ann", "company:acme")],
+    });
+    for (const question of [
+      "What is Ann's company?",
+      "What is Ann’s company?",
+      "Doesn't Ann work at Acme?",
+      "Why can't Ann work at Acme?",
+      "Won't Ann work at Acme?",
+    ]) {
+      const report = await g.checkAnswerable(question);
+      expect([report.verdict, report.missing], question).toEqual(["answerable", []]);
+    }
+    expect((await g.checkAnswerable("What is Ann's company?")).terms.map((t) => t.term)).toEqual(["ann", "company"]);
+  });
+
   it("synonym seeding finds entities by a type synonym", async () => {
     const g = open({ schema: TERMS });
     await g.insert.facts({

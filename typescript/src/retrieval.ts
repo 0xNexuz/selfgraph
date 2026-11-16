@@ -43,6 +43,8 @@ const STOPWORDS = new Set(
   ).split(" "),
 );
 
+const CLITIC =
+  /(?<![\p{L}\p{N}_])(?:won|can)['’ʼ]t(?![\p{L}\p{N}_])|(?<=[\p{L}\p{N}_])n['’ʼ]t(?![\p{L}\p{N}_])|(?<=[\p{L}\p{N}_])['’ʼ](?:s|ll|re|ve|d|m)(?![\p{L}\p{N}_])/giu;
 const FILLER = new Set(
   (
     "about all any can could describe does explain find give i know list many me much my our please should show " +
@@ -1122,12 +1124,14 @@ async function run(
 /**
  * Split a question into terms: each longest run of its content tokens that spells a multi-word name or alias, and every other content token on its own, except filler words such as "where", "tell", and "me".
  *
+ * A possessive or contraction ending is dropped first, so "Ann's" is "Ann" and "Doesn't" is "Does", and "won't" and "can't" are dropped whole, since they carry no term.
+ *
  * @param question (string): the question.
  * @param names (Iterable<string>): the entity names, aliases, and schema term forms a run may spell, ignoring a plain plural ending.
  * @return (string[]): the distinct terms, in question order.
  */
 function questionTerms(question: string, names: Iterable<string>): string[] {
-  const words = tokenList(question).filter((w) => !FILLER.has(w));
+  const words = tokenList(question.replace(CLITIC, "")).filter((w) => !FILLER.has(w));
   const stems = words.map(stem);
   const spelled = new Set<string>();
   let longest = 1;

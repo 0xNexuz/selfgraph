@@ -184,6 +184,29 @@ def test_check_answerable_grounds_schema_synonyms_definitions_and_plurals():
     assert run(fresh_graph("tier").check_answerable("anything")).verdict == "not_answerable"
 
 
+def test_check_answerable_ignores_possessive_and_contraction_endings():
+    g = fresh_graph("tier")
+    run(
+        g.insert.facts(
+            {
+                "entities": [{"type": "Person", "name": "Ann"}, {"type": "Company", "name": "Acme"}],
+                "relations": [works_at("acme")],
+            }
+        )
+    )
+    for question in [
+        "What is Ann's company?",
+        "What is Ann’s company?",
+        "Doesn't Ann work at Acme?",
+        "Why can't Ann work at Acme?",
+        "Won't Ann work at Acme?",
+    ]:
+        report = run(g.check_answerable(question))
+        assert (report.verdict, report.missing) == ("answerable", []), question
+    report = run(g.check_answerable("What is Ann's company?"))
+    assert [t.term for t in report.terms] == ["ann", "company"]
+
+
 def test_synonym_seeding_finds_entities_by_a_type_synonym():
     g = fresh_graph("tier", schema=TERMS)
     run(g.insert.facts({"entities": [{"type": "Company", "name": "Acme"}, {"type": "Person", "name": "Ann"}]}))

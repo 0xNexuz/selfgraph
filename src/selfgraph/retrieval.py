@@ -4,6 +4,7 @@ import asyncio
 import heapq
 import logging
 import math
+import re
 from collections import deque
 from collections.abc import Collection, Iterable
 from functools import partial
@@ -124,6 +125,10 @@ _FILLER = frozenset(
         "you",
         "your",
     }
+)
+_CLITIC = re.compile(
+    r"(?<!\w)(?:won|can)['’ʼ]t(?!\w)|(?<=\w)n['’ʼ]t(?!\w)|(?<=\w)['’ʼ](?:s|ll|re|ve|d|m)(?!\w)",
+    re.IGNORECASE,
 )
 _PAGE = 500
 _MAX_POOL = 5000
@@ -1054,12 +1059,15 @@ def _question_terms(question: str, names: Iterable[str]) -> list[str]:
     """Split a question into terms: each longest run of its content tokens that spells a multi-word name or alias,
     and every other content token on its own, except filler words such as "where", "tell", and "me".
 
+    A possessive or contraction ending is dropped first, so "Ann's" is "Ann" and "Doesn't" is "Does", and "won't"
+    and "can't" are dropped whole, since they carry no term.
+
     @param question (str): the question.
     @param names (Iterable[str]): the entity names, aliases, and schema term forms a run may spell, ignoring a plain
         plural ending.
     @return (list[str]): the distinct terms, in question order.
     """
-    words = [w for w in _token_list(question) if w not in _FILLER]
+    words = [w for w in _token_list(_CLITIC.sub("", question)) if w not in _FILLER]
     stems = [stem(w) for w in words]
     spelled = {phrase for phrase in (tuple(map(stem, _token_list(n))) for n in names) if len(phrase) > 1}
     longest = max(map(len, spelled), default=1)

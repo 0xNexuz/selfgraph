@@ -751,6 +751,13 @@ ANSWER_CASES = [
     ["Annie since", None, 3],
     ["the a of", None, 3],
     ["ÉCOLE Straße 北京", None, 3],
+    ["what is Ann Lee's employer", None, 3],
+    ["what is Ann Lee’s employer", None, 3],
+    ["Doesn't Ann Lee work at Acme Corp", None, 3],
+    ["why can't Ann Lee work at Acme Corp", None, 3],
+    ["Won't Globex grow, and isn't Acme Corp's revenue what we'll see", None, 3],
+    ["Ann Lee's", None, 3],
+    ["O'Brien", None, 3],
 ]
 
 

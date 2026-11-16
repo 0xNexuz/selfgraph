@@ -11258,6 +11258,253 @@
      "hub_only": [],
      "note": null
     }
+   ],
+   [
+    "what is Ann Lee's employer",
+    null,
+    3,
+    {
+     "question": "what is Ann Lee's employer",
+     "verdict": "partial",
+     "terms": [
+      {
+       "term": "ann lee",
+       "status": "entity",
+       "matches": [
+        "person:ann-lee"
+       ],
+       "certified": false
+      },
+      {
+       "term": "employer",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "employer"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "what is Ann Lee\u2019s employer",
+    null,
+    3,
+    {
+     "question": "what is Ann Lee\u2019s employer",
+     "verdict": "partial",
+     "terms": [
+      {
+       "term": "ann lee",
+       "status": "entity",
+       "matches": [
+        "person:ann-lee"
+       ],
+       "certified": false
+      },
+      {
+       "term": "employer",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "employer"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "Doesn't Ann Lee work at Acme Corp",
+    null,
+    3,
+    {
+     "question": "Doesn't Ann Lee work at Acme Corp",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "ann lee",
+       "status": "entity",
+       "matches": [
+        "person:ann-lee"
+       ],
+       "certified": false
+      },
+      {
+       "term": "work",
+       "status": "relation",
+       "matches": [
+        "WORKS_AT"
+       ],
+       "certified": false
+      },
+      {
+       "term": "acme corp",
+       "status": "entity",
+       "matches": [
+        "company:acme"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "why can't Ann Lee work at Acme Corp",
+    null,
+    3,
+    {
+     "question": "why can't Ann Lee work at Acme Corp",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "ann lee",
+       "status": "entity",
+       "matches": [
+        "person:ann-lee"
+       ],
+       "certified": false
+      },
+      {
+       "term": "work",
+       "status": "relation",
+       "matches": [
+        "WORKS_AT"
+       ],
+       "certified": false
+      },
+      {
+       "term": "acme corp",
+       "status": "entity",
+       "matches": [
+        "company:acme"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "Won't Globex grow, and isn't Acme Corp's revenue what we'll see",
+    null,
+    3,
+    {
+     "question": "Won't Globex grow, and isn't Acme Corp's revenue what we'll see",
+     "verdict": "partial",
+     "terms": [
+      {
+       "term": "globex",
+       "status": "entity",
+       "matches": [
+        "company:globex"
+       ],
+       "certified": false
+      },
+      {
+       "term": "grow",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "acme corp",
+       "status": "entity",
+       "matches": [
+        "company:acme"
+       ],
+       "certified": false
+      },
+      {
+       "term": "revenue",
+       "status": "property",
+       "matches": [
+        "revenue"
+       ],
+       "certified": false
+      },
+      {
+       "term": "see",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "grow",
+      "see"
+     ],
+     "connected": false,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "Ann Lee's",
+    null,
+    3,
+    {
+     "question": "Ann Lee's",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "ann lee",
+       "status": "entity",
+       "matches": [
+        "person:ann-lee"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "O'Brien",
+    null,
+    3,
+    {
+     "question": "O'Brien",
+     "verdict": "not_answerable",
+     "terms": [
+      {
+       "term": "o",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "brien",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "o",
+      "brien"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
    ]
   ]
  },
