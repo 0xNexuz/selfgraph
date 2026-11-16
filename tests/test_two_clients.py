@@ -55,7 +55,7 @@ def test_two_clients_on_one_database_serialize_their_writes():
 def test_the_shared_locks_are_dropped_with_the_database():
     path = a_path()
     store = KuzuStore(path)
-    assert store._cache_key == path  # noqa: SLF001
+    assert store._cache_key == path
     assert path in _LOCKS and path in _WRITE_LOCKS
     run(store.close())
     assert path not in _LOCKS, "the lock outlived the database"
@@ -66,14 +66,14 @@ def test_the_shared_locks_are_dropped_with_the_database():
 def test_two_in_memory_stores_share_neither_data_nor_locks():
     first = KuzuStore(":memory:")
     second = KuzuStore(":memory:")
-    assert first._lock is not second._lock  # noqa: SLF001
-    assert first._write_lock is not second._write_lock  # noqa: SLF001
+    assert first._lock is not second._lock
+    assert first._write_lock is not second._write_lock
     run(first.initialize())
     run(second.initialize())
     run(first.upsert_node("mem", "Thing", "only-first", {"name": "one"}))
     assert run(second.get_node("mem", "Thing", "only-first")) is None
-    first_key = first._cache_key  # noqa: SLF001
-    second_key = second._cache_key  # noqa: SLF001
+    first_key = first._cache_key
+    second_key = second._cache_key
     assert first_key is not second_key
     run(first.close())
     run(second.close())
@@ -136,7 +136,7 @@ def test_two_threads_with_their_own_loops_write_once_each():
 def test_a_cancelled_waiter_does_not_unblock_the_waiter_behind_it():
     path = a_path()
     store = KuzuStore(path)
-    lock = store._lock  # noqa: SLF001
+    lock = store._lock
     holding = asyncio.Event()
     released = asyncio.Event()
     entered = asyncio.Event()
