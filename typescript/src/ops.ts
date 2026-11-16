@@ -2682,12 +2682,17 @@ async function lockCurrent<T>(
 /**
  * Create a new version of a relation with changed properties; an unchanged update is a no-op.
  *
+ * In supersede mode a new event_time moves the relation in time order, so its max_count endpoints are settled again by
+ * resettleEndpoints: a relation it retired and no longer displaces comes back, and the updated relation is retired when
+ * it is now the older fact.
+ *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
  * @param rid (string): the relation id.
  * @param args (UpdateRelationArgs): the properties to set and remove, a new valid time, and evidence to add.
  * @param schemaCheck (SchemaCheck | undefined): checks the resulting relation against the schema before the write, given the stored version too so only violations the update introduces count.
- * @return (Relation): the current version; throws ValidationError for a relation a contradiction invalidated.
+ * @param options (ContradictionOptions): "supersede" settles the endpoints again when event_time moves, against the max_count limits; any other mode leaves them as they are, since an update adds no relation.
+ * @return (Relation): the new version, current unless supersede retired it; throws ValidationError for a relation a contradiction invalidated.
  */
 export async function updateRelation(
   runner: Runner,
@@ -2695,6 +2700,7 @@ export async function updateRelation(
   rid: string,
   args: UpdateRelationArgs,
   schemaCheck?: SchemaCheck,
+  options: ContradictionOptions = {},
 ): Promise<Relation> {
   requireJsonMapping("set_properties", args.set_properties);
   requireList("remove_properties", args.remove_properties);
@@ -2747,6 +2753,11 @@ export async function updateRelation(
   });
   const rel = await writeRelationVersion(runner, ns, current, props, true);
   await writeEvidence(runner, ns, records, createdAt);
+  if (options.contradiction === "supersede" && toIso(newEventTime) !== toIso(current.event_time)) {
+    const edge = { type: rel.type, from_id: rel.from_entity, to_id: rel.to_entity, props };
+    await resettleEndpoints(runner, ns, [edge], options.caps, createdAt);
+    return (await newestRelation(runner, ns, rid))!;
+  }
   return rel;
 }
 

@@ -160,15 +160,20 @@ export class Relations extends Resource {
   /**
    * Create a new version of a relation with merged properties; an unchanged update is a no-op.
    *
+   * Under contradiction "supersede" or "llm" a new event_time settles the relation's max_count endpoints again, as an
+   * insert would: a relation it retired and no longer displaces becomes current again, and the updated relation is
+   * returned retired when it is now the older fact.
+   *
    * @param id (string): the relation id.
    * @param options (RelationUpdateOptions): properties to set and remove, a new valid time, and evidence records to add.
-   * @return (Relation): the current version.
+   * @return (Relation): the new version, current unless supersede retired it.
    */
   async update(id: string, options: RelationUpdateOptions = {}): Promise<Relation> {
     checkOptions("relations.update", options, UPDATE_KEYS);
     ops.validateOwnId("relation", id);
     const eventTime = parseTime(options.event_time, "event_time");
     const evidence = options.evidence == null ? null : parseEvidence(options.evidence);
+    const conflicts = this.graph.contradictionFor(null, this.graph.schema);
     return this.graph.write((tx, ns) =>
       ops.updateRelation(
         tx,
@@ -181,6 +186,7 @@ export class Relations extends Resource {
           evidence,
         },
         this.graph.schemaCheck,
+        { contradiction: conflicts.contradiction, caps: conflicts.caps },
       ),
     );
   }
