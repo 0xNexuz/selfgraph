@@ -1417,7 +1417,7 @@ async def delete_entities(
     pointing at them, their evidence, and the merge records they survived or were absorbed in. A considered
     alternative is dropped from a decision that is kept, and a kept preference about a deleted entity loses its
     about_entity in a new version. The max_count endpoints a deleted relation sat at are settled again after (see
-    resettle_after_delete). Ids that are not stored are skipped.
+    resettle_endpoints). Ids that are not stored are skipped.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -1485,7 +1485,7 @@ async def delete_entities(
     newest: dict[str, dict] = {}
     for edge in versions:
         _keep_newest(newest, edge)
-    counts["restored_relations"] = await resettle_after_delete(runner, ns, newest.values(), caps, now())
+    counts["restored_relations"] = await resettle_endpoints(runner, ns, newest.values(), caps, now())
     return counts
 
 
@@ -2159,10 +2159,13 @@ async def retire_relations(
     return [_relation_of(e) for e in gone.values()]
 
 
-async def resettle_after_delete(
-    runner: Any, ns: str, deleted: Iterable[dict], caps: Mapping[str, RelationCap] | None, at: datetime
+async def resettle_endpoints(
+    runner: Any, ns: str, moved: Iterable[dict], caps: Mapping[str, RelationCap] | None, at: datetime
 ) -> int:
-    """Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
+    """Settle again each max_count endpoint a deleted or moved relation sat at, as supersede would settle it now.
+
+    A relation moves when a write gives it a new event_time, so it may no longer be newer than the relations it
+    retired.
 
     Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
     Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
@@ -2171,27 +2174,28 @@ async def resettle_after_delete(
     retired, or a retired one whose invalidation settle corrects, takes a new revision naming the relation and time
     that now displace it, so known_at reads still see the earlier retirement. A current one settle retires is retired
     as a supersede retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so
-    it is left as it is. Both endpoints of each deleted relation are locked before they are read.
+    it is left as it is. Both endpoints of each deleted or moved relation are locked before they are read.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
-    @param deleted (Iterable[dict]): the edge rows of the deleted relations, read before they were deleted.
+    @param moved (Iterable[dict]): the edge rows of the deleted relations, read before they were deleted, or of the
+        new versions of the moved ones.
     @param caps (Mapping[str, RelationCap] | None): the schema's max_count limits, or None without a schema.
-    @param at (datetime): the delete's timestamp, the created_at of each restored revision.
+    @param at (datetime): the write's timestamp, the created_at of each restored revision.
     @return (int): how many relations came back.
     """
     caps = caps or {}
-    deleted = [e for e in deleted if _cap_slots(caps, e["type"], e["from_id"], e["to_id"])]
-    if not deleted:
+    moved = [e for e in moved if _cap_slots(caps, e["type"], e["from_id"], e["to_id"])]
+    if not moved:
         return 0
-    for eid in _dedup_list(end for edge in deleted for end in (edge["from_id"], edge["to_id"])):
+    for eid in _dedup_list(end for edge in moved for end in (edge["from_id"], edge["to_id"])):
         await runner.lock_node(ns, L_ENTITY, eid)
-    found = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in deleted])
+    found = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in moved])
     members: dict[tuple[str, str, str], set[str]] = {}
-    for edge in [*deleted, *found.values()]:
+    for edge in [*moved, *found.values()]:
         for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"]):
             members.setdefault(key, set()).add(edge["props"]["id"])
-    freed = {key for edge in deleted for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])}
+    freed = {key for edge in moved for key, _ in _cap_slots(caps, edge["type"], edge["from_id"], edge["to_id"])}
     stale = [
         edge
         for edge in found.values()
@@ -2813,7 +2817,7 @@ async def preferences_as_of(runner: Any, ns: str, as_of: AsOf) -> list[Preferenc
 async def delete_relation(
     runner: Any, ns: str, rid: str, caps: Mapping[str, RelationCap] | None = None
 ) -> dict[str, int]:
-    """Delete a relation and all of its versions, then settle its max_count endpoints again (see resettle_after_delete).
+    """Delete a relation and all of its versions, then settle its max_count endpoints again (see resettle_endpoints).
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2829,7 +2833,7 @@ async def delete_relation(
     n = await runner.delete_edges(ns, rid)
     await _delete_evidence(runner, ns, rid)
     deleted_decisions = sum([await _delete_trace_quietly(runner, ns, tid) for tid in trace_ids])
-    restored = await resettle_after_delete(runner, ns, [newest], caps, now())
+    restored = await resettle_endpoints(runner, ns, [newest], caps, now())
     return {
         **_NO_DELETES,
         "deleted_relation_versions": n,
