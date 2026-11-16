@@ -105,6 +105,14 @@ REL_TYPES = [
     "पिता",
     "पोता",
     "काम करता है!",
+    "uses k8s",
+    "USES_K8S",
+    "has 2fa",
+    "has 3d model",
+    "Has2FA",
+    "x2ß",
+    "ß\u0307",
+    "56İ",
 ]
 ENTITY_ID_INPUTS = [
     "T:X",

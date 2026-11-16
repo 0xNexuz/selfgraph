@@ -26,7 +26,8 @@ const tagged = (prefix: (typeof ID_PREFIXES)[number], rest: string): string => `
 const MARK = new RegExp(`^[${MARK_CLASS}]$`, "u");
 const PUNCT = new RegExp(`[^${PY_WORD_CLASS}${PY_WS_CLASS}${MARK_CLASS}]+`, "gu");
 const NON_IDENT = new RegExp(`[^${PY_WORD_CLASS}${MARK_CLASS}]+`, "gu");
-const CAMEL = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g;
+const CAMEL = /(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g;
+const DIGIT_LETTER = /(?<=[0-9])(?=[A-Z])/g;
 const ENTITY_SUFFIXES = new Set([
   "inc",
   "incorporated",
@@ -192,13 +193,18 @@ export function canonicalEntityId(eid: unknown): string {
 /**
  * Canonicalise a relation type to UPPER_SNAKE so case, spacing, and camelCase variants collapse.
  *
+ * A lower-to-upper case change splits words in the raw type. A digit and the letter after it split on the
+ * uppercased result, so 'uses k8s' and 'USES_K8S' agree, and the result is NFC. Normalizing the result again
+ * returns it unchanged.
+ *
  * @param type (string): the raw relation type.
  * @return (string): the canonical relation type.
  */
 export function normalizeRelType(type: string): string {
   requireStr("relation type", type);
   const split = pyStrip(normalizeText(type)).replace(CAMEL, "_");
-  const normalized = pyStrip(split.toLowerCase().replace(NON_IDENT, "_"), "_").toUpperCase();
+  const upper = pyStrip(split.toLowerCase().replace(NON_IDENT, "_"), "_").toUpperCase();
+  const normalized = normalizeText(upper.replace(DIGIT_LETTER, "_"));
   if (!normalized) {
     throw new ValidationError("relation type cannot be empty; use a verb phrase, e.g. 'works at' or 'WORKS_AT'");
   }
