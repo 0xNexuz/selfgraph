@@ -728,6 +728,31 @@ async def plan_resolution(
     return Resolution(rewritten.model_copy(update={"entities": entities}), list(merges.values()), warnings)
 
 
+def trim_resolution(resolution: Resolution, kept: Extraction) -> Resolution:
+    """Drop planned merges and rewrites whose survivor or rewritten item was removed by drop_off_schema.
+
+    @param resolution (Resolution): the planned resolution before schema dropping.
+    @param kept (Extraction): the facts kept after drop_off_schema.
+    @return (Resolution): the resolution aligned to kept.
+    """
+    entities = {ent.id or _ids.entity_id(ent.type, ent.name) for ent in kept.entities}
+    kept_by_kind = {
+        "relation": {rel.id or _ids.relation_id(rel.from_entity, rel.type, rel.to_entity) for rel in kept.relations},
+        "preference": {
+            p.id or _ids.preference_id(p.subject_entity, p.stance, p.key, p.value_entity) for p in kept.preferences
+        },
+        "decision": {d.id or _ids.decision_id(d.actor_entity, d.title) for d in kept.decisions},
+    }
+    merges = []
+    for merge in resolution.merges:
+        if merge.survivor_id not in entities:
+            continue
+        merge.rewrites = [r for r in merge.rewrites if r.dropped or r.id in kept_by_kind[r.kind]]
+        merges.append(merge)
+    warnings = [w for w in resolution.warnings if any(f"join {eid} to itself" in w.message for eid in entities)]
+    return Resolution(kept, merges, warnings)
+
+
 def _redirect(ent: EntityInput, target: Entity) -> EntityInput:
     """The input that folds a merged candidate into its target through the normal upsert alias path.
 

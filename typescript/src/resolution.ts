@@ -857,6 +857,34 @@ export async function planResolution(
 }
 
 /**
+ * Drop planned merges and rewrites whose survivor or rewritten item was removed by dropOffSchema.
+ *
+ * @param resolution (Resolution): the planned resolution before schema dropping.
+ * @param kept (ParsedExtraction): the facts kept after dropOffSchema.
+ * @return (Resolution): the resolution aligned to kept.
+ */
+export function trimResolution(resolution: Resolution, kept: ParsedExtraction): Resolution {
+  const entities = new Set(kept.entities.map((ent) => ent.id || ids.entityId(ent.type, ent.name)));
+  const keptByKind = {
+    relation: new Set(kept.relations.map(ridOf)),
+    preference: new Set(kept.preferences.map(pidOf)),
+    decision: new Set(kept.decisions.map(tidOf)),
+  };
+  const merges: PendingMerge[] = [];
+  for (const merge of resolution.merges) {
+    if (!entities.has(merge.survivor_id)) continue;
+    merges.push({
+      ...merge,
+      rewrites: merge.rewrites.filter((r) => r.dropped || keptByKind[r.kind].has(r.id)),
+    });
+  }
+  const warnings = resolution.warnings.filter((w) =>
+    [...entities].some((eid) => w.message.includes(`join ${eid} to itself`)),
+  );
+  return { facts: kept, merges, warnings };
+}
+
+/**
  * Point every reference to a merged candidate at its target and record each rewrite on the merges it involves. A relation between two different entities that the merge would join into a self-loop is dropped, with a merge_self_loop warning; its rewrite is still recorded, marked dropped, so unmerging restores it.
  *
  * @param runner (Runner): the graph runner.
