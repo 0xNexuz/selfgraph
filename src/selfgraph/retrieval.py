@@ -198,15 +198,17 @@ def _entity_text(e: Entity) -> str:
     return " ".join(parts)
 
 
-def _format_props(props: dict) -> str:
+def _format_props(props: dict, *, single_line: bool = False) -> str:
     """Render relation properties as a compact brace-wrapped string.
 
     @param props (dict): the properties to render.
+    @param single_line (bool): contain rendered values on one context line.
     @return (str): the rendered string, or empty when there are none.
     """
     if not props:
         return ""
-    return "{" + ", ".join(f"{k}={v}" for k, v in props.items()) + "}"
+    text = "{" + ", ".join(f"{k}={v}" for k, v in props.items()) + "}"
+    return _single_line(text) if single_line else text
 
 
 def _term_counts(query: set[str], doc: list[str]) -> dict[str, int]:
@@ -815,32 +817,22 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
-_OPEN_BRACKETS = frozenset(
-    "[{༺༼᚛‚„⁅⁽₍⌈⌊〈❨❪❬❮❰❲❴⟅⟦⟨⟪⟬⟮⦃⦅⦇⦉⦋⦍⦏⦑⦓⦕⦗⧘⧚⧼⸢⸤⸦⸨⹂⹕⹗⹙⹛⹢〈《「『【〔〖〘〚〝﴿︗︵︷︹︻︽︿﹁﹃﹇﹙﹛﹝（［｛｟｢"
-)
-_CLOSE_BRACKETS = frozenset(
-    "]}༻༽᚜⁆⁾₎⌉⌋〉❩❫❭❯❱❳❵⟆⟧⟩⟫⟭⟯⦄⦆⦈⦊⦌⦎⦐⦒⦔⦖⦘⧙⧛⧽⸣⸥⸧⸩⹖⹘⹚⹜⹣〉》」』】〕〗〙〛〞〟﴾︘︶︸︺︼︾﹀﹂﹄﹈﹚﹜﹞）］｝｠｣"
-)
-
-
-def _escape_marks(text: str, *, preserve_lines: bool = False) -> str:
-    """Distinguish literal trust marks from metadata and contain rendered values on one line.
+def _single_line(text: str) -> str:
+    """Keep stored values inside their SDK-built context line.
 
     @param text (str): stored text rendered into context.
-    @param preserve_lines (bool): keep source passage line breaks readable.
-    @return (str): text with reserved marks labeled as literal content.
+    @return (str): text with line separators replaced by spaces.
     """
-    if not preserve_lines:
-        text = re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text)
-    text = "".join(
-        "(literal: " if char in _OPEN_BRACKETS else ")" if char in _CLOSE_BRACKETS else char for char in text
-    )
-    return re.sub(
-        r"[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]",
-        "(literal: via hub)",
-        text,
-        flags=re.IGNORECASE | re.ASCII,
-    )
+    return re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text)
+
+
+def _source_lines(text: str) -> str:
+    """Label every source passage line without flattening its readable layout.
+
+    @param text (str): a stored source passage.
+    @return (str): source-prefixed lines with normalized line separators.
+    """
+    return "\n".join("SOURCE | " + line for line in re.split(r"\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]", text))
 
 
 def _assemble(
@@ -872,26 +864,24 @@ def _assemble(
     """
     lines: list[str] = []
     first: list[str] = []
-    used = 0
     full = False
 
     def add(line: str, cap: int) -> bool:
-        nonlocal used, full
+        nonlocal full
         if not first:
             first.append(line)
         if full:
             return False
-        cost = count_tokens(line)
-        if used + cost > cap:
+        cost = count_tokens("\n".join([*lines, line]))
+        if cost > cap:
             full = cap >= budget_tokens
             return False
         lines.append(line)
-        used += cost
         return True
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100
     for p in passages:
-        if not add(_escape_marks(p, preserve_lines=True), passage_cap):
+        if not add(_source_lines(p), passage_cap):
             break
 
     far = len(dist) + 1
@@ -902,28 +892,29 @@ def _assemble(
 
     ordered = sorted(relations, key=rel_rank)
     for r in ordered:
-        subject = _escape_marks(names.get(r.from_entity, r.from_entity))
-        target = _escape_marks(names.get(r.to_entity, r.to_entity))
-        line = f"{subject} -[{_escape_marks(r.type)}]-> {target}"
-        props = ", ".join(f"{_escape_marks(str(k))}={_escape_marks(str(v))}" for k, v in r.properties.items())
+        subject = _single_line(names.get(r.from_entity, r.from_entity))
+        target = _single_line(names.get(r.to_entity, r.to_entity))
+        line = f"{subject} -[{_single_line(r.type)}]-> {target}"
+        props = _format_props(r.properties, single_line=True)
         if props:
-            line += f" {{{props}}}"
+            line += f" {props}"
+        prefix = "GRAPH"
         if r.certified_at is not None:
-            line += " [certified]"
+            prefix += " [certified]"
         if r.from_entity in hubs or r.to_entity in hubs:
-            line += " (via hub)"
-        if not add(line, budget_tokens):
+            prefix += " (via hub)"
+        if not add(f"{prefix} | {line}", budget_tokens):
             break
 
     for p in sorted(preferences, key=lambda p: dist.get(p.subject_entity, far)):
         verb = preference_edge_type(p.stance).lower()
-        subject = _escape_marks(names.get(p.subject_entity, p.subject_entity))
-        value = _escape_marks(names.get(p.value_entity, p.value_entity))
-        key = _escape_marks(f"({p.key})")
+        subject = _single_line(names.get(p.subject_entity, p.subject_entity))
+        value = _single_line(names.get(p.value_entity, p.value_entity))
+        key = _single_line(f"({p.key})")
         line = f"{subject} {verb} {value} {key}"
         if p.strength is not None:
             line += f" [strength {p.strength}]"
-        if not add(line, budget_tokens):
+        if not add(f"GRAPH | {line}", budget_tokens):
             break
 
     for d in decisions:
@@ -934,10 +925,10 @@ def _assemble(
             parts.append("alternatives " + ", ".join(names.get(a, a) for a in d.alternative_entities))
         if d.rationale:
             parts.append(f"rationale {d.rationale}")
-        add(_escape_marks("; ".join(parts)), budget_tokens)
+        add("GRAPH | " + _single_line("; ".join(parts)), budget_tokens)
 
     for e in sorted(entities, key=lambda e: dist.get(e.id, far)):
-        if not add(f"{_escape_marks(e.name)} (type: {_escape_marks(e.type)})", budget_tokens):
+        if not add(f"GRAPH | {_single_line(e.name)} [{_single_line(e.type)}]", budget_tokens):
             break
 
     return "\n".join(lines) if lines or not first else _truncate(first[0], budget_tokens)

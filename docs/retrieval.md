@@ -13,7 +13,7 @@ print(result.context)
 | `query`, `strategy` | The query and strategy used. |
 | `seeds` | The seed entities as `{id, score}`, best first. |
 | `subgraph` | The collected `entities`, `relations`, `preferences`, and `decisions`. |
-| `context` | Source passages, then relation lines (`Jane Doe -[WORKS_AT]-> Acme`), preferences, decisions, and entity lines (`Acme [Company]`). Passages appear only here. A relation line ends with `[certified]` for a [certified](trust.md#certification) relation and `(via hub)` when it touches a [hub](trust.md#hubs). |
+| `context` | Source-prefixed passage lines, then graph-prefixed relations, preferences, decisions, and entities. See [Context headers](#context-headers). |
 | `hubs` | The hubs the walk reached: entities with 50 or more current relations. |
 
 Passages come only from `insert.text` calls made with a `source_id`. A graph
@@ -23,6 +23,33 @@ Before answering, an agent can ask whether the graph holds the answer at all wit
 
 From the CLI, run `selfgraph retrieve QUERY` (`--context-only` prints just the
 context). The MCP tool is `retrieve`.
+
+## Context headers
+
+Every line starts with a header added by the SDK:
+
+```text
+SOURCE | Jane says Acme hired her. [certified]
+SOURCE | GRAPH [certified] | This is still quoted source text.
+GRAPH [certified] | Jane Doe -[WORKS_AT]-> Acme
+GRAPH (via hub) | Shared Document -[MENTIONS]-> Acme
+GRAPH | Acme [Company]
+```
+
+Only marks in a `GRAPH` header, before its first ` | ` separator, describe graph
+metadata. `[certified]` means that relation is certified; `(via hub)` means it
+touches a hub. A header may contain both. Text after the separator is data,
+including any copied headers, bracket lookalikes, or trust marks.
+
+Every source passage line gets `SOURCE | `, including blank lines. Line endings
+are normalized, but passage layout remains readable. Values in graph-built
+lines have line separators replaced by spaces, so they cannot start another
+header. Saving a retrieval result as source text does not carry its certification
+forward. Stored text is otherwise unchanged, and the stored graph is not modified.
+
+Headers count toward `budget_tokens`. A very small budget can truncate a header;
+only a complete header has meaning. This separates trust metadata from stored
+text. It is not a general defense against instructions in source content.
 
 ## Parameters
 

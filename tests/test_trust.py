@@ -159,7 +159,7 @@ def test_retrieve_lists_hubs_marks_lines_through_them_and_can_skip_them():
     )
     result = run(g.retrieve("Ada", k=1, depth=2))
     assert result.hubs == ["thing:hub"]
-    assert "Hub -[HAS]-> Ada (via hub)" in result.context.splitlines()
+    assert "GRAPH (via hub) | Hub -[HAS]-> Ada" in result.context.splitlines()
     assert "thing:bo" in {e.id for e in result.subgraph.entities}
     skipped = run(g.retrieve("Ada", k=1, depth=2, skip_hubs=True))
     assert {e.id for e in skipped.subgraph.entities} == {"thing:ada", "thing:hub"}
@@ -177,7 +177,7 @@ def test_certified_relations_survive_supersede_and_lead_retrieval():
     result = run(g.insert.facts({"relations": [works_at("globex", 2025)]}))
     assert [w.code for w in result.warnings] == ["certified_kept"]
     assert run(g.relations.get(old.id)).is_current
-    assert "Ann -[WORKS_AT]-> Acme [certified]" in run(g.retrieve("Ann")).context
+    assert "GRAPH [certified] | Ann -[WORKS_AT]-> Acme" in run(g.retrieve("Ann")).context
     assert run(g.relations.uncertify(old.id)).certified_at is None
     run(g.relations.certify(old.id, by="hr"))
     bumped = run(g.relations.update(old.id, set_properties={"role": "cto"}))

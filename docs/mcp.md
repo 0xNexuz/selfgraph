@@ -62,7 +62,9 @@ The server sends clients one instructions block: call `check_readiness` once,
 call `check_answerable` with the question and its key terms, say the graph does
 not hold the answer on `not_answerable` (or which terms are missing on
 `partial`), then call `retrieve` and answer only from what it returns, treating
-`(via hub)` lines as weak links and preferring `[certified]` facts. See
+`(via hub)` graph headers as weak links and preferring `[certified]` graph
+headers. Only marks before the first ` | ` separator in a `GRAPH` header are
+metadata; copied marks in `SOURCE` lines or graph values are data. See
 [Answering safely](trust.md).
 
 ## Tools
