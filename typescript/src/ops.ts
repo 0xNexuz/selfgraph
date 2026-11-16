@@ -1727,6 +1727,16 @@ const restatedEventTime = (named: Date | null, stored: Date | null, keepStored: 
   return keepStored ? stored : null;
 };
 
+/**
+ * Tell whether a write at an effective time brings a retired relation back as current.
+ *
+ * @param prev (Relation): the stored version.
+ * @param effective (Date): the write's effective time.
+ * @return (boolean): true when prev is retired and the write is not earlier than its invalidation.
+ */
+const reasserts = (prev: Relation, effective: Date): boolean =>
+  !prev.is_current && (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
+
 type Slot = readonly [string, string, string];
 type Rank = readonly [number, number, number];
 
@@ -2098,8 +2108,7 @@ export async function requireMaxCount(
     const edge = stored.get(rid);
     if (edge !== undefined && !admitted.has(rid)) {
       const prev = relationOf(edge);
-      if (!prev.is_current && prev.invalidated_at !== null && epochMicros(effective) < epochMicros(prev.invalidated_at))
-        continue;
+      if (!prev.is_current && !reasserts(prev, effective)) continue;
     }
     const rank: Rank = [epochMicros(effective), 0, epochMicros(createdAt)];
     tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, rank, effective);
@@ -2452,9 +2461,7 @@ export async function upsertRelations(
       const effective = eventTime ?? createdAt;
       const sources = prev.source_count + takeGained(gained, rid);
       const mergedProperties = mergeProps(prev.properties, rel.properties);
-      const reassert =
-        !prev.is_current &&
-        (prev.invalidated_at === null || epochMicros(effective) >= epochMicros(prev.invalidated_at));
+      const reassert = reasserts(prev, effective);
       const unchanged = deepEqual(prev.properties, mergedProperties) && toIso(prev.event_time) === toIso(eventTime);
       if (unchanged && !reassert) {
         write = sources !== prev.source_count;

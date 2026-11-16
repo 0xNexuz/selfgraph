@@ -1782,6 +1782,16 @@ def _restated_event_time(named: datetime | None, *, stored: datetime | None, kee
     return stored if keep_stored else None
 
 
+def _reasserts(prev: Relation, effective: datetime) -> bool:
+    """Tell whether a write at an effective time brings a retired relation back as current.
+
+    @param prev (Relation): the stored version.
+    @param effective (datetime): the write's effective time.
+    @return (bool): True when prev is retired and the write is not earlier than its invalidation.
+    """
+    return not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+
+
 def _rank(rel: Relation) -> tuple[datetime, int, datetime]:
     """Order a relation among others at one endpoint: by effective time, then revision, then creation time.
 
@@ -2020,7 +2030,7 @@ async def require_max_count(
         edge = stored.get(rid)
         if edge is not None and rid not in admitted:
             prev = _relation_of(edge)
-            if not prev.is_current and prev.invalidated_at is not None and effective < prev.invalidated_at:
+            if not prev.is_current and not _reasserts(prev, effective):
                 continue
         tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (effective, 0, created_at))
         admitted.add(rid)
@@ -2366,7 +2376,7 @@ async def upsert_relations(
             effective = aware(event_time or created_at)
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
-            reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+            reassert = _reasserts(prev, effective)
             unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
                 event_time
             )
