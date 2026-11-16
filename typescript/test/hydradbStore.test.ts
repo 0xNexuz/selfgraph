@@ -85,4 +85,39 @@ describe("HydraDB write queue failure", () => {
       await store.close();
     }
   });
+
+  it("includes extra_label in the Cypher SET clause and marks", async () => {
+    const store = new HydraDBStore("bolt://127.0.0.1:1", { auth: ["neo4j", "unused"] });
+    const captured: { query: string; params: unknown; marks: readonly bigint[] }[] = [];
+    const queue = store as unknown as {
+      write: (
+        query: string,
+        params: unknown,
+        writes: readonly bigint[],
+        needs: readonly bigint[],
+        marks: readonly bigint[],
+        afterAll: boolean,
+      ) => Promise<void>;
+    };
+    queue.write = (query, params, writes, needs, marks) => {
+      captured.push({ query, params, marks });
+      return Promise.resolve();
+    };
+    try {
+      await store.upsertNode("test_ns", "Source", "x:test", { id: "x:test", name: "test" }, { extra_label: "CustomLabel" });
+      await store.upsertNode("test_ns", "Source", "x:default", { id: "x:default", name: "default" });
+      expect(captured.length).toBe(2);
+
+      // With extra_label
+      expect(captured[0]!.query).toContain("SET n:Source, n:CustomLabel,");
+      expect(captured[0]!.marks.length).toBe(2);
+
+      // Without extra_label
+      expect(captured[1]!.query).toContain("SET n:Source,");
+      expect(captured[1]!.query).not.toContain("n:CustomLabel");
+      expect(captured[1]!.marks.length).toBe(1);
+    } finally {
+      await store.close();
+    }
+  });
 });

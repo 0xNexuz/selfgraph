@@ -63,3 +63,41 @@ def test_evidence_is_not_written_when_a_write_queued_before_it_fails():
         return found
 
     assert run(go()) is None
+
+
+@pytest.fixture(autouse=True)
+def _wipe_store():
+    yield
+
+
+def test_upsert_nodes_applies_extra_label_in_cypher_set():
+    from selfgraph.stores.hydradb import HydraDBStore, _label_key
+
+    store = HydraDBStore("bolt://127.0.0.1:1", auth="unused")
+    captured = []
+
+    async def fake_write(query, params=None, writes=(), needs=(), marks=(), after_all=False):
+        captured.append((query, params, marks))
+
+    store._write = fake_write
+
+    async def go():
+        await store.upsert_node(
+            "test_ns", "Source", "x:test", {"id": "x:test", "name": "test"}, extra_label="CustomLabel"
+        )
+        await store.upsert_node(
+            "test_ns", "Source", "x:default", {"id": "x:default", "name": "default"}
+        )
+
+    run(go())
+    assert len(captured) == 2
+
+    q_extra, _, marks_extra = captured[0]
+    assert "SET n:Source, n:CustomLabel," in q_extra
+    assert marks_extra == [_label_key("Source"), _label_key("CustomLabel")]
+
+    q_no_extra, _, marks_no_extra = captured[1]
+    assert "SET n:Source," in q_no_extra
+    assert "n:CustomLabel" not in q_no_extra
+    assert marks_no_extra == [_label_key("Source")]
+

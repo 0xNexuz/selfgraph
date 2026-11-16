@@ -596,6 +596,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
       label,
       out,
       indexRows.map((r) => r.id as bigint),
+      options.extra_label,
     );
     for (const [keys, params] of held) {
       await this._run(`MATCH (n:${label}) WHERE n.id IN $iids REMOVE ${removes("n", keys)}`, params);
@@ -608,19 +609,32 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
    * @param label (string): the node label.
    * @param rows (Props[]): the rows, each with its surrogate id and the columns to set.
    * @param needs (readonly bigint[]): ids that must be written first, such as the entities' key rows, so a failed write never leaves an entity stored without them.
+   * @param extraLabel (string | null | undefined): an optional secondary label.
    * @return (void): nothing.
    */
-  private async mergeRows(label: string, rows: Props[], needs: readonly bigint[] = []): Promise<void> {
+  private async mergeRows(
+    label: string,
+    rows: Props[],
+    needs: readonly bigint[] = [],
+    extraLabel?: string | null,
+  ): Promise<void> {
+    const extra = extraLabel != null ? `, n:${quoteLabel(extraLabel)}` : "";
+    const marks = extraLabel != null ? [labelKey(label), labelKey(extraLabel)] : [labelKey(label)];
     for (const batch of byColumns(rows)) {
       await this.write(
-        `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:${label}, ${sets("n", batch[0]!, ["id"])}`,
+        `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:${label}${extra}, ${sets("n", batch[0]!, ["id"])}`,
         { rows: batch },
         batch.map((r) => r.id as bigint),
         needs,
-        [labelKey(label)],
+        marks,
         label === L_EVIDENCE || label === L_MERGE,
       );
-      if (queuing.getStore() === this) for (const r of batch) this.pendingNodes.add(`${label}\x00${r.id}`);
+      if (queuing.getStore() === this) {
+        for (const r of batch) {
+          this.pendingNodes.add(`${label}\x00${r.id}`);
+          if (extraLabel != null) this.pendingNodes.add(`${extraLabel}\x00${r.id}`);
+        }
+      }
     }
   }
 
