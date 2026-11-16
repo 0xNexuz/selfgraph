@@ -124,6 +124,22 @@ def _kuzu_error(exc: BaseException, prefix: str) -> StoreError:
     return StoreError(message)
 
 
+def _release_store(key: object) -> None:
+    """Release one open-store reference, closing the cached database once the last store lets it go.
+
+    @param key (object): the cache key the store was opened under.
+    @return (None): nothing.
+    """
+    with _CACHE_LOCK:
+        _OPEN_STORES[key] -= 1
+        if _OPEN_STORES[key] == 0:
+            del _OPEN_STORES[key]
+            _DATABASES.pop(key).close()
+            _DATABASE_OPTIONS.pop(key, None)
+            _LOCKS.pop(key, None)
+            _WRITE_LOCKS.pop(key, None)
+
+
 def _db_options(kuzu: Any, db_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Resolve Kuzu database kwargs against the kuzu.Database defaults.
 
@@ -247,7 +263,11 @@ class KuzuStore(AutoCommitStore):
         self._cache_key = key
         self._db = db
         self._connect = partial(kuzu.Connection, db)
-        self._conn = self._connect()
+        try:
+            self._conn = self._connect()
+        except Exception:
+            _release_store(key)
+            raise
         self._statements = 0
         self._raw = False
 
@@ -309,14 +329,7 @@ class KuzuStore(AutoCommitStore):
                 return
             self._closed = True
             self._conn.close()
-            with _CACHE_LOCK:
-                _OPEN_STORES[self._cache_key] -= 1
-                if _OPEN_STORES[self._cache_key] == 0:
-                    del _OPEN_STORES[self._cache_key]
-                    _DATABASES.pop(self._cache_key).close()
-                    _DATABASE_OPTIONS.pop(self._cache_key, None)
-                    _LOCKS.pop(self._cache_key, None)
-                    _WRITE_LOCKS.pop(self._cache_key, None)
+            _release_store(self._cache_key)
 
     async def get_node(self, ns: str, label: str, id: str) -> dict | None:
         res = await self._run(

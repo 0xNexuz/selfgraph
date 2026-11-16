@@ -1389,6 +1389,61 @@ describe("store setup errors", () => {
     }
   });
 
+  it("rolls back the Kuzu cache when a store cannot connect", async () => {
+    const mod = await import("kuzu");
+    const kuzu = (mod.default ?? mod) as { Connection: unknown; Database: unknown };
+    const opened: { closed: boolean }[] = [];
+    const RealDB = kuzu.Database as new (...args: unknown[]) => { close?: () => unknown };
+    kuzu.Database = new Proxy(RealDB, {
+      construct(target, args) {
+        const db = new target(...args);
+        const record = { closed: false };
+        const close = db.close?.bind(db);
+        if (close)
+          db.close = async () => {
+            record.closed = true;
+            return close();
+          };
+        opened.push(record);
+        return db;
+      },
+    });
+    const refuse = class {
+      async init() {
+        throw new Error("connection refused");
+      }
+    };
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-conn-"));
+    try {
+      const path = join(dir, "g.kuzu");
+      const first = new KuzuStore(path);
+      await first.initialize();
+      const RealConn = kuzu.Connection;
+      kuzu.Connection = refuse;
+      try {
+        await expect(new KuzuStore(path).initialize()).rejects.toThrow("connection refused");
+      } finally {
+        kuzu.Connection = RealConn;
+      }
+      await first.close();
+      expect(opened[0].closed).toBe(true);
+
+      const dead = join(dir, "dead.kuzu");
+      kuzu.Connection = refuse;
+      try {
+        await expect(new KuzuStore(dead).initialize()).rejects.toThrow("connection refused");
+      } finally {
+        kuzu.Connection = RealConn;
+      }
+      expect(opened[1].closed).toBe(true);
+      const reopened = new KuzuStore(dead);
+      await reopened.initialize();
+      await reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a Kuzu store whose options differ from the open database", async () => {
     const dir = mkdtempSync(join(tmpdir(), "selfgraph-options-"));
     const path = join(dir, "opts.kuzu");
