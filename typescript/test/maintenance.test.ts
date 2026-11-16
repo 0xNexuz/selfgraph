@@ -243,6 +243,7 @@ function suite(spec: StoreSpec) {
       deleted_relation_versions: 3,
       deleted_decisions: 1,
       deleted_preference_versions: 1,
+      restored_relations: 0,
     });
     const state = await cascadeState(one);
     expect(await cascadeState(batched)).toEqual(state);

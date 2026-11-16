@@ -209,6 +209,12 @@ The `contradiction` option decides what happens:
 `schema_mode="off"` does not stop these checks. `contradiction="off"` does (see
 [which option controls which warning](#which-option-controls-which-warning)).
 
+Deleting a relation at a `max_count` endpoint settles that endpoint again, as
+`supersede` would have without it. The newest `max_count` relations, retired ones
+included, are current afterwards, and a relation that stays retired is re-pointed
+to the one that now displaces it. A retirement by the LLM judge stays as it is
+(see [updating and deleting](resources.md#updating-and-deleting)).
+
 ```python
 graph = SelfGraph(store, schema=schema, contradiction="supersede")
 await graph.insert.facts(facts, contradiction="warn")    # per insert

@@ -504,6 +504,7 @@ class DeleteResult(BaseModel):
     deleted_relation_versions: int = 0
     deleted_decisions: int = 0
     deleted_preference_versions: int = 0
+    restored_relations: int = 0
 
 
 class DecayResult(BaseModel):

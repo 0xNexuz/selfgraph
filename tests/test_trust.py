@@ -395,6 +395,15 @@ def test_llm_contradiction_keeps_a_certified_rival():
     assert run(g.relations.get(acme.id)).is_current
 
 
+def test_a_delete_leaves_what_the_llm_judge_retired_retired():
+    g = fresh_graph("llm-delete", llm=Judge(), extraction="regex", contradiction="llm")
+    acme = run(g.insert.facts({"entities": ANN_ACME_GLOBEX, "relations": [works_at("acme", 2020)]})).relations[0]
+    globex = run(g.insert.facts({"relations": [works_at("globex", 2022)]})).relations[0]
+    assert run(g.relations.versions(acme.id))[0].invalidated_by == globex.id
+    assert run(g.relations.delete(globex.id)).restored_relations == 0
+    assert not run(g.relations.versions(acme.id))[0].is_current
+
+
 def test_a_write_that_changes_a_certified_relation_warns_it_dropped_the_mark():
     g = employment_graph("cert-drop")
     rel = run(g.insert.facts({"relations": [works_at("acme", 2024)]})).relations[0]

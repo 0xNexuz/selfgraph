@@ -246,11 +246,14 @@ export class Relations extends Resource {
   /**
    * Delete a relation, all its versions, and any decision trace that uses it as a step.
    *
+   * A relation it had retired comes back as current when the schema's max_count leaves room, else it is re-pointed to
+   * the relation that displaces it.
+   *
    * @param id (string): the relation id.
-   * @return (DeleteResult): counts of what was removed.
+   * @return (DeleteResult): counts of what was removed, and relations restored.
    */
   async delete(id: string): Promise<DeleteResult> {
     ops.validateOwnId("relation", id);
-    return this.graph.write((tx, ns) => ops.deleteRelation(tx, ns, id));
+    return this.graph.write((tx, ns) => ops.deleteRelation(tx, ns, id, this.graph.caps()));
   }
 }

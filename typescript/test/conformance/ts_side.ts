@@ -392,6 +392,11 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const USES_SPEC = {
+  entities: [{ name: "Person" }, { name: "Tool" }],
+  relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
+};
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -545,6 +550,27 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.repeated_merges = repeatedMerges;
   out.retrieval_overflow = await overflow(graph);
+  const capped = new SelfGraph(graph.store, {
+    namespace: graph.namespace,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  const names = ["a", "b", "c", "d"];
+  await capped.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const uses = names.map((n) => ids.relationId("person:ann", "USES", `tool:${n}`));
+  for (const [i, name] of names.entries()) {
+    await capped.relations.create("person:ann", "USES", `tool:${name}`, {
+      event_time: `${2020 + i}-01-01T00:00:00+00:00`,
+    });
+  }
+  out.resettle_delete = toJsonable(await capped.relations.delete(uses[2]!));
+  const versions: Record<string, unknown> = {};
+  for (const rid of uses.filter((r) => r !== uses[2])) {
+    versions[rid] = await capped.relations.versions(rid, { newest_first: false });
+  }
+  out.resettle_versions = toJsonable(versions);
   return out;
 }
 
