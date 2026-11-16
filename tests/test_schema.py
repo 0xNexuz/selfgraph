@@ -826,6 +826,22 @@ def test_endpoint_types_resolve_like_entity_types_and_are_only_checked_with_enti
         update={"relations": [facts.relations[0].model_copy(update={"from_entity": "company:acme"})]}
     )
     assert [w.code for w in validate_against_schema(swapped, as_schema(schema))] == ["endpoint_type_violation"]
+    parsed = as_schema(
+        {
+            "entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Company", "aliases": ["Org"]}],
+            "relations": [
+                {"type": "WORKS_AT", "from": {"types": ["person"]}, "to": {"types": ["Company", "Org"]}},
+                {"type": "KNOWS", "from": {"types": ["Person"]}, "to": {"types": ["Human"]}},
+            ],
+        }
+    )
+    assert [(r.from_.types, r.to.types) for r in parsed.relations] == [
+        (["Person"], ["Company"]),
+        (["Person"], ["Person"]),
+    ]
+    assert [c["concept"] for c in parsed.to_ossie()["ontology"]] == ["Person", "Company"]
+    assert parsed.to_ossie()["ontology"][0]["relationships"][1]["roles"] == [{"concept": "Person", "name": "other"}]
+    assert parsed.to_neo4j_ontology()["patterns"] == [["Person", "WORKS_AT", "Company"], ["Person", "KNOWS", "Person"]]
     assert as_schema({"relations": [{"type": "R", "to": {"types": ["Anything"]}}]}).entities == []
     with pytest.raises(ValidationError, match="entities\\[2\\].aliases\\[0\\]"):
         as_schema({**schema, "entities": [*schema["entities"], {"name": "Team", "aliases": ["org"]}]})

@@ -171,9 +171,15 @@ class Schema(TopInputModel):
                 types[rtype] = i
             for side, end in (("from", relation.from_), ("to", relation.to)):
                 at = f"relations[{i}].{side}"
-                for j, name in enumerate(end.types if self.entities else ()):
-                    if canonical_entity_type(name, self).casefold() not in names:
-                        raise ValueError(f"{at}.types[{j}]: unknown type {name!r}")
+                if self.entities:
+                    resolved_types: list[str] = []
+                    for j, name in enumerate(end.types):
+                        resolved = canonical_entity_type(name, self)
+                        if resolved.casefold() not in names:
+                            raise ValueError(f"{at}.types[{j}]: unknown type {name!r}")
+                        if resolved not in resolved_types:
+                            resolved_types.append(resolved)
+                    end.types = resolved_types
                 if end.max_count is not None and end.max_count < 1:
                     raise ValueError(f"{at}.max_count: must be >= 1")
                 if end.min_count is not None and end.min_count < 0:

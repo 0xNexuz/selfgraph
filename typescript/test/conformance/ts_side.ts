@@ -308,6 +308,7 @@ export function schemaWarnings(): {
   alias_errors: string[];
   own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
+  endpoint_types: unknown[];
   tables: unknown;
   tables_errors: string[];
   term_forms: unknown;
@@ -395,6 +396,29 @@ export function schemaWarnings(): {
     ].map((spec) => {
       try {
         return parseOrThrow(Schema, spec, "schema").entities.map((entity) => entity.parent);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
+    endpoint_types: [
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Company", aliases: ["Org"] },
+        ],
+        relations: [
+          { type: "WORKS_AT", from: { types: ["person", "Human"] }, to: { types: ["Org", "company"] } },
+          { type: "KNOWS", from: { types: ["Person"] }, to: { types: ["Human"] } },
+        ],
+      },
+      { relations: [{ type: "R", from: { types: ["CustomFrom"] }, to: { types: ["CustomTo"] } }] },
+      {
+        entities: [{ name: "Person" }],
+        relations: [{ type: "R", to: { types: ["Missing"] } }],
+      },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").relations.map((r) => [r.from.types, r.to.types]);
       } catch (exc) {
         return (exc as Error).message;
       }
