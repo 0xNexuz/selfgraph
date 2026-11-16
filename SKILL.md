@@ -13,7 +13,7 @@ Properties to rely on:
 - Ids are deterministic and every insert is an idempotent upsert, so re-inserting a fact does not duplicate it or bump a version.
 - Relations and preferences are versioned: changing them creates a new revision and keeps the history. Decisions are updated in place.
 - Every graph has a `namespace` (default `"default"`); reads and writes never cross namespaces, so keep one per tenant.
-- Retrieval is lexical (BM25 and substring) plus graph traversal by default; passing `embedder=` adds an optional embeddings seed tier. Out of scope by design: a vector store and GraphRAG.
+- Retrieval is lexical (BM25 and substring) plus graph traversal by default; passing a caller-supplied `embedder=` adds an optional embeddings seed tier. Out of scope by design: a vector store, a bundled embedding model, and GraphRAG.
 
 ## Install
 
