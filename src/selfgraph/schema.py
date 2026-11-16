@@ -116,17 +116,27 @@ class Schema(TopInputModel):
     def _check_consistency(self) -> "Schema":
         """Reject a schema whose types contradict each other, naming the first problem by its path.
 
-        Entity type names are compared ignoring case and relation types after normalization. A max_count must be
-        at least 1, a min_count at least 0, and a min_count no greater than the max_count on the same side.
+        Entity type names and aliases are compared ignoring case, and an entity alias may not name another type or
+        repeat another type's alias. Relation types are compared after normalization. A max_count must be at
+        least 1, a min_count at least 0, and a min_count no greater than the max_count on the same side.
 
-        @return (Schema): the schema; raises ValueError on a duplicate name, an unknown or cyclic parent, an
-            endpoint type that is no entity type name or alias, or an impossible endpoint count.
+        @return (Schema): the schema; raises ValueError on a duplicate name, an alias of another type, an unknown
+            or cyclic parent, an endpoint type that is no entity type name or alias, or an impossible endpoint count.
         """
         names: set[str] = set()
         for i, entity in enumerate(self.entities):
             if entity.name.casefold() in names:
                 raise ValueError(f"entities[{i}].name: duplicate entity type {entity.name!r}")
             names.add(entity.name.casefold())
+        owners = {entity.name.casefold(): i for i, entity in enumerate(self.entities)}
+        for i, entity in enumerate(self.entities):
+            for j, alias in enumerate(entity.aliases):
+                owner = owners.setdefault(alias.casefold(), i)
+                if owner != i:
+                    raise ValueError(
+                        f"entities[{i}].aliases[{j}]: {alias!r} is already a name or alias of entity type "
+                        f"{self.entities[owner].name!r}"
+                    )
         index = _entity_index(self)
         for i, entity in enumerate(self.entities):
             if entity.parent is None:
@@ -143,7 +153,7 @@ class Schema(TopInputModel):
                     break
                 seen.add(current.name)
                 current = index.get(current.parent) if current.parent is not None else None
-        types: set[str] = set()
+        types: dict[str, int] = {}
         for i, relation in enumerate(self.relations):
             try:
                 rtype = normalize_rel_type(relation.type)
@@ -152,7 +162,7 @@ class Schema(TopInputModel):
             if rtype in types:
                 raise ValueError(f"relations[{i}].type: duplicate relation type {relation.type!r}")
             if rtype is not None:
-                types.add(rtype)
+                types[rtype] = i
             for side, end in (("from", relation.from_), ("to", relation.to)):
                 at = f"relations[{i}].{side}"
                 for j, name in enumerate(end.types if self.entities else ()):
@@ -165,6 +175,18 @@ class Schema(TopInputModel):
                 if end.min_count is not None and end.max_count is not None and end.min_count > end.max_count:
                     raise ValueError(
                         f"{at}.min_count: min_count {end.min_count} is greater than max_count {end.max_count}"
+                    )
+        for i, relation in enumerate(self.relations):
+            for j, alias in enumerate(relation.aliases):
+                try:
+                    key = normalize_rel_type(alias)
+                except ValidationError:
+                    continue
+                owner = types.setdefault(key, i)
+                if owner != i:
+                    raise ValueError(
+                        f"relations[{i}].aliases[{j}]: {alias!r} is already a name or alias of relation type "
+                        f"{self.relations[owner].type!r}"
                     )
         return self
 

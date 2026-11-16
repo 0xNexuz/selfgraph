@@ -85,6 +85,8 @@ first problem by its path:
 | Problem | Message |
 |---------|---------|
 | Two entity types with the same name, ignoring case | `entities[1].name: duplicate entity type 'Person'` |
+| An entity alias that is another type's name or alias, ignoring case | `entities[1].aliases[0]: 'Person' is already a name or alias of entity type 'Person'` |
+| A relation alias that names another relation after normalization | `relations[1].aliases[0]: 'works at' is already a name or alias of relation type 'WORKS_AT'` |
 | A `parent` that is no entity type name or alias | `entities[1].parent: unknown type 'X'` |
 | A `parent` chain that loops back | `entities[0].parent: parent cycle 'A' -> 'B' -> 'A'` |
 | An endpoint type that is no entity type name or alias, in a schema with entities | `relations[0].to.types[1]: unknown type 'B'` |

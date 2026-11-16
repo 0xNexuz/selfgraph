@@ -251,6 +251,7 @@ function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
   unknown_keys: string[];
+  alias_errors: string[];
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
@@ -279,6 +280,24 @@ export function schemaWarnings(): {
         message: w.message,
       })),
     ),
+    alias_errors: [
+      { entities: [{ name: "Person" }, { name: "Company", aliases: ["Person"] }] },
+      {
+        entities: [
+          { name: "Company", aliases: ["org"] },
+          { name: "Team", aliases: ["Org"] },
+        ],
+      },
+      { entities: [{ name: "Straße" }, { name: "Company", aliases: ["STRASSE"] }] },
+      { relations: [{ type: "WORKS_AT" }, { type: "OWNS", aliases: ["works at"] }] },
+      { relations: [{ type: "OWNS", aliases: ["works-at"] }, { type: "WORKS_AT" }] },
+      {
+        relations: [
+          { type: "OWNS", aliases: ["employed by"] },
+          { type: "WORKS_AT", aliases: ["employed-by"] },
+        ],
+      },
+    ].map((spec) => unknownKeyError("schema", spec)),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     neo4j_dropped: neo4jExportWarnings(),
