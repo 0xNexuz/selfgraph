@@ -618,17 +618,27 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     needs: readonly bigint[] = [],
     extraLabel?: string | null,
   ): Promise<void> {
-    const extra = extraLabel != null ? `, n:${quoteLabel(extraLabel)}` : "";
     const marks = extraLabel != null ? [labelKey(label), labelKey(extraLabel)] : [labelKey(label)];
     for (const batch of byColumns(rows)) {
       await this.write(
-        `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:${label}${extra}, ${sets("n", batch[0]!, ["id"])}`,
+        `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:${label}, ${sets("n", batch[0]!, ["id"])}`,
         { rows: batch },
         batch.map((r) => r.id as bigint),
         needs,
         marks,
         label === L_EVIDENCE || label === L_MERGE,
       );
+      if (extraLabel != null) {
+        const iids = batch.map((r) => r.id as bigint);
+        await this.write(
+          `MATCH (n:${label}) WHERE n.id IN $iids SET n:${quoteLabel(extraLabel)}`,
+          { iids },
+          iids,
+          iids,
+          marks,
+          label === L_EVIDENCE || label === L_MERGE,
+        );
+      }
       if (queuing.getStore() === this) {
         for (const r of batch) {
           this.pendingNodes.add(`${label}\x00${r.id}`);

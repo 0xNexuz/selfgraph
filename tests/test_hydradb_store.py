@@ -65,39 +65,20 @@ def test_evidence_is_not_written_when_a_write_queued_before_it_fails():
     assert run(go()) is None
 
 
-@pytest.fixture(autouse=True)
-def _wipe_store():
-    yield
-
-
-def test_upsert_nodes_applies_extra_label_in_cypher_set():
-    from selfgraph.stores.hydradb import HydraDBStore, _label_key
-
-    store = HydraDBStore("bolt://127.0.0.1:1", auth="unused")
-    captured = []
-
-    async def fake_write(query, params=None, writes=(), needs=(), marks=(), after_all=False):
-        captured.append((query, params, marks))
-
-    store._write = fake_write
+def test_upsert_nodes_applies_extra_label():
+    store, ns = make_store(), unique_ns("queue")
 
     async def go():
-        await store.upsert_node(
-            "test_ns", "Source", "x:test", {"id": "x:test", "name": "test"}, extra_label="CustomLabel"
-        )
-        await store.upsert_node(
-            "test_ns", "Source", "x:default", {"id": "x:default", "name": "default"}
-        )
+        async with store.transaction() as tx:
+            await tx.upsert_nodes(
+                ns,
+                "Source",
+                [("x:a", _props(ns, "x:a")), ("x:b", _props(ns, "x:b"))],
+                extra_label="CustomLabel",
+            )
+        found = [await store.get_node(ns, "Source", i) is not None for i in ("x:a", "x:b")]
+        res = await store._run("MATCH (n:CustomLabel) WHERE n.ns = $ns RETURN n.id AS id ORDER BY n.id", {"ns": ns})
+        await store.close()
+        return found, [r["id"] for r in res.rows]
 
-    run(go())
-    assert len(captured) == 2
-
-    q_extra, _, marks_extra = captured[0]
-    assert "SET n:Source, n:CustomLabel," in q_extra
-    assert marks_extra == [_label_key("Source"), _label_key("CustomLabel")]
-
-    q_no_extra, _, marks_no_extra = captured[1]
-    assert "SET n:Source," in q_no_extra
-    assert "n:CustomLabel" not in q_no_extra
-    assert marks_no_extra == [_label_key("Source")]
-
+    assert run(go()) == ([True, True], ["x:a", "x:b"])

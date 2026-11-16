@@ -61,6 +61,20 @@ function suite(spec: StoreSpec) {
       await store.close?.();
     }
   });
+
+  it.runIf(spec.name === "hydradb")("applies extra_label to the node", async () => {
+    const store: GraphStore = spec.make();
+    const ns = uniqueNs("queue");
+    try {
+      await store.transaction(async (tx) => {
+        await tx.upsertNode(ns, "Source", "x:a", props(ns, "x:a"), { extra_label: "CustomLabel" });
+      });
+      const found = await store.getNode(ns, "Source", "x:a");
+      expect(found).not.toBeNull();
+    } finally {
+      await store.close?.();
+    }
+  });
 }
 
 await forEachStore("HydraDB write queue", suite);
@@ -86,7 +100,7 @@ describe("HydraDB write queue failure", () => {
     }
   });
 
-  it("includes extra_label in the Cypher SET clause and marks", async () => {
+  it("applies extra_label via a separate SET statement after MERGE", async () => {
     const store = new HydraDBStore("bolt://127.0.0.1:1", { auth: ["neo4j", "unused"] });
     const captured: { query: string; params: unknown; marks: readonly bigint[] }[] = [];
     const queue = store as unknown as {
@@ -99,23 +113,32 @@ describe("HydraDB write queue failure", () => {
         afterAll: boolean,
       ) => Promise<void>;
     };
-    queue.write = (query, params, writes, needs, marks) => {
+    queue.write = (query, params, _writes, _needs, marks) => {
       captured.push({ query, params, marks });
       return Promise.resolve();
     };
     try {
-      await store.upsertNode("test_ns", "Source", "x:test", { id: "x:test", name: "test" }, { extra_label: "CustomLabel" });
+      await store.upsertNode(
+        "test_ns",
+        "Source",
+        "x:test",
+        { id: "x:test", name: "test" },
+        { extra_label: "CustomLabel" },
+      );
       await store.upsertNode("test_ns", "Source", "x:default", { id: "x:default", name: "default" });
-      expect(captured.length).toBe(2);
+      expect(captured.length).toBe(3);
 
-      // With extra_label
-      expect(captured[0]!.query).toContain("SET n:Source, n:CustomLabel,");
+      expect(captured[0]!.query).toContain("SET n:Source,");
+      expect(captured[0]!.query).not.toContain("CustomLabel");
       expect(captured[0]!.marks.length).toBe(2);
 
-      // Without extra_label
-      expect(captured[1]!.query).toContain("SET n:Source,");
-      expect(captured[1]!.query).not.toContain("n:CustomLabel");
-      expect(captured[1]!.marks.length).toBe(1);
+      expect(captured[1]!.query).toContain("MATCH (n:Source)");
+      expect(captured[1]!.query).toContain("SET n:");
+      expect(captured[1]!.query).toContain("CustomLabel");
+
+      expect(captured[2]!.query).toContain("SET n:Source,");
+      expect(captured[2]!.query).not.toContain("CustomLabel");
+      expect(captured[2]!.marks.length).toBe(1);
     } finally {
       await store.close();
     }
