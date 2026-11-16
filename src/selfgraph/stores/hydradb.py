@@ -438,30 +438,46 @@ class HydraDBStore(AutoCommitStore):
                     held.append((keys, params))
         index_rows = _key_rows(ns, rows) if label == L_ENTITY else []
         await self._merge_rows(_KEY, index_rows)
-        await self._merge_rows(label, out, [r["id"] for r in index_rows])
+        await self._merge_rows(label, out, [r["id"] for r in index_rows], extra_label=extra_label)
         for keys, params in held:
             await self._run(f"MATCH (n:{label}) WHERE n.id IN $iids REMOVE {_removes('n', keys)}", params)
 
-    async def _merge_rows(self, label: str, rows: list[dict], needs: list[int] | None = None) -> None:
+    async def _merge_rows(
+        self, label: str, rows: list[dict], needs: list[int] | None = None, *, extra_label: str | None = None
+    ) -> None:
         """Upsert node rows by surrogate id with one UNWIND statement per batch of rows sharing a column set.
 
         @param label (str): the node label.
         @param rows (list[dict]): the rows, each with its surrogate id and the columns to set.
         @param needs (list[int] | None): ids that must be written first, such as the entities' key rows, so a
             failed write never leaves an entity stored without them.
+        @param extra_label (str | None): an additional label to add to every node.
         @return (None): nothing.
         """
+        marks = [_label_key(label), _label_key(extra_label)] if extra_label is not None else [_label_key(label)]
         for batch in _by_columns(rows):
+            ids = [r["id"] for r in batch]
             await self._write(
                 f"UNWIND $rows AS row MERGE (n {{id: row.id}}) SET n:{label}, {_sets('n', batch[0], ('id',))}",
                 {"rows": batch},
-                [r["id"] for r in batch],
+                ids,
                 needs or (),
-                [_label_key(label)],
+                marks,
                 after_all=label in (L_EVIDENCE, L_MERGE),
             )
+            if extra_label is not None:
+                await self._write(
+                    f"MATCH (n:{label}) WHERE n.id IN $iids SET n:{quote_label(extra_label)}",
+                    {"iids": ids},
+                    ids,
+                    ids,
+                    marks,
+                    after_all=label in (L_EVIDENCE, L_MERGE),
+                )
             if _QUEUING.get() is self:
-                self._pending_nodes.update((label, r["id"]) for r in batch)
+                self._pending_nodes.update((label, i) for i in ids)
+                if extra_label is not None:
+                    self._pending_nodes.update((extra_label, i) for i in ids)
 
     async def entities_matching(self, ns: str, keys: Iterable[str]) -> list[dict]:
         """Read the entities sharing a match key with some keys, through the key index instead of a scan.

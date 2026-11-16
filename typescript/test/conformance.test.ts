@@ -187,6 +187,15 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
             unchanged: true,
           });
         }
+        if (store === "hydradb") {
+          for (const ops of [pyOps, tsOps]) {
+            expect((ops as { extra_label: unknown }).extra_label).toEqual({
+              primary: "extra:batch-1",
+              batch_extra: "extra:batch-2",
+              single_extra: "extra:single",
+            });
+          }
+        }
         rmSync(evidence, { recursive: true, force: true });
       },
     );

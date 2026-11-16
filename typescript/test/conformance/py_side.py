@@ -727,6 +727,35 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    mixed = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_mixed_case", resolver="fuzzy")
+    await mixed.insert.facts({"entities": [{"type": "Person", "name": "Jane Doe", "aliases": ["JD"]}]})
+    mixed_fuzzy = await mixed.insert.facts(
+        {"entities": [{"type": "person", "name": "Jane Does"}, {"type": "thing", "name": "JD"}]}
+    )
+    org_schema = {
+        "entities": [
+            {"name": "Organization", "aliases": ["Org"]},
+            {"name": "Company", "parent": "Organization"},
+        ]
+    }
+    mixed_schema = SelfGraph(
+        store=graph.store, namespace=f"{graph.namespace}_mixed_schema", resolver="default", schema=org_schema
+    )
+    await mixed_schema.insert.facts(
+        {"entities": [{"type": "Organization", "name": "International Business Machines", "aliases": ["IBM"]}]}
+    )
+    mixed_org = await mixed_schema.insert.facts(
+        {
+            "entities": [
+                {"type": "company", "name": "IBM"},
+                {"type": "org", "name": "Big Blue", "aliases": ["IBM"]},
+            ]
+        }
+    )
+    out["mixed_case_merges"] = [
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
@@ -752,6 +781,31 @@ async def write(graph):
         except ValidationError as exc:
             require_identifier_cases[name] = str(exc)
     out["require_identifier"] = require_identifier_cases
+    extra_ns = f"{graph.namespace}:extra"
+    await graph.store.upsert_nodes(
+        extra_ns,
+        "Extra",
+        [
+            ("extra:batch-1", {"id": "extra:batch-1", "name": "batch-1"}),
+            ("extra:batch-2", {"id": "extra:batch-2", "name": "batch-2"}),
+        ],
+        extra_label="CustomLabel",
+    )
+    await graph.store.upsert_node(
+        extra_ns,
+        "Extra",
+        "extra:single",
+        {"id": "extra:single", "name": "single"},
+        extra_label="CustomLabel",
+    )
+    primary_node = await graph.store.get_node(extra_ns, "Extra", "extra:batch-1")
+    extra_batch_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:batch-2")
+    extra_single_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:single")
+    out["extra_label"] = {
+        "primary": primary_node["id"] if primary_node else None,
+        "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
+        "single_extra": extra_single_node["id"] if extra_single_node else None,
+    }
     return out
 
 
@@ -828,6 +882,70 @@ async def supersede(graph):
         [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
         for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
     ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Frank", "Grace", "Heidi", "Ivan")),
+                *({"type": "Company", "name": n} for n in ("Cyberdyne", "Tyrell", "Soylent", "Vandelay")),
+            ],
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:tyrell",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+                {
+                    "from_entity": "person:grace",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                },
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:ivan",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+            ],
+        }
+    )
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:vandelay",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                }
+            ]
+        }
+    )
+    out["subms"] = {}
+    for person, company in (("frank", "cyberdyne"), ("heidi", "soylent")):
+        rid = ids.relation_id(f"person:{person}", "WORKS_AT", f"company:{company}")
+        out["subms"][rid] = [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
     return out
 
 
