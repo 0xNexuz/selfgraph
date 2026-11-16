@@ -221,6 +221,13 @@ describe("Schema.parse and asSchema", () => {
         "relations[0].from.min_count: min_count 1e+21 is greater than max_count 5",
       ],
     ],
+    [
+      { relations: [{ type: "R", from: { min_count: 1e20 + 16384, max_count: 5 } }] },
+      [
+        "relations[0].from.min_count: must be <= 9007199254740991",
+        "relations[0].from.min_count: min_count 100000000000000020000 is greater than max_count 5",
+      ],
+    ],
   ])("reports an unsafe count and then the first consistency problem for %j", (spec, lines) => {
     const message = `invalid schema:${lines.map((line) => `\n  ${line}`).join("")}`;
     expect(() => asSchema(spec as Schema)).toThrow(new ValidationError(message));

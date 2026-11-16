@@ -92,11 +92,21 @@ def _js_count(value: int) -> str:
     """Render a count the way JavaScript renders the same number in a message.
 
     @param value (int): the count.
-    @return (str): plain digits below 10**21, exponential notation at or above it, as JavaScript prints it.
+    @return (str): the count as JavaScript prints it.
     """
-    if abs(value) < 10**21:
+    if abs(value) <= MAX_SAFE_INTEGER:
         return str(value)
-    return repr(float(value))
+    sign = "-" if value < 0 else ""
+    mantissa, _, exponent = repr(float(abs(value))).partition("e")
+    whole, _, fraction = mantissa.partition(".")
+    digits = (whole + fraction).rstrip("0")
+    point = len(whole) + (int(exponent) if exponent else 0)
+    if point <= 21:
+        if len(digits) <= point:
+            return sign + digits + "0" * (point - len(digits))
+        return sign + digits[:point] + "." + digits[point:]
+    head, rest = digits[0], digits[1:]
+    return f"{sign}{head}{'.' + rest if rest else ''}e+{point - 1}"
 
 
 class RelationEndpoint(InputModel):

@@ -321,6 +321,13 @@ def test_inconsistent_schemas_are_rejected_with_a_path(spec, message):
                 "relations[0].from.min_count: min_count 1e+21 is greater than max_count 5",
             ],
         ),
+        (
+            {"relations": [{"type": "R", "from": {"min_count": 10**20 + 16384, "max_count": 5}}]},
+            [
+                "relations[0].from.min_count: must be <= 9007199254740991",
+                "relations[0].from.min_count: min_count 100000000000000020000 is greater than max_count 5",
+            ],
+        ),
     ],
 )
 def test_unsafe_counts_also_report_the_first_consistency_problem(spec, lines):
