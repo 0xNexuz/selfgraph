@@ -361,20 +361,18 @@ def _require_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
     _ids._require_clean_json(name, value, safe_ints=safe_ints)
 
 
-_MAX_SAFE_INT = 2**53 - 1
-
-
 def _whole_floats_as_ints(value: Any) -> Any:
-    """Turn every float that TypeScript reads as a safe integer into an int, so both SDKs store and render it alike.
+    """Turn each whole float within the safe integer range, other than -0.0, into an int, as TypeScript stores it.
 
-    TypeScript has one number type, so it reads 2.0 as 2 and writes it without a fraction. A finite whole float
-    within +/-(2**53 - 1), other than -0.0, is that case; every other float is kept.
-
-    @param value (Any): a JSON-like value; mappings, lists, and tuples are rebuilt, everything else is kept.
+    @param value (Any): a JSON-like value, searched through mappings, lists, and tuples.
     @return (Any): the value with those floats as ints.
     """
     if isinstance(value, float):
-        whole = value.is_integer() and abs(value) <= _MAX_SAFE_INT and not (value == 0 and math.copysign(1, value) < 0)
+        whole = (
+            value.is_integer()
+            and abs(value) <= _ids.MAX_SAFE_INTEGER
+            and not (value == 0 and math.copysign(1, value) < 0)
+        )
         return int(value) if whole else value
     if isinstance(value, Mapping):
         return {k: _whole_floats_as_ints(v) for k, v in value.items()}
