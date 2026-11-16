@@ -1166,6 +1166,16 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
     single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
   };
+  const blob = "x".repeat(40_000);
+  await graph.entities.create("Large Doc", "Note", { properties: { blob } });
+  await graph.entities.create("Small Doc", "Note");
+  const largeRel = await graph.relations.create("note:large-doc", "LINKS", "note:small-doc", { properties: { blob } });
+  const largeEntity = await graph.entities.get("note:large-doc");
+  const largeRelation = await graph.relations.get(largeRel.id);
+  out.large_document = {
+    entity: String(largeEntity?.properties.blob ?? "").length,
+    relation: String(largeRelation?.properties.blob ?? "").length,
+  };
   return out;
 }
 

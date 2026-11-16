@@ -1143,6 +1143,14 @@ async def write(graph):
         "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
         "single_extra": extra_single_node["id"] if extra_single_node else None,
     }
+    blob = "x" * 40_000
+    await graph.entities.create("Large Doc", "Note", properties={"blob": blob})
+    await graph.entities.create("Small Doc", "Note")
+    large_rel = await graph.relations.create("note:large-doc", "LINKS", "note:small-doc", properties={"blob": blob})
+    out["large_document"] = {
+        "entity": len((await graph.entities.get("note:large-doc")).properties["blob"]),
+        "relation": len((await graph.relations.get(large_rel.id)).properties["blob"]),
+    }
     return out
 
 
