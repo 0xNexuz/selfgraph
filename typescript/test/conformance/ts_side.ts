@@ -964,6 +964,20 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
     mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
   ];
+  const batchNames = new SelfGraph(graph.store, { namespace: `${graph.namespace}_batch_names`, resolver: "default" });
+  const mergedNames = await batchNames.insert.facts({
+    entities: [
+      { type: "Thing", name: "Bob", aliases: ["Robert"] },
+      { type: "Person", name: "Robert" },
+    ],
+  });
+  const storedName = (await batchNames.entities.get("person:robert"))!;
+  const restoredNames = await batchNames.entities.unmerge(mergedNames.merges[0]!.id);
+  out.batch_survivor_name = [
+    [storedName.id, storedName.name, storedName.aliases],
+    [restoredNames.survivor!.name, restoredNames.survivor!.aliases],
+    [restoredNames.entity.id, restoredNames.entity.name, restoredNames.entity.aliases],
+  ];
   const replacedSrc = new SelfGraph(graph.store, {
     namespace: `${graph.namespace}_replace_src`,
     extraction: "regex",
@@ -1303,6 +1317,34 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       decisions: result.subgraph.decisions.map((d) => d.title),
     };
   }
+  const temporal = new SelfGraph(store, { namespace: `${ns}_step_visibility` });
+  await temporal.insert.facts({
+    entities: ["Ada", "Bob", "Cy", "Dee"].map((name) => ({ type: "Person", name })),
+    relations: [
+      {
+        id: "relation:old",
+        from_entity: "person:ada",
+        type: "KNOWS",
+        to_entity: "person:bob",
+        event_time: "2020-01-01",
+      },
+      {
+        id: "relation:future",
+        from_entity: "person:cy",
+        type: "KNOWS",
+        to_entity: "person:dee",
+        event_time: "2030-01-01",
+      },
+    ],
+    decisions: [{ title: "Choose supplier", steps: ["relation:old", "relation:future"], event_time: "2020-01-01" }],
+  });
+  const hiddenSteps = await temporal.retrieve("Ada", { k: 1, as_of: "2025-01-01" });
+  deepStrictEqual(hiddenSteps.subgraph.decisions, []);
+  const visibleSteps = await temporal.retrieve("Ada", { k: 1 });
+  deepStrictEqual(
+    visibleSteps.subgraph.decisions.map((d) => d.title),
+    ["Choose supplier"],
+  );
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
@@ -1323,6 +1365,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     },
     retrieval_seeded: seeded,
     retrieval_boundary: boundaryResults,
+    decision_step_visibility: [hiddenSteps, visibleSteps].map((r) => r.subgraph.decisions.map((d) => d.title)),
     tiers: termed.tiers,
     entities,
     relations,

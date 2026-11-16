@@ -98,7 +98,7 @@ for (const spec of specs) live.set(spec.name, await reachable(spec));
 
 describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
   it.skipIf(!live.get("kuzu"))("isolates anonymous Kuzu databases in both languages", async () => {
-    const result: boolean[] = [];
+    const result: (boolean | string)[] = [];
     for (const path of ["", ":memory:"]) {
       await using first = new SelfGraph(new KuzuStore(path));
       await using second = new SelfGraph(new KuzuStore(path));
@@ -108,7 +108,18 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
       await second.entities.delete(entity.id);
       result.push((await first.entities.get(entity.id))?.id === entity.id);
     }
-    expect(result).toEqual([true, true, true, true]);
+    const shared = new KuzuStore(KUZU);
+    await shared.initialize();
+    for (const options of [{ read_only: true }, { read_only: true, max_db_size: 1024 }]) {
+      try {
+        await new KuzuStore(KUZU, options).initialize();
+        result.push("no error");
+      } catch (exc) {
+        result.push(exc instanceof Error ? exc.message : String(exc));
+      }
+    }
+    await shared.close();
+    expect(result.slice(0, 4)).toEqual([true, true, true, true]);
     expect(py("kuzu_isolation", "-", "-")).toEqual(result);
   });
 
