@@ -648,6 +648,13 @@ export const TOOLS: Tool[] = [
     },
   }),
   tool({
+    name: "graph_diff",
+    description:
+      "List stored changes in the known-time window (since, until]. until defaults to now. Deletes and merges are not visible.",
+    input: { since: str, until: optStr },
+    run: (g, a) => g.diff(a.since, a.until),
+  }),
+  tool({
     name: "retrieve",
     description:
       'Retrieve graph context for a query by keyword seeds and bounded BFS, DFS, or PageRank ("ppr") ranking. ' +
@@ -793,6 +800,7 @@ type ToolAnnotations = { readOnlyHint: true } | { destructiveHint: boolean; idem
 
 const READ_ONLY = [
   "get_schema",
+  "graph_diff",
   "retrieve",
   "run_cypher",
   "entity_evidence",

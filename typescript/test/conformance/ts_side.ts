@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 
 import { kv } from "../../src/cli.js";
+import { lenientTime } from "../../src/extraction/extractor.js";
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
 import {
   FalkorDBStore,
@@ -24,6 +25,20 @@ import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
+import { diffWindows } from "./diff.js";
+
+const LENIENT_EVENT_TIMES = [
+  "2021",
+  "0000",
+  "0001",
+  "9999",
+  "\u00b2\u00b2\u00b2\u00b2",
+  "\uff12\uff10\uff12\uff11",
+  "March 2021",
+  "",
+  "2021-06-15T12:00:00Z",
+  null,
+] as const;
 
 const TERMS_SPEC = {
   entities: [
@@ -209,6 +224,16 @@ const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["schema", { entities: [{ name: "A", properties: [{ name: "x", requird: true }] }] }],
   ["schema", { relations: [{ type: "X", from: { type: ["A"] } }] }],
   ["schema", { relations: [{ type: "X", to: { max: 1 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 1.5 } }] }],
+  ["schema", { relations: [{ type: "X", from: { min_count: true } }] }],
+  ["schema", { relations: [{ type: "X", to: { max_count: "1" } }] }],
+  ["schema", { relations: [{ type: "X", to: { min_count: 1.0, max_count: 2.0 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53 - 1 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: -(2 ** 53) } }] }],
+  ["schema", { relations: [{ type: "X", to: { min_count: -1e20 } }] }],
+  ["schema", { relations: [{ type: "X", from: { min_count: 2 ** 53, max_count: 5 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53, min_count: 1.5 } }] }],
 ];
 
 /**
@@ -267,9 +292,26 @@ function jsonConstants(): { flags: unknown[]; documents: unknown[] } {
 }
 
 /**
+ * Draft a schema with each invalid column reference and return the resulting error messages.
+ *
+ * @return (string[]): one message per reference, including unhashable ones.
+ */
+function tablesReferenceErrors(): string[] {
+  return [{ table: "users" }, ["users"], 5].map((reference) => {
+    try {
+      fromTables([{ name: "orders", columns: [{ name: "user_id", references: reference }] }]);
+      return "accepted";
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      return exc.message;
+    }
+  });
+}
+
+/**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; tables_errors: string[]; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
@@ -277,13 +319,16 @@ export function schemaWarnings(): {
   alias_errors: string[];
   own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
+  endpoint_types: unknown[];
   tables: unknown;
+  tables_errors: string[];
   term_forms: unknown;
   terms: unknown[];
   datetime_errors: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
+  lenient_event_times: Array<string | null>;
 } {
   const terms = Schema.parse(TERMS_SPEC);
   const subSchema = Schema.parse({
@@ -366,8 +411,32 @@ export function schemaWarnings(): {
         return (exc as Error).message;
       }
     }),
+    endpoint_types: [
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Company", aliases: ["Org"] },
+        ],
+        relations: [
+          { type: "WORKS_AT", from: { types: ["person", "Human"] }, to: { types: ["Org", "company"] } },
+          { type: "KNOWS", from: { types: ["Person"] }, to: { types: ["Human"] } },
+        ],
+      },
+      { relations: [{ type: "R", from: { types: ["CustomFrom"] }, to: { types: ["CustomTo"] } }] },
+      {
+        entities: [{ name: "Person" }],
+        relations: [{ type: "R", to: { types: ["Missing"] } }],
+      },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").relations.map((r) => [r.from.types, r.to.types]);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
+    tables_errors: tablesReferenceErrors(),
     neo4j_dropped: neo4jExportWarnings(),
     json_constants: jsonConstants(),
     term_forms: Object.fromEntries(
@@ -386,6 +455,10 @@ export function schemaWarnings(): {
     terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
       [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
     ),
+    lenient_event_times: LENIENT_EVENT_TIMES.map((value) => {
+      const parsed = lenientTime(value);
+      return parsed === null ? null : jsonIso(parsed);
+    }),
   };
 }
 
@@ -456,6 +529,20 @@ export const FACTS = {
     },
   ],
 };
+
+const JOINED = { from_entity: "company:acme", type: "JOINED", to_entity: "person:jane-doe" };
+const LIKES = { subject_entity: "person:jane-doe", key: "employer", value_entity: "company:acme" };
+const FACTS_TYPE_CASES: unknown[] = [
+  { relations: [{ ...JOINED, event_time: "2021" }] },
+  { relations: [{ ...JOINED, event_time: 2021 }] },
+  { relations: [{ ...JOINED, event_time: true }] },
+  { relations: [{ ...JOINED, evidence: [{ source_id: "s", confidence: "0.5" }] }] },
+  { preferences: [{ ...LIKES, strength: "0.9" }] },
+  { preferences: [{ ...LIKES, strength: false }] },
+  { preferences: [{ ...LIKES, event_time: "20210304T" }] },
+  { decisions: [{ title: "t", event_time: 1700000000 }] },
+  { decisions: [{ title: "t", event_time: "soon", steps: [] }] },
+];
 
 export const TEXT =
   "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京.";
@@ -636,6 +723,17 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.facts_none = exc.message;
   }
+  const factsTypes: string[] = [];
+  for (const facts of FACTS_TYPE_CASES) {
+    try {
+      await graph.insert.facts(facts as never);
+      factsTypes.push("accepted");
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      factsTypes.push(exc.message);
+    }
+  }
+  out.facts_types = factsTypes;
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
     out.unsafe_integer = "accepted";
@@ -968,6 +1066,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     relations: replayed.relations.map((r) => [r.id, r.revision, r.is_current]),
     warnings: replayed.warnings.map((w) => w.code),
   };
+  await graph.insert.text("Mira knows Niko.", { source_id: "diff-source" });
+  await graph.insert.text("Mira knows Omar.", { source_id: "diff-source", replace_source: true });
   const extraNs = `${graph.namespace}:extra`;
   await graph.store.upsertNodes(
     extraNs,
@@ -1138,6 +1238,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
+    diff: await graph.diff("1900-01-01", "2100-01-01"),
+    diff_windows: await diffWindows(graph),
     answerable,
     filters:
       store instanceof KuzuStore
@@ -1319,6 +1421,34 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
+  const undated = await graph.relations.create("person:frank", "WORKS_AT", "company:acme");
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:initech",
+        event_time: new Date(Date.UTC(2999, 0, 1)),
+      },
+    ],
+  });
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:globex",
+        event_time: new Date(Date.UTC(2998, 0, 1)),
+      },
+    ],
+  });
+  const corrected = await graph.relations.versions(undated.id);
+  const firstCreated = corrected[corrected.length - 1]!.created_at.getTime();
+  const undated_correction = corrected.map((v) => [
+    v.revision,
+    v.invalidated_by,
+    v.event_time ? v.event_time.getTime() === firstCreated : false,
+  ]);
   return {
     warnings,
     versions,
@@ -1327,5 +1457,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     delete_restored: deleted.restored_relations,
     delete_versions,
     subms,
+    undated_correction,
   };
 }

@@ -7,12 +7,27 @@ from datetime import datetime, timezone
 
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
+from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
+from selfgraph.extraction.extractor import _lenient_event_time
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
 from selfgraph.terms import expand_tokens, schema_forms
+
+LENIENT_EVENT_TIMES = [
+    "2021",
+    "0000",
+    "0001",
+    "9999",
+    "\u00b2\u00b2\u00b2\u00b2",
+    "\uff12\uff10\uff12\uff11",
+    "March 2021",
+    "",
+    "2021-06-15T12:00:00Z",
+    None,
+]
 
 TERMS_SPEC = {
     "entities": [
@@ -174,6 +189,16 @@ UNKNOWN_KEY_CASES = [
     ["schema", {"entities": [{"name": "A", "properties": [{"name": "x", "requird": True}]}]}],
     ["schema", {"relations": [{"type": "X", "from": {"type": ["A"]}}]}],
     ["schema", {"relations": [{"type": "X", "to": {"max": 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 1.5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": True}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"max_count": "1"}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": 1.0, "max_count": 2.0}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53 - 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": -(2**53)}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": -1e20}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": 2**53, "max_count": 5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53, "min_count": 1.5}}]}],
 ]
 
 
@@ -234,10 +259,24 @@ def json_constants():
     }
 
 
+def tables_reference_errors():
+    """Draft a schema with each invalid column reference and return the resulting error messages.
+
+    @return (list[str]): one message per reference, including unhashable ones.
+    """
+    messages = []
+    for reference in ({"table": "users"}, ["users"], 5):
+        try:
+            Schema.from_tables([{"name": "orders", "columns": [{"name": "user_id", "references": reference}]}])
+        except ValidationError as exc:
+            messages.append(str(exc))
+    return messages
+
+
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -273,6 +312,28 @@ def schema_warnings():
         except ValidationError as exc:
             return str(exc)
 
+    endpoint_specs = [
+        {
+            "entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Company", "aliases": ["Org"]}],
+            "relations": [
+                {"type": "WORKS_AT", "from": {"types": ["person", "Human"]}, "to": {"types": ["Org", "company"]}},
+                {"type": "KNOWS", "from": {"types": ["Person"]}, "to": {"types": ["Human"]}},
+            ],
+        },
+        {"relations": [{"type": "R", "from": {"types": ["CustomFrom"]}, "to": {"types": ["CustomTo"]}}]},
+        {
+            "entities": [{"name": "Person"}],
+            "relations": [{"type": "R", "to": {"types": ["Missing"]}}],
+        },
+    ]
+
+    def endpoint_outcome(spec):
+        try:
+            parsed = Schema.model_validate(spec)
+            return [[r.from_.types, r.to.types] for r in parsed.relations]
+        except ValidationError as exc:
+            return str(exc)
+
     return {
         "warnings": [
             [
@@ -288,8 +349,10 @@ def schema_warnings():
             for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
         ],
         "parents": [parent_outcome(spec) for spec in parent_specs],
+        "endpoint_types": [endpoint_outcome(spec) for spec in endpoint_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
+        "tables_errors": tables_reference_errors(),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
         "neo4j_dropped": neo4j_export_warnings(),
         "json_constants": json_constants(),
@@ -319,6 +382,7 @@ def schema_warnings():
             ]
             for q in ("Employees", "staff", "personnel")
         ],
+        "lenient_event_times": [json_iso(_lenient_event_time(value)) for value in LENIENT_EVENT_TIMES],
     }
 
 
@@ -433,6 +497,20 @@ FACTS = {
         }
     ],
 }
+
+_JOINED = {"from_entity": "company:acme", "type": "JOINED", "to_entity": "person:jane-doe"}
+_LIKES = {"subject_entity": "person:jane-doe", "key": "employer", "value_entity": "company:acme"}
+FACTS_TYPE_CASES = [
+    {"relations": [{**_JOINED, "event_time": "2021"}]},
+    {"relations": [{**_JOINED, "event_time": 2021}]},
+    {"relations": [{**_JOINED, "event_time": True}]},
+    {"relations": [{**_JOINED, "evidence": [{"source_id": "s", "confidence": "0.5"}]}]},
+    {"preferences": [{**_LIKES, "strength": "0.9"}]},
+    {"preferences": [{**_LIKES, "strength": False}]},
+    {"preferences": [{**_LIKES, "event_time": "20210304T"}]},
+    {"decisions": [{"title": "t", "event_time": 1700000000}]},
+    {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
+]
 
 USES_SPEC = {
     "entities": [{"name": "Person"}, {"name": "Tool"}],
@@ -636,6 +714,13 @@ async def write(graph):
         out["facts_none"] = "accepted"
     except ValidationError as exc:
         out["facts_none"] = str(exc)
+    out["facts_types"] = []
+    for facts in FACTS_TYPE_CASES:
+        try:
+            await graph.insert.facts(facts)
+            out["facts_types"].append("accepted")
+        except ValidationError as exc:
+            out["facts_types"].append(str(exc))
     try:
         await graph.entities.create("Unsafe", "Thing", properties={"n": 2**53})
         out["unsafe_integer"] = "accepted"
@@ -954,6 +1039,8 @@ async def write(graph):
         "relations": [(r.id, r.revision, r.is_current) for r in replayed.relations],
         "warnings": [w.code for w in replayed.warnings],
     }
+    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
+    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     extra_ns = f"{graph.namespace}:extra"
     await graph.store.upsert_nodes(
         extra_ns,
@@ -1119,6 +1206,35 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    undated = await graph.relations.create("person:frank", "WORKS_AT", "company:acme")
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:initech",
+                    "event_time": datetime(2999, 1, 1, tzinfo=timezone.utc),
+                }
+            ]
+        }
+    )
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:globex",
+                    "event_time": datetime(2998, 1, 1, tzinfo=timezone.utc),
+                }
+            ]
+        }
+    )
+    corrected = await graph.relations.versions(undated.id)
+    out["undated_correction"] = [
+        [v.revision, v.invalidated_by, v.event_time == corrected[-1].created_at] for v in corrected
+    ]
     return out
 
 
@@ -1186,6 +1302,37 @@ async def all_evidence(list_fn, oid):
         cursor = page.next_cursor
 
 
+async def diff_windows(graph):
+    d = await graph.diff("1900-01-01", "2100-01-01")
+    times = sorted(
+        {
+            at
+            for r in [*d.relations_added, *d.relations_revised, *d.relations_retired]
+            for at in (r.created_at, r.invalidated_known_at)
+            if at is not None
+        }
+    )
+    if not times:
+        return []
+    first, middle, last = times[0], times[len(times) // 2], times[-1]
+    windows = [("1900-01-01", first), (first, first), (first, middle), (middle, last), (last, "2100-01-01")]
+    out = []
+    for since, until in windows:
+        d = await graph.diff(since, until)
+        out.append(
+            {
+                "since": d.since.isoformat().replace("+00:00", "Z"),
+                "until": d.until.isoformat().replace("+00:00", "Z"),
+                "added": [[r.id, r.revision] for r in d.relations_added],
+                "revised": [[r.id, r.revision] for r in d.relations_revised],
+                "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
+                "entities": [e.id for e in d.entities_created],
+                "limitations": d.limitations,
+            }
+        )
+    return out
+
+
 async def dump(graph, ns):
     store = graph.store
     entities = [e async for e in graph.entities.iterate(limit=3)]
@@ -1236,6 +1383,8 @@ async def dump(graph, ns):
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
+            "diff": await graph.diff("1900-01-01", "2100-01-01"),
+            "diff_windows": await diff_windows(graph),
             "answerable": answerable,
             "prune_types": pruned,
             "known_at_sources": {

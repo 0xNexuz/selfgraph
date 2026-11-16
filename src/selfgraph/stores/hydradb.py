@@ -781,10 +781,12 @@ class HydraDBStore(AutoCommitStore):
             where.append("NOT r.is_current <> true" if anchored else "r.is_current = true")
         where_after("r.sid", id_gt, where, params)
         ob = "sid" if order_by == "id" else require_identifier(order_by, "order_by")
+        tie_break = ", r.revision AS __rev" if order_by == "id" else ""
+        order = "__ob, __rev" if order_by == "id" else "__ob"
         res = await self._run(
             f"MATCH ({apat})-[r:{_EDGE}]->({bpat}) WHERE {' AND '.join(where)} "
-            f"RETURN r.doc AS doc, r.fa AS fa, r.tb AS tb, r.etype AS et, r.`{ob}` AS __ob "
-            f"ORDER BY __ob SKIP $skip LIMIT $limit",
+            f"RETURN r.doc AS doc, r.fa AS fa, r.tb AS tb, r.etype AS et, r.`{ob}` AS __ob{tie_break} "
+            f"ORDER BY {order} SKIP $skip LIMIT $limit",
             params,
         )
         return [edge_row(r) for r in res.rows]

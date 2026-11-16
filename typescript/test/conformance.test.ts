@@ -63,7 +63,9 @@ function mask(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
-        if (k === "created_at" || k === "updated_at" || k === "invalidated_known_at") return [k, "<ts>"];
+        if (k === "invalidated_at" && String((value as Record<string, unknown>).invalidated_by).startsWith("sv:"))
+          return [k, "<ts>"];
+        if (["created_at", "updated_at", "invalidated_known_at", "since", "until"].includes(k)) return [k, "<ts>"];
         if (k === "ns") return [k, "<ns>"];
         if (k === "message") return [k, "<message>"];
         if (k === "evidence_json" && typeof v === "string") return [k, mask(v)];
@@ -124,6 +126,10 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
       expect(mask(fromTs)).toEqual(mask(fromPy));
       const ended = Object.values((fromTs as { versions: Record<string, unknown[][]> }).versions).map((v) => v[0]![3]);
       expect(ended.filter((at) => at !== null).sort()).toEqual(["2022-01-01T00:00:00Z", "2026-01-01T00:00:00Z"]);
+      expect((fromTs as { undated_correction: unknown[][] }).undated_correction.map((v) => v[2])).toEqual([
+        true,
+        false,
+      ]);
     });
 
     it.skipIf(!live.get(store))(
