@@ -1340,12 +1340,18 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         actor = await end(original.actor_entity, rewritten.actor_entity)
         outcome = await end(original.outcome_entity, rewritten.outcome_entity)
         steps = [restored.get(s, s) for s in rewritten.steps]
+        current = await _ops.get_trace(runner, ns, rw.id)
+        step_inputs = original.steps
+        if current is not None and not rw.existed:
+            current_steps = [restored.get(s.relation_id, s.relation_id) for s in current.steps]
+            if current_steps != steps:
+                step_inputs = current_steps
+            steps = current_steps
         if not all([actor is None or await exists(actor), outcome is None or await exists(outcome)]):
             continue
         if not all([await _ops.relation_exists(runner, ns, s) for s in steps]):
             continue
         base = original
-        current = await _ops.get_trace(runner, ns, rw.id)
         if current is not None and not rw.existed:
             base = original.model_copy(
                 update={
@@ -1361,7 +1367,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
             await end(o, r) for o, r in zip(original.alternative_entities, rewritten.alternative_entities, strict=True)
         ]
         restored_steps = []
-        for s in original.steps:
+        for s in step_inputs:
             if s in dropped_sibling_ids and s not in orig_restored:
                 continue
             if s in orig_restored:

@@ -472,6 +472,36 @@ def test_unmerge_skips_a_decision_whose_step_relation_was_deleted():
     assert run(g.decisions.list(limit=100)).items == []
 
 
+@pytest.mark.parametrize("edit", ["add", "replace", "clear"])
+def test_unmerge_preserves_post_merge_decision_step_edits(edit):
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    original = relation_id(BOB_ID, "USES", hammer)
+    redirected = relation_id(ROBERT_ID, "USES", hammer)
+    checked = relation_id(ADA, "CHECKED", hammer)
+    merge = _merge_with_references(
+        g,
+        relations=[
+            {"from_entity": BOB_ID, "type": "USES", "to_entity": hammer},
+            {"from_entity": ADA, "type": "CHECKED", "to_entity": hammer},
+        ],
+        decisions=[{"title": "Pick", "actor_entity": BOB_ID, "steps": [original]}],
+    )
+    trace_id = decision_id(ROBERT_ID, "Pick")
+    edited = {"add": [checked, redirected], "replace": [checked], "clear": []}[edit]
+    run(g.decisions.update(trace_id, steps=edited, summary="reviewed later"))
+    assert not next(r for r in merge.rewrites if r.kind == "decision").existed
+
+    out = run(g.entities.unmerge(merge.id))
+
+    expected = [original if s == redirected else s for s in edited]
+    restored = run(g.decisions.get(decision_id(BOB_ID, "Pick")))
+    assert [s.relation_id for s in restored.steps] == expected
+    assert [s.relation_id for s in out.decisions[0].steps] == expected
+    assert restored.summary == "reviewed later"
+    assert run(g.decisions.get(trace_id)) is None
+
+
 def test_unmerge_skips_a_preference_whose_subject_was_deleted():
     g = fresh_graph("res", resolver="default")
     ada = entity_id("Person", "Ada")

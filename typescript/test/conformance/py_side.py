@@ -876,6 +876,38 @@ async def write(graph):
         "returned_after_bb": [s.relation_id for s in after_bb_merge.decisions[0].steps],
         "returned_after_bob": [s.relation_id for s in after_bob_merge.decisions[0].steps],
     }
+    edited_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:edited-steps", resolver="default")
+    await edited_graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Person", "name": "Robert", "aliases": ["Bob"]},
+                {"type": "Person", "name": "Ada"},
+                {"type": "Tool", "name": "Hammer"},
+            ]
+        }
+    )
+    original_step = ids.relation_id("person:bob", "USES", "tool:hammer")
+    edited_merge = await edited_graph.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": "Bob"}],
+            "relations": [
+                {"from_entity": "person:bob", "type": "USES", "to_entity": "tool:hammer"},
+                {"from_entity": "person:ada", "type": "CHECKED", "to_entity": "tool:hammer"},
+            ],
+            "decisions": [{"title": "Pick", "actor_entity": "person:bob", "steps": [original_step]}],
+        }
+    )
+    edited_steps = [
+        ids.relation_id("person:ada", "CHECKED", "tool:hammer"),
+        ids.relation_id("person:robert", "USES", "tool:hammer"),
+    ]
+    await edited_graph.decisions.update(edited_merge.decisions[0].id, steps=edited_steps)
+    edited_undo = await edited_graph.entities.unmerge(edited_merge.merges[0].id)
+    edited_read = await edited_graph.decisions.get(ids.decision_id("person:bob", "Pick"))
+    out["unmerge_edited_steps"] = {
+        "returned": [s.relation_id for s in edited_undo.decisions[0].steps],
+        "stored": [s.relation_id for s in edited_read.steps],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",

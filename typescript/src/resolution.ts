@@ -1478,10 +1478,13 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     const outcome = await end(original.outcome_entity, rewritten.outcome_entity);
     if ((actor !== null && !(await exists(actor))) || (outcome !== null && !(await exists(outcome)))) continue;
     const steps = rewritten.steps.map((s) => restored.get(s) ?? s);
-    let stepsExist = true;
-    for (const s of steps) stepsExist = stepsExist && (await ops.relationExists(runner, ns, s));
-    if (!stepsExist) continue;
     const current = await ops.getTrace(runner, ns, rw.id);
+    const currentSteps =
+      current !== null && !rw.existed ? current.steps.map((s) => restored.get(s.relation_id) ?? s.relation_id) : steps;
+    const stepInputs = deepEqual(currentSteps, steps) ? original.steps : currentSteps;
+    let stepsExist = true;
+    for (const s of currentSteps) stepsExist = stepsExist && (await ops.relationExists(runner, ns, s));
+    if (!stepsExist) continue;
     const kept = current !== null && !rw.existed ? current : original;
     if (kept === current) await ops.deleteTraceQuietly(runner, ns, rw.id);
     const alternatives: string[] = [];
@@ -1490,7 +1493,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       if (await exists(alternative)) alternatives.push(alternative);
     }
     const restoredSteps: string[] = [];
-    for (const s of original.steps) {
+    for (const s of stepInputs) {
       if (droppedSiblingIds.has(s) && !origRestored.has(s)) continue;
       if (origRestored.has(s)) {
         restoredSteps.push(origRestored.get(s)!);
