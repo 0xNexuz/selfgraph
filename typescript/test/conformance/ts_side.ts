@@ -763,6 +763,31 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }
   }
   out.require_identifier = requireIdentifierCases;
+  const extraNs = `${graph.namespace}:extra`;
+  await graph.store.upsertNodes(
+    extraNs,
+    "Extra",
+    [
+      ["extra:batch-1", { id: "extra:batch-1", name: "batch-1" }],
+      ["extra:batch-2", { id: "extra:batch-2", name: "batch-2" }],
+    ],
+    { extra_label: "CustomLabel" },
+  );
+  await graph.store.upsertNode(
+    extraNs,
+    "Extra",
+    "extra:single",
+    { id: "extra:single", name: "single" },
+    { extra_label: "CustomLabel" },
+  );
+  const primaryNode = await graph.store.getNode(extraNs, "Extra", "extra:batch-1");
+  const extraBatchNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:batch-2");
+  const extraSingleNode = await graph.store.getNode(extraNs, "CustomLabel", "extra:single");
+  out.extra_label = {
+    primary: primaryNode ? (primaryNode.id as string) : null,
+    batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
+    single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
+  };
   return out;
 }
 
