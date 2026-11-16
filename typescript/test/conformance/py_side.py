@@ -368,6 +368,11 @@ FACTS = {
     ],
 }
 
+USES_SPEC = {
+    "entities": [{"name": "Person"}, {"name": "Tool"}],
+    "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
+}
+
 TEXT = "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京."
 
 
@@ -533,6 +538,29 @@ async def write(graph):
         out["schema_null_required"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    await graph.insert.facts(
+        {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
+    )
+    merged = await graph.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": "Mergia Bob"}, {"type": "Tool", "name": "Mergia Anvil"}],
+            "preferences": [
+                {"subject_entity": "person:mergia-bob", "key": "tool", "value_entity": "tool:mergia-anvil"}
+            ],
+        },
+        source_id="merge-doc",
+        resolver="default",
+    )
+    await graph.entities.delete("tool:mergia-anvil")
+    undone = await graph.entities.unmerge(merged.merges[0].id)
+    out["unmerge_after_delete"] = {
+        "entity": undone.entity.id,
+        "survivor": undone.survivor.id if undone.survivor else None,
+        "reverted": undone.merge.reverted_at is not None,
+        "relations": [r.id for r in undone.relations],
+        "preferences": [p.id for p in undone.preferences],
+        "decisions": [d.id for d in undone.decisions],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",
@@ -561,7 +589,24 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    await graph.insert.facts(
+        {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
+        source_id="follow-up",
+    )
     out["retrieval_overflow"] = await overflow(graph)
+    capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
+    await capped.insert.facts(
+        {"entities": [{"type": "Person", "name": "Ann"}, *({"type": "Tool", "name": n} for n in "abcd")]}
+    )
+    uses = [ids.relation_id("person:ann", "USES", f"tool:{n}") for n in "abcd"]
+    for year, name in enumerate("abcd", 2020):
+        await capped.relations.create(
+            "person:ann", "USES", f"tool:{name}", event_time=datetime(year, 1, 1, tzinfo=timezone.utc)
+        )
+    out["resettle_delete"] = to_jsonable(await capped.relations.delete(uses[2]))
+    out["resettle_versions"] = to_jsonable(
+        {rid: await capped.relations.versions(rid, newest_first=False) for rid in uses if rid != uses[2]}
+    )
     return out
 
 
@@ -621,6 +666,23 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Dan", "Eve")),
+                *({"type": "Company", "name": n} for n in ("Hooli", "Umbrella", "Wayne")),
+            ]
+        }
+    )
+    for person, company, year in (("dan", "hooli", 2020), ("dan", "umbrella", 2021), ("eve", "hooli", 2022)):
+        await graph.insert.facts({"relations": [link(person, company, year)]})
+    await graph.insert.facts({"relations": [link("eve", "wayne", 2023)]})
+    deleted = await graph.relations.delete(ids.relation_id("person:dan", "WORKS_AT", "company:umbrella"))
+    out["delete_restored"] = deleted.restored_relations
+    out["delete_versions"] = [
+        [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
+    ]
     return out
 
 
@@ -679,6 +741,8 @@ async def dump(graph, ns):
         sv["id"]: await store.child_nodes(ns, "SourceVersion", sv["id"], "HAS_CHUNK", "Chunk", order_by="index")
         for sv in source_versions
     }
+    cutoff = next(s["created_at"] for s in source_versions if s["source_id"] == "spec")
+    historical = await graph.retrieve("database", known_at=cutoff, k=1, depth=1)
     retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", depth=2)
     ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", strategy="ppr", depth=3, max_nodes=4)
     dfs = await graph.retrieve("Zoë ÅNGSTRÖM acme", strategy="dfs", depth=2)
@@ -698,6 +762,10 @@ async def dump(graph, ns):
         {
             "answerable": answerable,
             "prune_types": pruned,
+            "known_at_sources": {
+                "seeds": [s.id for s in historical.seeds],
+                "counts": {e.id: e.source_count for e in historical.subgraph.entities},
+            },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),

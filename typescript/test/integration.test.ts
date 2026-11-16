@@ -30,6 +30,7 @@ const NO_DELETES = {
   deleted_relation_versions: 0,
   deleted_decisions: 0,
   deleted_preference_versions: 0,
+  restored_relations: 0,
 };
 
 const FACTS = {
@@ -409,6 +410,7 @@ function suite(spec: StoreSpec) {
       deleted_relation_versions: 2,
       deleted_decisions: 1,
       deleted_preference_versions: 5,
+      restored_relations: 0,
     });
     expect(await graph.decisions.get(dec.id)).toBeNull();
 

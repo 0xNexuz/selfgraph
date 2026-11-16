@@ -392,6 +392,11 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const USES_SPEC = {
+  entities: [{ name: "Person" }, { name: "Tool" }],
+  relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
+};
+
 export async function write(graph: SelfGraph): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   out.facts = toJsonable(await graph.insert.facts(FACTS, { source_id: "spec" }));
@@ -509,6 +514,30 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   }
   out.ent_delete = toJsonable(await graph.entities.delete("thing:temp-thing"));
   out.rel_delete = toJsonable(await graph.relations.delete(ids.relationId(ZOE, "KNOWS", "person:jane-doe")));
+  await graph.insert.facts(
+    { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
+    { source_id: "merge-seed" },
+  );
+  const merged = await graph.insert.facts(
+    {
+      entities: [
+        { type: "Person", name: "Mergia Bob" },
+        { type: "Tool", name: "Mergia Anvil" },
+      ],
+      preferences: [{ subject_entity: "person:mergia-bob", key: "tool", value_entity: "tool:mergia-anvil" }],
+    },
+    { source_id: "merge-doc", resolver: "default" },
+  );
+  await graph.entities.delete("tool:mergia-anvil");
+  const undone = await graph.entities.unmerge(merged.merges[0]!.id);
+  out.unmerge_after_delete = {
+    entity: undone.entity.id,
+    survivor: undone.survivor?.id ?? null,
+    reverted: undone.merge.reverted_at !== null,
+    relations: undone.relations.map((r) => r.id),
+    preferences: undone.preferences.map((p) => p.id),
+    decisions: undone.decisions.map((d) => d.id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",
@@ -544,7 +573,37 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     });
   }
   out.repeated_merges = repeatedMerges;
+  await graph.insert.facts(
+    {
+      entities: [
+        { type: "Database", name: "HydraDB" },
+        { type: "Company", name: "Acme, Inc." },
+      ],
+    },
+    { source_id: "follow-up" },
+  );
   out.retrieval_overflow = await overflow(graph);
+  const capped = new SelfGraph(graph.store, {
+    namespace: graph.namespace,
+    schema: USES_SPEC,
+    contradiction: "supersede",
+  });
+  const names = ["a", "b", "c", "d"];
+  await capped.insert.facts({
+    entities: [{ type: "Person", name: "Ann" }, ...names.map((name) => ({ type: "Tool", name }))],
+  });
+  const uses = names.map((n) => ids.relationId("person:ann", "USES", `tool:${n}`));
+  for (const [i, name] of names.entries()) {
+    await capped.relations.create("person:ann", "USES", `tool:${name}`, {
+      event_time: `${2020 + i}-01-01T00:00:00+00:00`,
+    });
+  }
+  out.resettle_delete = toJsonable(await capped.relations.delete(uses[2]!));
+  const versions: Record<string, unknown> = {};
+  for (const rid of uses.filter((r) => r !== uses[2])) {
+    versions[rid] = await capped.relations.versions(rid, { newest_first: false });
+  }
+  out.resettle_versions = toJsonable(versions);
   return out;
 }
 
@@ -615,6 +674,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const rows = await store.childNodes(ns, "SourceVersion", sv.id as string, "HAS_CHUNK", "Chunk");
     chunks[sv.id as string] = rows.sort((a, b) => Number(a.index) - Number(b.index));
   }
+  const cutoff = sourceVersions.find((s) => s.source_id === "spec")!.created_at as string;
+  const historical = await graph.retrieve("database", { known_at: cutoff, k: 1, depth: 1 });
   const retrieval = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", { depth: 2 });
   const ppr = await graph.retrieve("what did Grace Hopper write about COBOL and Jane", {
     strategy: "ppr",
@@ -640,6 +701,10 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   return toJsonable({
     answerable,
     prune_types: pruned,
+    known_at_sources: {
+      seeds: historical.seeds.map((s) => s.id),
+      counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
+    },
     retrieval_seeded: seeded,
     tiers: termed.tiers,
     entities,
@@ -726,5 +791,30 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
-  return { warnings, versions, withdrawn_warnings: cidOlder.warnings.map((w) => w.code), withdrawn_versions };
+  await graph.insert.facts({
+    entities: [
+      ...["Dan", "Eve"].map((name) => ({ type: "Person", name })),
+      ...["Hooli", "Umbrella", "Wayne"].map((name) => ({ type: "Company", name })),
+    ],
+  });
+  for (const [person, company, year] of [
+    ["dan", "hooli", 2020],
+    ["dan", "umbrella", 2021],
+    ["eve", "hooli", 2022],
+  ] as const) {
+    await graph.insert.facts({ relations: [link(person, company, year)] });
+  }
+  await graph.insert.facts({ relations: [link("eve", "wayne", 2023)] });
+  const deleted = await graph.relations.delete(ids.relationId("person:dan", "WORKS_AT", "company:umbrella"));
+  const delete_versions = (
+    await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
+  ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  return {
+    warnings,
+    versions,
+    withdrawn_warnings: cidOlder.warnings.map((w) => w.code),
+    withdrawn_versions,
+    delete_restored: deleted.restored_relations,
+    delete_versions,
+  };
 }
