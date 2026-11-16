@@ -621,6 +621,26 @@ async def write(graph):
         out["schema_null_required"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    prune_graph = SelfGraph(
+        store=graph.store,
+        namespace=f"{graph.namespace}:prune",
+        schema={
+            "entities": [{"name": "Person"}, {"name": "Company"}],
+            "relations": [{"type": "WORKS_AT", "aliases": ["employed_by"]}],
+        },
+    )
+    await prune_graph.initialize()
+    person = await prune_graph.entities.create("Alice", "Person")
+    company = await prune_graph.entities.create("Acme", "Company")
+    relation = await prune_graph.relations.create(person.id, "employed_by", company.id)
+    await prune_graph.maintenance.decay(now=datetime.now(timezone.utc), half_life_days=1e-9, dry_run=False)
+    by_alias = await prune_graph.maintenance.prune(min_relevance=1.0, relation_types=["employed_by"])
+    by_canonical = await prune_graph.maintenance.prune(min_relevance=1.0, relation_types=["WORKS_AT"])
+    out["prune_relation_alias"] = {
+        "relation_id": relation.id,
+        "alias": by_alias.relation_ids,
+        "canonical": by_canonical.relation_ids,
+    }
     await graph.insert.facts(
         {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
     )
