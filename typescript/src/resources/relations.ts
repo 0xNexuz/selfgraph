@@ -176,7 +176,7 @@ export class Relations extends Resource {
         id,
         {
           set_properties: options.set_properties ?? null,
-          remove_properties: [...(options.remove_properties ?? [])],
+          remove_properties: options.remove_properties === undefined ? [] : options.remove_properties,
           event_time: eventTime,
           evidence,
         },

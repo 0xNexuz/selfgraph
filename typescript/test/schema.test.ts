@@ -820,9 +820,58 @@ describe("unknown keys and options", () => {
     expect(() => parseOrThrow(Extraction, { entities: [{ type: "P", name: 3 }, { type: "P" }] }, "facts")).toThrow(
       "invalid facts:\n  entities[0].name: expected string\n  entities[1].name: field required",
     );
-    expect((await g.decisions.create("D", { steps: [] })).steps).toEqual([]);
+    const d = await g.decisions.create("D", { steps: [] });
+    expect(d.steps).toEqual([]);
     expect((await g.decisions.create("No steps")).steps).toEqual([]);
     expect((await g.maintenance.decay()).dry_run).toBe(true);
+    await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Ann" },
+        { type: "Company", name: "Acme" },
+      ],
+    });
+    const rel = await g.relations.create("person:ann", "WORKS_AT", "company:acme", {
+      properties: { role: "lead", r: "keep_r" },
+    });
+    const pref = await g.preferences.create("person:ann", "employer", "company:acme", {
+      properties: { role: "lead", r: "keep_r" },
+    });
+    const listCases: Array<[() => Promise<unknown>, string]> = [
+      [
+        () => g.relations.update(rel.id, { remove_properties: "role" as never }),
+        "remove_properties must be a list of strings, got string",
+      ],
+      [
+        () => g.relations.update(rel.id, { remove_properties: null as never }),
+        "remove_properties must be a list of strings, got null",
+      ],
+      [
+        () => g.preferences.update(pref.id, { remove_properties: "role" as never }),
+        "remove_properties must be a list of strings, got string",
+      ],
+      [
+        () => g.decisions.create("Bad steps", { steps: "relation:x" as never }),
+        "decision steps must be a list of strings, got string",
+      ],
+      [
+        () => g.decisions.create("Bad alts", { alternative_entities: "person:ann" as never }),
+        "alternative_entities must be a list of strings, got string",
+      ],
+      [
+        () => g.decisions.update(d.id, { steps: "relation:x" as never }),
+        "decision steps must be a list of strings, got string",
+      ],
+      [() => g.decisions.update(d.id, { steps: null as never }), "decision steps must be a list of strings, got null"],
+      [
+        () => g.decisions.update(d.id, { alternative_entities: null as never }),
+        "alternative_entities must be a list of strings, got null",
+      ],
+    ];
+    for (const [call, message] of listCases) {
+      await expect(call()).rejects.toThrow(new ValidationError(message));
+    }
+    expect((await g.relations.get(rel.id))?.properties).toEqual({ role: "lead", r: "keep_r" });
+    expect((await g.preferences.get(pref.id))?.properties).toEqual({ role: "lead", r: "keep_r" });
   });
 
   it("suggests within edit distance two and breaks ties by declared order", () => {
