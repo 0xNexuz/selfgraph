@@ -283,8 +283,7 @@ export class Insert {
         { contradiction: conflicts, caps, warnings: found },
       );
       if (judged && llm !== null) {
-        const fresh = relations.filter((r) => r.created_at.getTime() === createdAt.getTime());
-        found.push(...(await judgeContradictions(tx, ns, llm, fresh, caps, createdAt)));
+        found.push(...(await judgeContradictions(tx, ns, llm, relations, caps, createdAt)));
       }
 
       let diff: SourceDiff | null = null;

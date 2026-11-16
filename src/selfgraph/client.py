@@ -663,8 +663,7 @@ class SelfGraph:
                 warnings=found,
             )
             if judged and self._llm is not None:
-                fresh = [r for r in relations if r.created_at == created_at]
-                found.extend(await judge_contradictions(tx, ns, self._llm, fresh, caps, created_at))
+                found.extend(await judge_contradictions(tx, ns, self._llm, relations, caps, created_at))
 
             diff = None
             if replace_source and source_id is not None and source_version is not None:
