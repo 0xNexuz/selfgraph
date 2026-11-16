@@ -984,6 +984,19 @@ function suite(spec: StoreSpec): void {
     }
   }
 
+  it("an insert that moves a fact reports what it stored", async () => {
+    const g = await graph("supersede");
+    await insert(g, [annAt("acme", 2020)]);
+    await insert(g, [annAt("globex", 2022)]);
+    const result = await insert(g, [annAt("acme", 2020), annAt("globex", 2019)]);
+    const stored = [(await g.relations.versions(ACME))[0]!, (await g.relations.versions(GLOBEX))[0]!];
+    expect(result.relations).toEqual(stored);
+    expect(stored.map((r) => [r.is_current, r.invalidated_by])).toEqual([
+      [true, null],
+      [false, ACME],
+    ]);
+  });
+
   it("updating the superseding fact to a later time moves the retirement it caused", async () => {
     const g = await graph("supersede");
     await insert(g, [annAt("acme", 2020)]);
@@ -991,11 +1004,6 @@ function suite(spec: StoreSpec): void {
     expect((await g.relations.update(GLOBEX, { event_time: at(2025) })).is_current).toBe(true);
     const [acme] = await g.relations.versions(ACME);
     expect([acme!.is_current, acme!.invalidated_by, acme!.invalidated_at]).toEqual([false, GLOBEX, at(2025)]);
-    const warned = await graph();
-    await insert(warned, [annAt("acme", 2020)]);
-    await insert(warned, [annAt("globex", 2022)]);
-    expect((await warned.relations.update(GLOBEX, { event_time: at(2019) })).is_current).toBe(true);
-    expect((await warned.relations.list()).items.map((r) => r.id).sort()).toEqual([ACME, GLOBEX].sort());
   });
 
   it("rejects an invalid as_of and a closed graph", async () => {

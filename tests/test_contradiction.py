@@ -709,12 +709,14 @@ def test_updating_the_superseding_fact_to_a_later_time_moves_the_retirement_it_c
     assert valid_at(g, 2026) == {GLOBEX}
 
 
-def test_updating_event_time_leaves_the_endpoint_alone_outside_supersede_mode():
-    g = graph()
+def test_an_insert_that_moves_a_fact_reports_what_it_stored():
+    g = graph(contradiction="supersede")
     insert(g, works_at("acme", 2020))
     insert(g, works_at("globex", 2022))
-    assert run(g.relations.update(GLOBEX, event_time=utc(2019))).is_current
-    assert sorted(r.id for r in run(g.relations.list()).items) == sorted([ACME, GLOBEX])
+    result = insert(g, works_at("acme", 2020), works_at("globex", 2019))
+    stored = [run(g.relations.versions(rid))[0] for rid in (ACME, GLOBEX)]
+    assert result.relations == stored
+    assert [(r.is_current, r.invalidated_by) for r in stored] == [(True, None), (False, ACME)]
 
 
 @pytest.mark.parametrize("how", ["insert", "update"])
