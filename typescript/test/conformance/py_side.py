@@ -158,6 +158,8 @@ UNKNOWN_KEY_CASES = [
     ["schema", {"relations": [{"type": "X", "from": {"min_count": True}}]}],
     ["schema", {"relations": [{"type": "X", "to": {"max_count": "1"}}]}],
     ["schema", {"relations": [{"type": "X", "to": {"min_count": 1.0, "max_count": 2.0}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53 - 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53}}]}],
 ]
 
 

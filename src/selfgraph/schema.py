@@ -8,7 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from . import _ops
 from ._serde import L_ENTITY, decode_entity
 from .errors import ValidationError
-from .ids import _canonical_id, entity_id, normalize_rel_type, normalize_text, relation_id, slug
+from .ids import MAX_SAFE_INTEGER, _canonical_id, entity_id, normalize_rel_type, normalize_text, relation_id, slug
 from .models import Extraction, InputModel, InsertWarning, TopInputModel, as_input
 
 __all__ = [
@@ -92,18 +92,24 @@ class RelationEndpoint(InputModel):
     @field_validator("min_count", "max_count", mode="before")
     @classmethod
     def _whole_count(cls, value: Any) -> Any:
-        """Accept a count that is an integer or a float with no fractional part, with the TypeScript error text.
+        """Accept a safe integer count, or a float with no fractional part, with the TypeScript error text.
 
         @param value (Any): the raw count.
         @return (Any): the count as an int, or None.
         """
-        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        if value is None:
             return value
-        if not isinstance(value, float) or not math.isfinite(value):
-            raise ValueError("expected number")
-        if not value.is_integer():
-            raise ValueError("expected integer")
-        return int(value)
+        if not isinstance(value, int) or isinstance(value, bool):
+            if not isinstance(value, float) or not math.isfinite(value):
+                raise ValueError("expected number")
+            if not value.is_integer():
+                raise ValueError("expected integer")
+            value = int(value)
+        if value > MAX_SAFE_INTEGER:
+            raise ValueError(f"must be <= {MAX_SAFE_INTEGER}")
+        if value < -MAX_SAFE_INTEGER:
+            raise ValueError(f"must be >= {-MAX_SAFE_INTEGER}")
+        return value
 
 
 class RelationType(InputModel):
