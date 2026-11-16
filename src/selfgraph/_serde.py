@@ -116,11 +116,18 @@ def json_iso(dt: datetime | None) -> str | None:
 
 
 def from_iso(value: Any) -> datetime | None:
+    """Parse an ISO 8601 datetime, honoring a trailing ``Z``/``z`` as UTC.
+
+    ``datetime.fromisoformat`` rejects a trailing ``Z`` before Python 3.11, and this
+    project supports Python 3.10+, so rewrite ``Z``/``z`` to an explicit offset first.
+    This mirrors the handling in :func:`selfgraph._ops.parse_time`.
+    """
     if value is None:
         return None
     if isinstance(value, datetime):
         return value
-    return datetime.fromisoformat(value)
+    text = f"{value[:-1]}+00:00" if isinstance(value, str) and value[-1:] in ("Z", "z") else value
+    return datetime.fromisoformat(text)
 
 
 def _dumps(value: Any) -> str:
