@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -15,6 +18,29 @@ MAX_ONE = {
     "entities": [{"name": "Person"}, {"name": "Company"}],
     "relations": [{"type": "WORKS_AT", "from": {"types": ["Person"], "max_count": 1}}],
 }
+
+MANY_WRITERS = 64
+MANY_WRITERS_SCRIPT = f"""
+import asyncio, tempfile
+from pathlib import Path
+
+from selfgraph import KuzuStore, SelfGraph
+
+
+async def main():
+    path = str(Path(tempfile.mkdtemp()) / "graph.kuzu")
+    graph = SelfGraph(store=KuzuStore(path), namespace="pool")
+    await graph.initialize()
+
+    async def one(i):
+        await graph.entities.create(f"Thing {{i}}", "Thing")
+
+    await asyncio.wait_for(asyncio.gather(*(one(i) for i in range({MANY_WRITERS}))), timeout=45)
+    print(len((await graph.entities.list(limit={MANY_WRITERS} + 5)).items))
+
+
+asyncio.run(main())
+"""
 
 
 def a_path() -> str:
@@ -84,7 +110,7 @@ def test_a_second_event_loop_uses_the_path_after_the_first_closes():
 
 
 @pytest.mark.skipif(not KUZU, reason="one embedded database per path")
-def test_two_threads_with_their_own_loops_do_not_deadlock():
+def test_two_threads_with_their_own_loops_write_once_each():
     path = a_path()
     done: list[str] = []
     errors: list[BaseException] = []
@@ -102,9 +128,11 @@ def test_two_threads_with_their_own_loops_do_not_deadlock():
         thread.start()
     for thread in threads:
         thread.join(timeout=20)
-    assert not any(thread.is_alive() for thread in threads), "a thread hung: the per-path lock is not safe across loops"
+    assert not any(thread.is_alive() for thread in threads), "a thread hung: the path lock is not safe across loops"
     assert not errors, errors
     assert sorted(done) == ["alpha", "beta"]
+    tally = SyncSelfGraph(store=KuzuStore(path), namespace="threads")
+    assert len(tally.entities.list().items) == 2, "a thread wrote to a database the other one never saw"
 
 
 @pytest.mark.skipif(not KUZU, reason="one embedded database per path")
@@ -149,27 +177,44 @@ def test_a_thread_and_an_event_loop_share_one_path():
 
 
 @pytest.mark.skipif(not KUZU, reason="one embedded database per path")
-def test_four_threads_write_one_path_without_losing_anything():
+def test_a_cancelled_waiter_does_not_keep_the_lock():
     path = a_path()
-    finished: list[int] = []
-    errors: list[BaseException] = []
+    store = KuzuStore(path)
+    lock = store._lock  # noqa: SLF001
+    holding = asyncio.Event()
 
-    def worker(index: int) -> None:
-        try:
-            graph = SyncSelfGraph(store=KuzuStore(path), namespace="stress")
-            for step in range(3):
-                graph.insert.facts({"entities": [{"type": "Thing", "name": f"thing-{index}-{step}"}]})
-            finished.append(index)
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
+    async def hold() -> None:
+        async with lock:
+            holding.set()
+            await asyncio.sleep(0.3)
 
-    threads = [threading.Thread(target=worker, args=(index,), daemon=True) for index in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=40)
-    assert not any(thread.is_alive() for thread in threads), "a thread hung: the path lock is not safe across threads"
-    assert not errors, errors
-    assert sorted(finished) == [0, 1, 2, 3]
-    tally = SyncSelfGraph(store=KuzuStore(path), namespace="stress")
-    assert len(tally.entities.list().items) == 12
+    async def wait() -> None:
+        async with lock:
+            pass
+
+    async def scenario() -> None:
+        holder = asyncio.create_task(hold())
+        await holding.wait()
+        waiter = asyncio.create_task(wait())
+        await asyncio.sleep(0.05)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        await holder
+        await asyncio.wait_for(wait(), timeout=5)
+
+    run(scenario())
+    run(store.close())
+
+
+@pytest.mark.skipif(not KUZU, reason="the executor pool is Kuzu's")
+def test_many_writers_on_one_store_do_not_starve_the_pool():
+    result = subprocess.run(
+        [sys.executable, "-u", "-c", MANY_WRITERS_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ},
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip().splitlines()[-1] == str(MANY_WRITERS), result.stdout[-2000:]

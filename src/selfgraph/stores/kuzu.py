@@ -6,6 +6,8 @@ import os
 import re
 import threading
 from collections.abc import Mapping
+from concurrent.futures import Future
+from contextvars import ContextVar
 from typing import Any
 
 from ..errors import StoreError, ValidationError
@@ -58,31 +60,55 @@ _SCHEMA = (
 _DATABASES: dict[str, Any] = {}
 
 
+# One token per wait per task or thread, so a lock hands over in order without anyone holding an event loop.
+_PENDING: ContextVar[tuple[Future[None], ...]] = ContextVar("selfgraph_kuzu_locks", default=())
+
+
 class _PathLock:
-    """A lock shared by every store on one path, safe across event loops and threads.
-
-    An asyncio.Lock binds to the loop that first waits on it, and SyncSelfGraph gives each thread its own loop, so it
-    would hang a second thread instead of serializing with it. Acquiring this one off the loop keeps the wait off the
-    event loop and the lock usable from any of them.
-    """
-
+    # A FIFO queue of futures: a waiter parks on the previous holder's future instead of on a thread, so the executor
+    # pool cannot starve the holder, and a cancelled wait hands its place on rather than taking the lock later.
     def __init__(self) -> None:
-        self.lock = threading.Lock()
+        released: Future[None] = Future()
+        released.set_result(None)
+        self._tail = released
+        self._claim = threading.Lock()
+
+    def _join(self) -> tuple[Future[None], Future[None]]:
+        """Take the next place in the queue.
+
+        @return (tuple[Future[None], Future[None]]): the future to wait on, and this waiter's own token.
+        """
+        with self._claim:
+            previous = self._tail
+            mine: Future[None] = Future()
+            self._tail = mine
+        return previous, mine
 
     async def __aenter__(self) -> None:
-        """Take the lock, waiting off the event loop so a thread that holds it does not stall this loop.
+        """Wait for the store ahead in the queue to release, parking the task rather than a worker thread.
 
         @return (None): nothing.
         """
-        await asyncio.to_thread(self.lock.acquire)
+        previous, mine = self._join()
+        _PENDING.set((*_PENDING.get(), mine))
+        try:
+            # shielded: a cancelled waiter must not cancel the token it is waiting on, which is the holder's
+            await asyncio.shield(asyncio.wrap_future(previous))
+        except BaseException:
+            _PENDING.set(_PENDING.get()[:-1])
+            mine.set_result(None)
+            raise
 
     async def __aexit__(self, *exc_info: object) -> None:
-        """Release the lock.
+        """Release the lock and hand the queue to the next waiter.
 
         @param exc_info (object): the exception triple, ignored.
         @return (None): nothing.
         """
-        self.lock.release()
+        pending = _PENDING.get()
+        token = pending[-1]
+        _PENDING.set(pending[:-1])
+        token.set_result(None)
 
 
 _CACHE_LOCK = threading.Lock()
@@ -202,24 +228,24 @@ class KuzuStore(AutoCommitStore):
 
     async def _run(self, query: str, params: Mapping[str, Any] | None = None) -> CypherResult:
         def _exec():
-            with self._lock.lock:
-                qr = self._conn.execute(query, parameters=dict(params or {}))
-                if isinstance(qr, list):
-                    raise StoreError("Kuzu runs one statement per query; pass one statement, not several joined by ';'")
-                columns = qr.get_column_names()
-                rows = []
-                while qr.has_next():
-                    rows.append({k: _normalize(v) for k, v in zip(columns, qr.get_next(), strict=False)})
-                return columns, rows
+            qr = self._conn.execute(query, parameters=dict(params or {}))
+            if isinstance(qr, list):
+                raise StoreError("Kuzu runs one statement per query; pass one statement, not several joined by ';'")
+            columns = qr.get_column_names()
+            rows = []
+            while qr.has_next():
+                rows.append({k: _normalize(v) for k, v in zip(columns, qr.get_next(), strict=False)})
+            return columns, rows
 
-        self._require_open()
-        try:
-            columns, rows = await asyncio.to_thread(_exec)
-            return CypherResult(columns=columns, rows=rows)
-        except StoreError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise _kuzu_error(exc, "Kuzu query failed") from exc
+        async with self._lock:
+            self._require_open()
+            try:
+                columns, rows = await asyncio.to_thread(_exec)
+                return CypherResult(columns=columns, rows=rows)
+            except StoreError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise _kuzu_error(exc, "Kuzu query failed") from exc
 
     async def initialize(self) -> None:
         """Create the node and relationship tables if they do not exist."""
