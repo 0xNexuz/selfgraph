@@ -290,7 +290,10 @@ async function scanSeeds(
     else yield* entityPages(store, ns, asOf, valid);
   }
   let best: Array<[Entity, number]> = [];
-  for await (const page of scored()) best = bestSeeds([...best, ...seedScores(page, queryTokens, exact, stats!)], k);
+  for await (const page of scored()) {
+    const visible = asOf?.known ? await ops.withKnownSources(store, ns, page, asOf.known) : page;
+    best = bestSeeds([...best, ...seedScores(visible, queryTokens, exact, stats!)], k);
+  }
   return best;
 }
 
@@ -838,6 +841,23 @@ async function collectPreferences(
 }
 
 /**
+ * Render terminal controls as text so stored values cannot erase context headers.
+ *
+ * @param text (string): stored text after line separator normalization.
+ * @return (string): text with non-layout control characters visibly escaped.
+ */
+function visibleControls(text: string): string {
+  return [...text]
+    .map((char) => {
+      const code = char.codePointAt(0)!;
+      return code <= 8 || (code >= 14 && code <= 27) || code === 31 || (code >= 127 && code <= 159)
+        ? `\\u${code.toString(16).padStart(4, "0")}`
+        : char;
+    })
+    .join("");
+}
+
+/**
  * Keep stored values inside their SDK-built context line.
  *
  * @param text (string): stored text rendered into context.
@@ -845,7 +865,7 @@ async function collectPreferences(
  */
 function renderValue(text: string): string {
   text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
-  return text.replace(/[\r\n\v\f\x85\u2028\u2029]+/g, " ");
+  return visibleControls(text.replace(/[\r\n\v\f\x85\u2028\u2029]+/g, " "));
 }
 
 /**
@@ -859,7 +879,7 @@ function sourceLines(text: string): string {
   text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
   return text
     .split(/[\n\v\f\x85\u2028\u2029]/)
-    .map((line) => `SOURCE | ${line}`)
+    .map((line) => `SOURCE | ${visibleControls(line)}`)
     .join("\n");
 }
 
@@ -1103,7 +1123,8 @@ async function run(
   }
 
   await load(store, ns, known, dist.keys());
-  const entities = [...dist.keys()].flatMap((eid) => known.get(eid) ?? []);
+  let entities = [...dist.keys()].flatMap((eid) => known.get(eid) ?? []);
+  if (asOf?.known) entities = await ops.withKnownSources(store, ns, entities, asOf.known);
 
   let decisions = await collectDecisions(store, ns, new Set(relations.map((r) => r.id)), asOf);
   let preferences = await collectPreferences(store, ns, dist.keys(), valid);

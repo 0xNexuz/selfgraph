@@ -198,6 +198,17 @@ function suite(spec: StoreSpec) {
     expect([after.groups, after.note]).toEqual([[], null]);
   });
 
+  it("keeps a duplicate's constructor property on dedupe instead of reporting a conflict", async () => {
+    const g = open();
+    await g.entities.create("A", "T", { id: "t:a" });
+    await g.entities.create("B", "T", { id: "t:b" });
+    await g.relations.create("t:a", "BUILT_BY", "t:b", { id: "relation:c1", properties: { year: 2024 } });
+    await g.relations.create("t:a", "BUILT_BY", "t:b", { id: "relation:c2", properties: { constructor: "Ferrari" } });
+    const done = await g.maintenance.dedupeRelations({ dry_run: false });
+    expect(done.groups.map((p) => [p.survivor, p.conflicts])).toEqual([["relation:c1", {}]]);
+    expect((await g.relations.get("relation:c1"))!.properties).toEqual({ year: 2024, constructor: "Ferrari" });
+  });
+
   it("requires a prune criterion, notes an unscored prune, and rejects prune and decay times in the future", async () => {
     const g = open();
     for (const options of [{}, { types: ["Temp"] }, { dry_run: false }, { older_than: later(0.0005), dry_run: "no" }]) {
@@ -243,6 +254,7 @@ function suite(spec: StoreSpec) {
       deleted_relation_versions: 3,
       deleted_decisions: 1,
       deleted_preference_versions: 1,
+      restored_relations: 0,
     });
     const state = await cascadeState(one);
     expect(await cascadeState(batched)).toEqual(state);

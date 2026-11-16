@@ -355,6 +355,8 @@ async def _scan_seeds(
 
     best: list[tuple[Entity, float]] = []
     async for page in scored():
+        if as_of is not None and as_of.known is not None:
+            page = await _ops.with_known_sources(graph.store, ns, page, as_of.known)
         best = heapq.nsmallest(k, [*best, *_seed_scores(page, query_tokens, exact, stats)], key=_seed_rank)
     return best
 
@@ -817,13 +819,22 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
+def _visible_controls(text: str) -> str:
+    """Render terminal controls as text so stored values cannot erase context headers.
+
+    @param text (str): stored text after line separator normalization.
+    @return (str): text with non-layout control characters visibly escaped.
+    """
+    return re.sub(r"[\x00-\x08\x0e-\x1b\x1f\x7f-\x9f]", lambda m: f"\\u{ord(m[0]):04x}", text)
+
+
 def _single_line(text: str) -> str:
     """Keep stored values inside their SDK-built context line.
 
     @param text (str): stored text rendered into context.
     @return (str): text with line separators replaced by spaces.
     """
-    return re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text)
+    return _visible_controls(re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text))
 
 
 def _source_lines(text: str) -> str:
@@ -832,7 +843,9 @@ def _source_lines(text: str) -> str:
     @param text (str): a stored source passage.
     @return (str): source-prefixed lines with normalized line separators.
     """
-    return "\n".join("SOURCE | " + line for line in re.split(r"\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]", text))
+    return "\n".join(
+        "SOURCE | " + _visible_controls(line) for line in re.split(r"\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]", text)
+    )
 
 
 def _assemble(
@@ -1033,6 +1046,8 @@ async def retrieve(
 
     await _load(graph, ns, known, dist)
     entities = [known[eid] for eid in dist if eid in known]
+    if as_of is not None and as_of.known is not None:
+        entities = await _ops.with_known_sources(graph.store, ns, entities, as_of.known)
 
     decisions = await _collect_decisions(graph, ns, {r.id for r in relations}, as_of)
     preferences = await _collect_preferences(graph, ns, dist, valid)

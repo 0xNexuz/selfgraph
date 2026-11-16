@@ -144,6 +144,8 @@ class Insert:
         @return (InsertResult): the inserted entities, relations, preferences, decisions, and merges.
         """
         _require_optional_text("source_id", source_id)
+        if facts is None:
+            raise ValidationError("invalid facts: expected object")
         return await self._c._apply_facts(
             as_input(Extraction, facts, "facts"),
             source_id=source_id,

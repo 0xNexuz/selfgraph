@@ -166,6 +166,7 @@ def test_prune_dry_run_then_apply_matches_deleting_entities_one_by_one(caplog):
         "deleted_relation_versions": 3,
         "deleted_decisions": 1,
         "deleted_preference_versions": 1,
+        "restored_relations": 0,
     }
     assert _state(batched) == _state(one)
     assert _state(one)[:5] == (["person:keep"], [], ["decision:keep"], ["person:keep"], (None, 2))

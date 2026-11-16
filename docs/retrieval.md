@@ -45,7 +45,10 @@ Every source passage line gets `SOURCE | `, including blank lines. Line endings
 are normalized, but passage layout remains readable. Values in graph-built
 lines have line separators replaced by spaces, so they cannot start another
 header. Saving a retrieval result as source text does not carry its certification
-forward. Stored text is otherwise unchanged, and the stored graph is not modified.
+forward. Terminal control characters, such as escape and backspace, are rendered
+as visible `\u001b` and `\u0008` sequences so raw CLI output cannot erase a
+header. Tabs and ordinary Unicode remain readable. These are display escapes
+only; stored text and structured graph values are not modified.
 
 Headers count toward `budget_tokens`. A very small budget can truncate a header;
 only a complete header has meaning. This separates trust metadata from stored

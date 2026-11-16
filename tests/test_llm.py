@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import re
 
 import pytest
@@ -171,7 +172,7 @@ def test_a_tiktoken_that_cannot_load_its_encoding_warns_once_and_falls_back(monk
 def test_error_reasons_fill_empty_messages_and_strip_driver_boilerplate():
     try:
         try:
-            raise ConnectionRefusedError(111, "Connection refused")
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
         except OSError as inner:
             raise RuntimeError("Cannot connect to API: ") from inner
     except RuntimeError as exc:

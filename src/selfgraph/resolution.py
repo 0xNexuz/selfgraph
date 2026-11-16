@@ -728,6 +728,31 @@ async def plan_resolution(
     return Resolution(rewritten.model_copy(update={"entities": entities}), list(merges.values()), warnings)
 
 
+def trim_resolution(resolution: Resolution, kept: Extraction) -> Resolution:
+    """Drop planned merges and rewrites whose survivor or rewritten item was removed by drop_off_schema.
+
+    @param resolution (Resolution): the planned resolution before schema dropping.
+    @param kept (Extraction): the facts kept after drop_off_schema.
+    @return (Resolution): the resolution aligned to kept.
+    """
+    entities = {ent.id or _ids.entity_id(ent.type, ent.name) for ent in kept.entities}
+    kept_by_kind = {
+        "relation": {rel.id or _ids.relation_id(rel.from_entity, rel.type, rel.to_entity) for rel in kept.relations},
+        "preference": {
+            p.id or _ids.preference_id(p.subject_entity, p.stance, p.key, p.value_entity) for p in kept.preferences
+        },
+        "decision": {d.id or _ids.decision_id(d.actor_entity, d.title) for d in kept.decisions},
+    }
+    merges = []
+    for merge in resolution.merges:
+        if merge.survivor_id not in entities:
+            continue
+        merge.rewrites = [r for r in merge.rewrites if r.dropped or r.id in kept_by_kind[r.kind]]
+        merges.append(merge)
+    warnings = [w for w in resolution.warnings if any(f"join {eid} to itself" in w.message for eid in entities)]
+    return Resolution(kept, merges, warnings)
+
+
 def _redirect(ent: EntityInput, target: Entity) -> EntityInput:
     """The input that folds a merged candidate into its target through the normal upsert alias path.
 
@@ -1193,7 +1218,11 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
     relations = []
     for rw in (r for r in rec.rewrites if r.kind == "relation"):
         original, rewritten = RelationInput.model_validate(rw.original), RelationInput.model_validate(rw.rewritten)
+        source = await end(original.from_entity, rewritten.from_entity)
+        target = await end(original.to_entity, rewritten.to_entity)
         versions = history.pop(rw.id, [])
+        if not (await exists(source) and await exists(target)):
+            continue
         properties, event_time, carried, touching = dict(original.properties), original.event_time, [], set()
         if versions:
             properties, event_time = versions[0].properties, versions[0].event_time
@@ -1203,9 +1232,9 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
             await _ops._delete_evidence(runner, ns, rw.id)
         back = RelationInput(
             id=original.id,
-            from_entity=await end(original.from_entity, rewritten.from_entity),
+            from_entity=source,
             type=original.type,
-            to_entity=await end(original.to_entity, rewritten.to_entity),
+            to_entity=target,
             properties=properties,
             event_time=event_time,
         )
@@ -1229,6 +1258,11 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
     preferences = []
     for rw in (r for r in rec.rewrites if r.kind == "preference"):
         original, rewritten = PreferenceInput.model_validate(rw.original), PreferenceInput.model_validate(rw.rewritten)
+        subject = await end(original.subject_entity, rewritten.subject_entity)
+        value = await end(original.value_entity, rewritten.value_entity)
+        about = await end(original.about_entity, rewritten.about_entity)
+        if not (await exists(subject) and await exists(value)):
+            continue
         current = await _ops.get_preference(runner, ns, rw.id)
         values = {"strength": original.strength, "properties": original.properties, "event_time": original.event_time}
         if current is not None and not rw.existed:
@@ -1236,11 +1270,11 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
             await runner.delete_edges(ns, rw.id)
         back = PreferenceInput(
             id=original.id,
-            subject_entity=await end(original.subject_entity, rewritten.subject_entity),
+            subject_entity=subject,
             stance=original.stance,
             key=original.key,
-            value_entity=await end(original.value_entity, rewritten.value_entity),
-            about_entity=await end(original.about_entity, rewritten.about_entity),
+            value_entity=value,
+            about_entity=about if about is None or await exists(about) else None,
             **values,
         )
         pid = back.id or _ids.preference_id(back.subject_entity, back.stance, back.key, back.value_entity)
@@ -1253,6 +1287,13 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
     for rw in (r for r in rec.rewrites if r.kind == "decision"):
         original = DecisionTraceInput.model_validate(rw.original)
         rewritten = DecisionTraceInput.model_validate(rw.rewritten)
+        actor = await end(original.actor_entity, rewritten.actor_entity)
+        outcome = await end(original.outcome_entity, rewritten.outcome_entity)
+        steps = [restored.get(s, s) for s in rewritten.steps]
+        if not all([actor is None or await exists(actor), outcome is None or await exists(outcome)]):
+            continue
+        if not all([await _ops.relation_exists(runner, ns, s) for s in steps]):
+            continue
         base = original
         current = await _ops.get_trace(runner, ns, rw.id)
         if current is not None and not rw.existed:
@@ -1271,10 +1312,10 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         ]
         back = base.model_copy(
             update={
-                "steps": [restored.get(s, s) for s in rewritten.steps],
-                "actor_entity": await end(original.actor_entity, rewritten.actor_entity),
-                "outcome_entity": await end(original.outcome_entity, rewritten.outcome_entity),
-                "alternative_entities": [a for a in alternatives if a is not None],
+                "steps": steps,
+                "actor_entity": actor,
+                "outcome_entity": outcome,
+                "alternative_entities": [a for a in alternatives if a is not None and await exists(a)],
             }
         )
         existed = await runner.node_exists(ns, L_TRACE, back.id or _ids.decision_id(back.actor_entity, back.title))

@@ -18,7 +18,15 @@ import {
   type UpsertNodeOptions,
 } from "../protocols.js";
 import { checkOptions, keysOf } from "../validate.js";
-import { AutoCommitStore, quoteLabel, sortedEntries, toCount, whereAfter, writeBatches } from "./cypherPrimitives.js";
+import {
+  AutoCommitStore,
+  quoteLabel,
+  requireIdentifier,
+  sortedEntries,
+  toCount,
+  whereAfter,
+  writeBatches,
+} from "./cypherPrimitives.js";
 import { docs, edgeRow, firstDoc, mergedCurrentEdge } from "./docRows.js";
 
 const SCHEMA = [
@@ -81,6 +89,9 @@ interface KuzuModule {
 const DATABASES = new Map<string, KuzuDatabase>();
 const OPEN_STORES = new Map<string, number>();
 const MAX_SKIP = 10_000_000;
+const RECONNECT_EVERY = 500;
+const NOW = "RETURN current_timestamp() AS now";
+const CLOCK_TICK_MS = 20;
 
 function normalize(value: unknown): unknown {
   if (value === null || value === undefined) return null;
@@ -160,7 +171,7 @@ function intLiteral(n: number): number {
 function whereDocEquals(alias: string, equals: Props | null | undefined, where: string[], params: Props): void {
   sortedEntries(equals).forEach(([key, value], i) => {
     where.push(`json_extract(${alias}.doc, $k${i}) = $v${i}`);
-    params[`k${i}`] = key;
+    params[`k${i}`] = requireIdentifier(key);
     params[`v${i}`] = jv(value);
   });
 }
@@ -186,7 +197,7 @@ function whereDocAnyOf(
       params[`in${i}`] = list.map((v) => pk(ns, v as string));
     } else {
       where.push(`CAST(json_extract(n.doc, $ik${i}) AS STRING) IN $in${i}`);
-      params[`ik${i}`] = key;
+      params[`ik${i}`] = requireIdentifier(key);
       params[`in${i}`] = list.map(jv);
     }
   });
@@ -220,8 +231,12 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       DATABASES.set(this.path, db);
     }
     OPEN_STORES.set(this.path, (OPEN_STORES.get(this.path) ?? 0) + 1);
-    return new kuzu.Connection(db);
+    this.connect = () => new kuzu.Connection(db);
+    return this.connect();
   });
+  private connect!: () => KuzuConnection;
+  private statements = 0;
+  private raw = false;
   private queue: Promise<unknown> = Promise.resolve();
 
   /**
@@ -243,8 +258,19 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     this.path = databasePath(path);
   }
 
-  private async exec(query: string, params?: Record<string, unknown> | null): Promise<CypherResult> {
-    const conn = await this.conn.get();
+  private async exec(query: string, params?: Record<string, unknown> | null, raw = false): Promise<CypherResult> {
+    let conn = await this.conn.get();
+    if (++this.statements > RECONNECT_EVERY && !this.closed) {
+      this.statements = 1;
+      if (!(this.raw && (await this.inTransaction(conn))) && !this.closed) {
+        const stale = conn;
+        conn = this.connect();
+        this.conn.set(conn);
+        this.raw = false;
+        await stale.close?.();
+      }
+    }
+    this.raw ||= raw;
     const res =
       params && Object.keys(params).length
         ? await conn.execute(await conn.prepare(query), params)
@@ -262,9 +288,35 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     }
   }
 
-  protected async _run(query: string, params?: Record<string, unknown> | null): Promise<CypherResult> {
+  /**
+   * Report whether a raw statement left a transaction open on the connection.
+   *
+   * Kuzu fixes current_timestamp() when a transaction starts, so two reads a clock tick apart match only inside one. Reading it never ends the transaction.
+   *
+   * @param conn (KuzuConnection): the connection.
+   * @return (boolean): true when a transaction is open.
+   */
+  private async inTransaction(conn: KuzuConnection): Promise<boolean> {
+    const now = async () => {
+      const res = (await conn.query(NOW)) as KuzuQueryResult;
+      try {
+        return JSON.stringify(await res.getAll());
+      } finally {
+        res.close?.();
+      }
+    };
+    const first = await now();
+    await new Promise((resolve) => setTimeout(resolve, CLOCK_TICK_MS));
+    return (await now()) === first;
+  }
+
+  override async runCypher(query: string, params?: Record<string, JsonValue> | null): Promise<CypherResult> {
+    return this._run(query, params, true);
+  }
+
+  protected async _run(query: string, params?: Record<string, unknown> | null, raw = false): Promise<CypherResult> {
     this.requireOpen();
-    const run = this.queue.then(() => this.exec(query, params));
+    const run = this.queue.then(() => this.exec(query, params, raw));
     this.queue = run.catch(() => undefined);
     try {
       return await run;
@@ -330,6 +382,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     if (options.extra_label != null) quoteLabel(options.extra_label);
+    for (const key of Object.keys(props)) requireIdentifier(key);
     await this._run("MERGE (n:N {pk:$pk}) SET n.id = $id, n.ns = $ns, n.label = $label, n.doc = $doc", {
       pk: pk(ns, id),
       id,
@@ -354,6 +407,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     options: UpsertNodeOptions = {},
   ): Promise<void> {
     if (options.extra_label != null) quoteLabel(options.extra_label);
+    for (const [, props] of rows) for (const key of Object.keys(props)) requireIdentifier(key);
     for (const [, batch] of writeBatches(
       rows.map(([id, props]) => [null, { pk: pk(ns, id), id, doc: jv(props) }] as const),
     )) {
@@ -377,6 +431,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     toLabel: string,
     rows: readonly EdgeWrite[],
   ): Promise<void> {
+    for (const [, , , props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const keyed = rows.map(([type, fromId, toId, props]) => {
       const row = {
         f: pk(ns, fromId),
@@ -446,6 +501,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   ): Promise<boolean> {
     if (!(await this.nodeExists(ns, fromLabel, fromId))) return false;
     if (!(await this.nodeExists(ns, toLabel, toId))) return false;
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const sid = props.id ?? null;
     const rev = props.revision ?? null;
     const params = {
@@ -484,6 +540,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   }
 
   async updateCurrentEdge(ns: string, id: string, props: Props): Promise<void> {
+    for (const k of Object.keys(props)) requireIdentifier(k);
     const merged = await mergedCurrentEdge(this, ns, id, props);
     if (merged === null) return;
     await this._run(`${BY_SID} AND r.is_current = true SET r.doc = $doc, r.is_current = $isc, r.revision = $rev`, {

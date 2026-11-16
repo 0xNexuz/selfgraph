@@ -17,7 +17,7 @@ from ._maintenance import scan_entities, scan_relations
 from ._ops import DECISION_CLEARABLE, PREFERENCE_CLEARABLE, invalidated_note, parse_time, require_changes
 from ._serde import EDGE_TYPES, LABELS, PREFERENCE_EDGE_TYPES
 from .client import SelfGraph
-from .errors import STORE_KUZU_HINT, NotFoundError, StoreError, ValidationError, setting_hint, surface_hint
+from .errors import LLM_HINT, STORE_KUZU_HINT, NotFoundError, StoreError, ValidationError, setting_hint, surface_hint
 from .extraction.prompts import check_prompts
 from .ids import _require_namespace
 from .llm.base import check_llm_config
@@ -38,7 +38,7 @@ from .protocols import GraphStore
 from .resolution import require_resolver
 from .schema import Schema, as_schema, require_contradiction_mode, require_schema_for_mode, require_schema_mode
 from .stores._cypher import parse_auth
-from .tiers import require_level
+from .tiers import PRESETS, clamp, require_level
 
 __all__ = [
     "SETTING_KEYS",
@@ -577,6 +577,15 @@ def check_settings(settings: GraphSettings) -> GraphSettings:
     llm = _build_llm(settings)
     if llm is not None:
         check_llm_config(llm)
+    level = settings.level or "balanced"
+    cap = settings.max_tier or "max"
+    if llm is None and level == "max" and cap == "max":
+        raise ValidationError(f"level 'max' needs an LLM: {LLM_HINT}")
+    preset = PRESETS[level]
+    if llm is None and clamp("resolution", settings.resolver or preset["resolution"], cap) == "llm":
+        raise ValidationError(f"resolver 'llm' needs an LLM: {LLM_HINT}")
+    if llm is None and clamp("contradiction", settings.contradiction or preset["contradiction"], cap) == "llm":
+        raise ValidationError(f"contradiction 'llm' needs an LLM: {LLM_HINT}")
     schema = as_schema(_json_setting(settings.schema, "schema"))
     require_schema_for_mode(settings.schema_mode, schema)
     instructions = as_input(
