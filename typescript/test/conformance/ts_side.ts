@@ -17,6 +17,7 @@ import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
 import { Schema, validateAgainstSchema } from "../../src/schema.js";
+import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { STORE_SPECS } from "../helpers.js";
 
@@ -604,6 +605,15 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     versions[rid] = await capped.relations.versions(rid, { newest_first: false });
   }
   out.resettle_versions = toJsonable(versions);
+  const requireIdentifierCases: Record<string, string> = {};
+  for (const name of ["id", "external_ids", "a b", "1x", ""]) {
+    try {
+      requireIdentifierCases[name] = requireIdentifier(name);
+    } catch (exc) {
+      requireIdentifierCases[name] = (exc as Error).message;
+    }
+  }
+  out.require_identifier = requireIdentifierCases;
   return out;
 }
 

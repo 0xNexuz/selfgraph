@@ -9,7 +9,7 @@ from typing import Any
 from neo4j.graph import Node, Path, Relationship
 
 from ..errors import STORE_CLOSED_MESSAGE, StoreError, TransientError, ValidationError, error_reason
-from ..ids import quote_label, quote_reltype
+from ..ids import quote_label, quote_reltype, require_identifier
 from ..models import CypherResult, JsonValue
 
 BOLT_CONNECT_TIMEOUT = 10.0
@@ -225,7 +225,7 @@ def where_equals(alias: str, equals: dict | None, where: list[str], params: dict
     @return (None): nothing.
     """
     for i, (key, value) in enumerate(sorted((equals or {}).items())):
-        where.append(f"{alias}.{key} = $eq{i}")
+        where.append(f"{alias}.{require_identifier(key)} = $eq{i}")
         params[f"eq{i}"] = value
 
 
@@ -239,7 +239,7 @@ def where_any_of(alias: str, any_of: dict | None, where: list[str], params: dict
     @return (None): nothing.
     """
     for i, (key, values) in enumerate(sorted((any_of or {}).items())):
-        where.append(f"{alias}.{key} IN $in{i}")
+        where.append(f"{alias}.{require_identifier(key)} IN $in{i}")
         params[f"in{i}"] = list(values)
 
 
@@ -397,6 +397,8 @@ class CypherPrimitives(CypherRunner):
         @param extra_label (str | None): an additional label to add.
         """
         extra = f", n:{quote_label(extra_label)}" if extra_label is not None else ""
+        for key in props:
+            require_identifier(key)
         await self._run(
             f"MERGE (n:{label} {{id:$id, ns:$ns}}) SET n += $props{extra}",
             {"id": id, "ns": ns, "props": props},
@@ -414,6 +416,9 @@ class CypherPrimitives(CypherRunner):
         @return (None): nothing.
         """
         extra = f", n:{quote_label(extra_label)}" if extra_label is not None else ""
+        for _, props in rows:
+            for key in props:
+                require_identifier(key)
         for _, batch in write_batches((None, {"id": id, "props": props}) for id, props in rows):
             await self._run(
                 f"UNWIND $rows AS row MERGE (n:{label} {{id: row.id, ns: $ns}}) SET n += row.props{extra}",
@@ -431,6 +436,9 @@ class CypherPrimitives(CypherRunner):
         @param rows (list[tuple[str, str, str, dict]]): (edge type, source id, destination id, properties) rows.
         @return (None): nothing.
         """
+        for _type, _from_id, _to_id, props in rows:
+            for key in props:
+                require_identifier(key)
         batches = write_batches(
             (
                 (type, "id" in props and "revision" in props),
@@ -492,7 +500,8 @@ class CypherPrimitives(CypherRunner):
         where_equals("n", equals, where, params)
         where_any_of("n", any_of, where, params)
         where_after("n.id", id_gt, where, params)
-        query = f"MATCH (n:{label}) WHERE {' AND '.join(where)} RETURN n ORDER BY n.{order_by} SKIP $skip LIMIT $limit"
+        ob = require_identifier(order_by, "order_by")
+        query = f"MATCH (n:{label}) WHERE {' AND '.join(where)} RETURN n ORDER BY n.{ob} SKIP $skip LIMIT $limit"
         res = await self._run(query, params)
         return [r["n"] for r in res.rows]
 
@@ -555,6 +564,8 @@ class CypherPrimitives(CypherRunner):
         @param props (dict): edge properties.
         @return (bool): True when both endpoints were found and the edge created.
         """
+        for key in props:
+            require_identifier(key)
         match = f"MATCH (a:{from_label} {{id:$from, ns:$ns}}), (b:{to_label} {{id:$to, ns:$ns}}) "
         params: dict[str, Any] = {"from": from_id, "to": to_id, "ns": ns, "props": props}
         if "id" in props and "revision" in props:
@@ -604,6 +615,8 @@ class CypherPrimitives(CypherRunner):
         @param id (str): edge id.
         @param props (dict): properties to set.
         """
+        for key in props:
+            require_identifier(key)
         await self._run(
             "MATCH ()-[r {id:$id, ns:$ns}]->() WHERE r.is_current = true SET r += $props",
             {"id": id, "ns": ns, "props": props},
@@ -692,7 +705,7 @@ class CypherPrimitives(CypherRunner):
         query = (
             f"MATCH (a:{from_label})-[r]->(b{blabel}) WHERE {' AND '.join(where)} "
             f"RETURN r, a.id AS from_e, b.id AS to_e, type(r) AS t "
-            f"ORDER BY r.{order_by} SKIP $skip LIMIT $limit"
+            f"ORDER BY r.{require_identifier(order_by, 'order_by')} SKIP $skip LIMIT $limit"
         )
         res = await self._run(query, params)
         return [_edge_row(r) for r in res.rows]
@@ -717,7 +730,7 @@ class CypherPrimitives(CypherRunner):
         @param order_by (str | None): child property to order by.
         @return (list[dict]): child property maps.
         """
-        order = f" ORDER BY c.{order_by}" if order_by else ""
+        order = f" ORDER BY c.{require_identifier(order_by, 'order_by')}" if order_by else ""
         res = await self._run(
             f"MATCH (p:{parent_label} {{id:$id, ns:$ns}})-[:{edge_type}]->(c:{child_label}) RETURN c{order}",
             {"id": parent_id, "ns": ns},

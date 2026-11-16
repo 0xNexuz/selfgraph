@@ -26,6 +26,7 @@ __all__ = [
     "evidence_id",
     "quote_label",
     "quote_reltype",
+    "require_identifier",
 ]
 
 
@@ -534,3 +535,15 @@ def quote_label(name: str) -> str:
 
 
 quote_reltype = quote_label
+
+
+def require_identifier(name: str, what: str = "property name") -> str:
+    """Validate that a key or column is a plain identifier before it is interpolated into a query.
+
+    @param name (str): the property key or order_by column to check.
+    @param what (str): the field label used in the error message.
+    @return (str): the validated name, unchanged.
+    """
+    if not _IDENT.fullmatch(name):
+        raise ValidationError(f"{what} {name!r} must be a plain identifier of letters, digits, and underscores")
+    return name
