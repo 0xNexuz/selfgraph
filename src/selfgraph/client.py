@@ -508,6 +508,9 @@ class SelfGraph:
         mode = self._contradiction if contradiction is None else self._contradiction_tier(contradiction)
         return mode, contradiction_caps(schema)
 
+    def _caps(self) -> dict[str, Any]:
+        return contradiction_caps(self._schema)
+
     async def _create_relation(self, contradiction: ContradictionMode | None, **fields: Any) -> Any:
         """Create one relation under the contradiction mode, logging contradiction warnings like schema warnings.
 

@@ -547,3 +547,110 @@ def test_withdrawn_relations_do_not_trigger_supersede_or_lose_invalidation():
     late = insert(g, works_at("globex", 2019))
     assert [w.code for w in late.warnings] == ["contradiction_out_of_order"]
     assert run(g.relations.list(from_entity="person:ann", type="WORKS_AT")).items == []
+
+
+def test_deleting_the_relation_that_superseded_another_restores_it():
+    for remove in (lambda g: g.relations.delete(GLOBEX), lambda g: g.entities.delete("company:globex")):
+        g = graph(contradiction="supersede")
+        insert(g, works_at("acme", 2020))
+        insert(g, works_at("globex", 2023))
+        assert run(remove(g)).restored_relations == 1
+        assert run(collect(g.relations.iterate(from_entity="person:ann"))) == [ACME]
+        newest, retired = run(g.relations.versions(ACME))
+        assert (newest.revision, newest.is_current, newest.invalidated_by) == (2, True, None)
+        assert (newest.event_time, retired.invalidated_by) == (utc(2020), GLOBEX)
+        assert {r.id for r in run(g.retrieve("Ann", as_of=utc(2024))).subgraph.relations} == {ACME}
+        assert run(g.relations.delete(ACME)).restored_relations == 0
+
+
+def test_a_retired_relation_that_still_does_not_fit_is_repointed_to_what_displaces_it():
+    initech = ids.relation_id("person:ann", "WORKS_AT", "company:initech")
+
+    def jobs():
+        g = graph(contradiction="supersede")
+        for company, year in (("acme", 2019), ("globex", 2020), ("initech", 2022)):
+            insert(g, works_at(company, year))
+        return g
+
+    g = jobs()
+    assert run(g.relations.delete(GLOBEX)).restored_relations == 0
+    assert run(collect(g.relations.iterate(from_entity="person:ann"))) == [initech]
+    acme = run(g.relations.versions(ACME))[0]
+    assert (acme.is_current, acme.invalidated_by, acme.invalidated_at) == (False, initech, utc(2022))
+    assert {r.id for r in run(g.retrieve("Ann", as_of=utc(2021))).subgraph.relations} == {ACME}
+
+    g = jobs()
+    assert run(g.relations.delete(initech)).restored_relations == 1
+    assert run(collect(g.relations.iterate(from_entity="person:ann"))) == [GLOBEX]
+    acme = run(g.relations.versions(ACME))[0]
+    assert (acme.is_current, acme.invalidated_by, acme.invalidated_at) == (False, GLOBEX, utc(2020))
+
+
+def test_dedupe_repoints_what_a_folded_duplicate_retired_to_the_survivor():
+    g = graph(contradiction="supersede")
+    bob = run(g.relations.create("person:bob", "CEO_OF", "company:acme", event_time=utc(2020)))
+    run(g.relations.create("person:ann", "CEO_OF", "company:acme", id="relation:c2", event_time=utc(2022)))
+    assert run(g.relations.versions(bob.id))[0].invalidated_by == "relation:c2"
+    run(g.relations.create("person:ann", "CEO_OF", "company:acme", id="relation:c1", contradiction="warn"))
+    run(g.maintenance.dedupe_relations(dry_run=False))
+    assert run(g.relations.versions(bob.id))[0].invalidated_by == "relation:c1"
+
+
+USES = {
+    "entities": [{"name": "Person"}, {"name": "Tool"}],
+    "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
+}
+
+
+def uses(tool):
+    return ids.relation_id("person:ann", "USES", f"tool:{tool}")
+
+
+def tools(*names):
+    g = fresh_graph("contra", schema=USES, contradiction="supersede")
+    run(
+        g.insert.facts(
+            {"entities": [{"type": "Person", "name": "Ann"}, *({"type": "Tool", "name": n} for n in "abcd")]}
+        )
+    )
+    for year, name in enumerate(names, 2020):
+        run(g.relations.create("person:ann", "USES", f"tool:{name}", event_time=utc(year)))
+    return g
+
+
+def test_a_delete_settles_the_whole_endpoint_again_newest_first():
+    g = tools("a", "b", "c", "d")
+    assert run(g.relations.delete(uses("c"))).restored_relations == 1
+    assert sorted(run(collect(g.relations.iterate(from_entity="person:ann")))) == sorted([uses("b"), uses("d")])
+    a = run(g.relations.versions(uses("a")))[0]
+    assert (a.is_current, a.invalidated_by, a.invalidated_at) == (False, uses("d"), utc(2023))
+
+    g = tools("a", "b", "c")
+    assert run(g.relations.delete(uses("b"))).restored_relations == 1
+    assert sorted(run(collect(g.relations.iterate(from_entity="person:ann")))) == sorted([uses("a"), uses("c")])
+
+
+def test_a_delete_counts_retired_history_at_the_other_endpoint():
+    spec = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [
+            {
+                "type": "WORKS_AT",
+                "from": {"types": ["Person"], "max_count": 1},
+                "to": {"types": ["Company"], "max_count": 1},
+            }
+        ],
+    }
+    people = [{"type": "Person", "name": n} for n in ("Ann", "Bob")]
+    people += [{"type": "Company", "name": n} for n in ("Acme", "Globex", "Initech")]
+    g = fresh_graph("contra", schema=spec, contradiction="supersede")
+    run(g.insert.facts({"entities": people}))
+    for person, company, year in (("ann", "acme", 2020), ("ann", "globex", 2021), ("bob", "acme", 2022)):
+        insert(g, works_at(company, year, person=person))
+    insert(g, works_at("initech", 2023, person="bob"))
+    bob_acme = ids.relation_id("person:bob", "WORKS_AT", "company:acme")
+    assert run(g.relations.delete(GLOBEX)).restored_relations == 0
+    newest, first = run(g.relations.versions(ACME))
+    assert (newest.is_current, newest.invalidated_by, newest.invalidated_at) == (False, bob_acme, utc(2022))
+    assert (newest.revision, first.invalidated_by) == (first.revision + 1, GLOBEX)
+    assert {r.id for r in run(g.retrieve("Ann", as_of=utc(2021, 6))).subgraph.relations} == {ACME}
