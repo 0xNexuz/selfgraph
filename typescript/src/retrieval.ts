@@ -1256,7 +1256,9 @@ export function answerability(
 ): AnswerabilityReport {
   const found = schemaForms(schema);
   const definitionEntries = new Map<string, Array<readonly [string, string, boolean]>>();
+  const definitionCertified = new Map<string, boolean>();
   for (const [owner, name, defForms, certified] of definitionForms(schema).values()) {
+    definitionCertified.set(name, (definitionCertified.get(name) ?? true) && certified);
     for (const form of defForms) {
       const entries = definitionEntries.get(form) ?? [];
       entries.push([owner, name, certified]);
@@ -1305,9 +1307,8 @@ export function answerability(
             if (!words.length || !covers(words, form)) continue;
             const entries = definitionEntries.get(form) ?? [];
             if (!entries.some(([owner]) => held.type.has(owner))) continue;
-            const allCertified = entries.every(([, , certified]) => certified);
             for (const [owner, name] of entries) {
-              if (held.type.has(owner)) live.push([name, allCertified]);
+              if (held.type.has(owner)) live.push([name, definitionCertified.get(name) ?? false]);
             }
           }
         } else {

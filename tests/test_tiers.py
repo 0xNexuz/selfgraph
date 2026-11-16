@@ -206,21 +206,23 @@ def test_definition_terms_keep_their_entity_owners():
     assert [seed.id for seed in run(g.retrieve("employment state", depth=0)).seeds] == ["employee:alice"]
 
 
-def test_a_shared_definition_synonym_grounds_the_stored_owners_definition():
+def test_certification_follows_the_stored_definitions_name():
     schema = {
         "entities": [
             {
-                "name": "Employee",
-                "definitions": [{"name": "status", "expression": "active", "synonyms": ["state"]}],
+                "name": "Project",
+                "definitions": [{"name": "phase", "expression": "b", "synonyms": ["state"], "certified": False}],
             },
-            {"name": "Project", "definitions": [{"name": "phase", "expression": "phase", "synonyms": ["state"]}]},
+            {
+                "name": "Employee",
+                "definitions": [{"name": "status", "expression": "a", "synonyms": ["state"], "certified": True}],
+            },
         ]
     }
     g = fresh_graph("tier", schema=schema)
     run(g.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]}))
-    report = run(g.check_answerable("state", terms=["state"]))
-    assert report.verdict == "answerable"
-    assert [(t.status, t.matches) for t in report.terms] == [("definition", ["status"])]
+    report = run(g.check_answerable("state"))
+    assert [(t.status, t.matches, t.certified) for t in report.terms] == [("definition", ["status"], True)]
 
 
 def test_check_answerable_ignores_possessive_and_contraction_endings():

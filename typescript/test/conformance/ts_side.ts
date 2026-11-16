@@ -49,8 +49,8 @@ const SHARED_DEFINITION_SPEC = {
 };
 const SHARED_SYNONYM_SPEC = {
   entities: [
-    { name: "Employee", definitions: [{ name: "status", expression: "active", synonyms: ["state"] }] },
-    { name: "Project", definitions: [{ name: "phase", expression: "phase", synonyms: ["state"] }] },
+    { name: "Employee", definitions: [{ name: "status", expression: "active", synonyms: ["state"], certified: true }] },
+    { name: "Project", definitions: [{ name: "phase", expression: "phase", synonyms: ["state"], certified: false }] },
   ],
 };
 const TERM_QUESTIONS = [

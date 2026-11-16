@@ -46,9 +46,12 @@ SHARED_SYNONYM_SPEC = {
     "entities": [
         {
             "name": "Employee",
-            "definitions": [{"name": "status", "expression": "active", "synonyms": ["state"]}],
+            "definitions": [{"name": "status", "expression": "active", "synonyms": ["state"], "certified": True}],
         },
-        {"name": "Project", "definitions": [{"name": "phase", "expression": "phase", "synonyms": ["state"]}]},
+        {
+            "name": "Project",
+            "definitions": [{"name": "phase", "expression": "phase", "synonyms": ["state"], "certified": False}],
+        },
     ]
 }
 TERM_QUESTIONS = [

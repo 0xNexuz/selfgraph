@@ -110,7 +110,7 @@ export function definitionForms(schema: ParsedSchema | null): Map<string, Defini
 /**
  * List the terms the stored graph holds instances of, by kind, so a schema term alone never grounds a question.
  *
- * A type is held when an entity of it or of a subtype is stored, a definition when its entity type is held, and a relation type when a relation of it is stored. The stored types themselves are held too.
+ * A type is held when an entity of it or of a subtype is stored, and a relation type when a relation of it is stored. The stored types themselves are held too. Definition grounding is resolved from the held entity types and the schema's definitions, keyed by entity and name.
  *
  * @param schema (ParsedSchema | null): the schema, or null for the stored types only.
  * @param entityTypes (Iterable<string>): the stored entities' types.
@@ -135,8 +135,6 @@ export function groundedTerms(
     const entity = index.get(canonicalEntityType(etype, schema));
     if (entity !== undefined) for (const t of lineage(entity, index)) held.type.add(t.name);
   }
-  for (const e of schema.entities)
-    if (held.type.has(e.name)) for (const d of e.definitions) held.definition.add(d.name);
   const stored = new Set([...rels].map((t) => normalizeRelType(canonicalRelationType(t, schema))));
   for (const r of schema.relations) if (stored.has(normalizeRelType(r.type))) held.relation.add(r.type);
   return held;
