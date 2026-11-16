@@ -314,6 +314,19 @@ function suite(spec: StoreSpec): void {
     expect(merged.warnings.map((w) => w.code)).toEqual(["entity_merged", "contradiction"]);
   });
 
+  it("undated restatement keeps event_time and supersede order", async () => {
+    const g = await graph("supersede");
+    await g.insert.facts({ relations: [annAt("acme", 2020)] }, { source_id: "a" });
+    await g.insert.facts({ relations: [annAt("acme")] }, { source_id: "b" });
+    const current = (await g.relations.get(ACME))!;
+    expect([current.event_time, current.revision, current.source_count]).toEqual([at(2020), 1, 2]);
+    const res = await g.insert.facts({ relations: [annAt("globex", 2022)] }, { source_id: "c" });
+    expect(res.warnings.map((w) => w.code)).toEqual(["relation_superseded"]);
+    expect((await g.relations.list()).items.map((r) => r.id)).toEqual([GLOBEX]);
+    const asOf = new Set((await g.retrieve("Ann", { as_of: at(2023) })).subgraph.relations.map((r) => r.id));
+    expect(asOf).toEqual(new Set([GLOBEX]));
+  });
+
   it("does not treat equal effective times as out of order, and a create without event_time supersedes from now", async () => {
     const g = await graph("supersede");
     await insert(g, [annAt("acme", 2024)]);

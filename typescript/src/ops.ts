@@ -1685,16 +1685,6 @@ export const effectiveTime = (version: Relation | Preference | DecisionTrace): D
   version.event_time ?? version.created_at;
 
 /**
- * Combine an input's event_time with an insert-level default; neither means no time was named.
- *
- * @param named (Date | null | undefined): the time on the relation or preference input.
- * @param fallback (Date | null | undefined): the insert's default event_time.
- * @return (Date | null): the named time, else the default, else null.
- */
-const namedEventTime = (named: Date | null | undefined, fallback: Date | null | undefined): Date | null =>
-  named ?? fallback ?? null;
-
-/**
  * Pick the event_time for an upsert of an existing version.
  *
  * A write that does not name a time keeps the stored time when the version is still current, matching
@@ -2230,7 +2220,7 @@ export async function upsertRelations(
   const retires = new Map<string, readonly [string, Props]>();
   const out: Array<readonly [string, number, Relation]> = [];
   for (const { rid, rtype, rel } of keyed) {
-    const named = namedEventTime(rel.event_time, defaultEventTime);
+    const named = rel.event_time ?? defaultEventTime ?? null;
     let edge = current.get(rid);
     let props: Props;
     let write = true;
@@ -3037,7 +3027,7 @@ export async function upsertPreference(
   validateStrength(pref.strength);
   validateOwnId("preference", pref.id);
   const pid = pref.id || ids.preferenceId(pref.subject_entity, pref.stance, pref.key, pref.value_entity);
-  const named = namedEventTime(pref.event_time, defaultEventTime);
+  const named = pref.event_time ?? defaultEventTime ?? null;
   await requirePreferenceRefs(runner, ns, pref);
   const profileId = await ensureProfile(runner, ns, pref.subject_entity, createdAt);
 
@@ -3058,7 +3048,6 @@ export async function upsertPreference(
   const eventTime = current === null ? named : restatedEventTime(named, current.event_time, true);
   const strength = current === null || pref.strength != null ? pref.strength : current.strength;
   const aboutEntity = current === null || pref.about_entity != null ? pref.about_entity : current.about_entity;
-  validateStrength(strength);
   const mergedProps = mergeProps(current?.properties ?? null, pref.properties);
   const props = encodePreferenceProps({
     ns,

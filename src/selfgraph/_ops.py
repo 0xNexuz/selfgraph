@@ -1698,16 +1698,6 @@ def effective_time(version: Relation | Preference | DecisionTrace) -> datetime:
     return aware(version.event_time or version.created_at)
 
 
-def _named_event_time(named: datetime | None, default: datetime | None) -> datetime | None:
-    """Combine an input's event_time with an insert-level default; neither means no time was named.
-
-    @param named (datetime | None): the time on the relation or preference input.
-    @param default (datetime | None): the insert's default event_time.
-    @return (datetime | None): the named time, else the default, else None.
-    """
-    return named if named is not None else default
-
-
 def _restated_event_time(named: datetime | None, *, stored: datetime | None, keep_stored: bool) -> datetime | None:
     """Pick the event_time for an upsert of an existing version.
 
@@ -2139,7 +2129,7 @@ async def upsert_relations(
     retires: dict[tuple[str, int], dict] = {}
     out: list[tuple[str, int, Relation]] = []
     for rid, rtype, rel, _ in keyed:
-        named = _named_event_time(rel.event_time, default_event_time)
+        named = rel.event_time if rel.event_time is not None else default_event_time
         edge = current.get(rid)
         write = True
         if edge is None:
@@ -2846,7 +2836,7 @@ async def upsert_preference(
     _validate_strength(pref.strength)
     _validate_own_id("preference", pref.id)
     pid = pref.id or _ids.preference_id(pref.subject_entity, pref.stance, pref.key, pref.value_entity)
-    named = _named_event_time(pref.event_time, default_event_time)
+    named = pref.event_time if pref.event_time is not None else default_event_time
     await _require_preference_refs(runner, ns, pref.value_entity, pref.about_entity)
     profile_id = await _ensure_profile(runner, ns, pref.subject_entity, created_at)
 
@@ -2868,7 +2858,6 @@ async def upsert_preference(
         event_time = _restated_event_time(named, stored=current.event_time, keep_stored=True)
         strength = current.strength if pref.strength is None else pref.strength
         about_entity = current.about_entity if pref.about_entity is None else pref.about_entity
-    _validate_strength(strength)
     merged_props = _merge_props(current.properties if current is not None else None, pref.properties)
     props = encode_preference_props(
         ns=ns,
