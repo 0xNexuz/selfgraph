@@ -2222,8 +2222,6 @@ export async function retireRelations(
 /**
  * Settle again each max_count endpoint a deleted or moved relation sat at, as supersede would settle it now.
  *
- * A relation moves when a write gives it a new event_time, so it may no longer be newer than the relations it retired.
- *
  * Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
  * Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
  * counted at each one. One that comes back is written as a new current revision with its properties and source count,
@@ -2356,11 +2354,9 @@ export async function repointRetired(
  * A superseded relation is retired in place: its version keeps its revision and gains invalidated_at and
  * invalidated_by, so the version list shows exactly the writes that happened. In supersede mode each constrained
  * endpoint the batch touches is settled once after the whole batch (see Contradictions.settle): an input older than
- * the relations it conflicts with is written already invalidated. A stored relation restated with a new event_time
- * has moved in time order, so its endpoints are then settled again by resettleEndpoints, which brings back a relation
- * it retired and no longer displaces. New versions are written before any retirement, so a failed write never leaves
- * an endpoint without its current relation. A new revision of a certified relation is not certified, and a
- * certified_dropped warning says so.
+ * the relations it conflicts with is written already invalidated. New versions are written before any retirement,
+ * so a failed write never leaves an endpoint without its current relation. A new revision of a certified relation is
+ * not certified, and a certified_dropped warning says so.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
@@ -2512,6 +2508,9 @@ export async function upsertRelations(
       options.caps,
       createdAt,
     );
+    const stored = new Map<string, Relation>();
+    for (const rid of dedupList(out.map(([rid]) => rid))) stored.set(rid, (await newestRelation(runner, ns, rid))!);
+    return out.map(([rid]) => stored.get(rid)!);
   }
   return out.map(([rid, revision, rel]) => {
     const key = JSON.stringify([rid, revision]);
@@ -2680,11 +2679,8 @@ async function lockCurrent<T>(
 }
 
 /**
- * Create a new version of a relation with changed properties; an unchanged update is a no-op.
- *
- * In supersede mode a new event_time moves the relation in time order, so its max_count endpoints are settled again by
- * resettleEndpoints: a relation it retired and no longer displaces comes back, and the updated relation is retired when
- * it is now the older fact.
+ * Create a new version of a relation, settling its max_count endpoints again when supersede moves its event_time; an
+ * unchanged update is a no-op.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
