@@ -845,6 +845,34 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     }
   }
   out.require_identifier = requireIdentifierCases;
+  const replayGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}-strict-replay`,
+    schema: { relations: [{ type: "WORKS_AT", from: { max_count: 1 } }] },
+    schema_mode: "strict",
+  });
+  const old = {
+    from_entity: "person:ann",
+    type: "WORKS_AT",
+    to_entity: "company:acme",
+    event_time: "2020-01-01",
+  };
+  await replayGraph.insert.facts({
+    entities: [
+      { type: "Person", name: "Ann" },
+      { type: "Company", name: "Acme" },
+      { type: "Company", name: "Globex" },
+    ],
+    relations: [old],
+  });
+  await replayGraph.insert.facts(
+    { relations: [{ ...old, to_entity: "company:globex", event_time: "2023-01-01" }] },
+    { contradiction: "supersede" },
+  );
+  const replayed = await replayGraph.insert.facts({ relations: [old] });
+  out.strict_retired_replay = {
+    relations: replayed.relations.map((r) => [r.id, r.revision, r.is_current]),
+    warnings: replayed.warnings.map((w) => w.code),
+  };
   const extraNs = `${graph.namespace}:extra`;
   await graph.store.upsertNodes(
     extraNs,

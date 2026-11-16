@@ -1804,6 +1804,16 @@ def _restated_event_time(named: datetime | None, *, stored: datetime | None, kee
     return stored if keep_stored else None
 
 
+def _reasserts(prev: Relation, effective: datetime) -> bool:
+    """Tell whether a write at an effective time brings a retired relation back as current.
+
+    @param prev (Relation): the stored version.
+    @param effective (datetime): the write's effective time.
+    @return (bool): True when prev is retired and the write is not earlier than its invalidation.
+    """
+    return not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+
+
 def _rank(rel: Relation) -> tuple[datetime, int, datetime]:
     """Order a relation among others at one endpoint: by effective time, then revision, then creation time.
 
@@ -2007,7 +2017,12 @@ class Contradictions:
 
 
 async def require_max_count(
-    runner: Any, ns: str, caps: Mapping[str, RelationCap] | None, relations: Iterable[RelationInput]
+    runner: Any,
+    ns: str,
+    caps: Mapping[str, RelationCap] | None,
+    relations: Iterable[RelationInput],
+    default_event_time: datetime | None,
+    created_at: datetime,
 ) -> None:
     """Reject relations that would exceed a schema max_count, against the stored graph or each other, before writing.
 
@@ -2017,6 +2032,8 @@ async def require_max_count(
     @param ns (str): namespace.
     @param caps (Mapping[str, RelationCap] | None): the max_count limits, or None without a schema.
     @param relations (Iterable[RelationInput]): the relations about to be written.
+    @param default_event_time (datetime | None): fallback event time.
+    @param created_at (datetime): timestamp of the planned write.
     @return (None): nothing; raises ValidationError on the first relation over a max_count.
     """
     keyed = []
@@ -2026,9 +2043,19 @@ async def require_max_count(
     tracker, _ = await _contradiction_check(
         runner, ns, "strict", caps, [(rtype, rel.from_entity, rel.to_entity) for _, rtype, rel in keyed]
     )
-    at = now()
-    for rid, rtype, rel in keyed if tracker is not None else ():
-        tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (at, 0, at))
+    if tracker is None:
+        return
+    stored = await _current_relations(runner, ns, [(rid, rel) for rid, _, rel in keyed])
+    admitted: set[str] = set()
+    for rid, rtype, rel in keyed:
+        effective = aware(rel.event_time or default_event_time or created_at)
+        edge = stored.get(rid)
+        if edge is not None and rid not in admitted:
+            prev = _relation_of(edge)
+            if not prev.is_current and not _reasserts(prev, effective):
+                continue
+        tracker.admit(rid, rtype, rel.from_entity, rel.to_entity, (effective, 0, created_at))
+        admitted.add(rid)
 
 
 def _retired(edge: dict, by: str, at: datetime, known: datetime) -> dict:
@@ -2373,7 +2400,7 @@ async def upsert_relations(
             effective = aware(event_time or created_at)
             sources = prev.source_count + gained.pop(rid, 0)
             merged_properties = _merge_props(prev.properties, rel.properties)
-            reassert = not prev.is_current and (prev.invalidated_at is None or effective >= prev.invalidated_at)
+            reassert = _reasserts(prev, effective)
             unchanged = _json_equal(prev.properties, merged_properties) and to_iso(prev.event_time) == to_iso(
                 event_time
             )

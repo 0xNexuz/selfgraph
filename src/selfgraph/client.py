@@ -618,7 +618,7 @@ class SelfGraph:
             checked = await enforce_schema(tx, ns, resolved, active_schema, mode, max_count=max_count, upsert=True)
             found: list[InsertWarning] = []
             if mode == "strict" and conflicts == "warn":
-                await _ops.require_max_count(tx, ns, caps, resolved.relations)
+                await _ops.require_max_count(tx, ns, caps, resolved.relations, default_event_time, created_at)
             await _ops.require_relation_identities(tx, ns, resolved.relations)
             source_version: str | None = None
             base_evidence = []

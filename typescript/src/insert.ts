@@ -245,7 +245,8 @@ export class Insert {
       const maxCount = mode === "strict" && conflicts !== "off";
       const checked = await enforceSchema(tx, ns, resolved, activeSchema, mode, true, maxCount, null, true);
       const found: InsertWarning[] = [];
-      if (mode === "strict" && conflicts === "warn") await ops.requireMaxCount(tx, ns, caps, resolved.relations);
+      if (mode === "strict" && conflicts === "warn")
+        await ops.requireMaxCount(tx, ns, caps, resolved.relations, source.default_event_time, createdAt);
       await ops.requireRelationIdentities(tx, ns, resolved.relations);
       let sourceVersion: string | null = null;
       let baseEvidence: Evidence[] = [];
