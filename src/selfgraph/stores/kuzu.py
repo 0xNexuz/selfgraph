@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import threading
 import time
 from collections.abc import Mapping
+from concurrent.futures import Future
+from contextvars import ContextVar
 from functools import partial
 from typing import Any
 
@@ -43,6 +47,58 @@ _SCHEMA = (
     "is_current BOOLEAN, revision INT64, doc STRING)",
 )
 _DATABASES: dict[str, Any] = {}
+
+
+_PENDING: ContextVar[tuple[Future[None], ...]] = ContextVar("selfgraph_kuzu_locks", default=())
+
+
+class _PathLock:
+    def __init__(self) -> None:
+        released: Future[None] = Future()
+        released.set_result(None)
+        self._tail = released
+        self._claim = threading.Lock()
+
+    def _join(self) -> tuple[Future[None], Future[None]]:
+        """Take the next place in the queue.
+
+        @return (tuple[Future[None], Future[None]]): the future to wait on, and this waiter's own token.
+        """
+        with self._claim:
+            previous = self._tail
+            mine: Future[None] = Future()
+            self._tail = mine
+        return previous, mine
+
+    async def __aenter__(self) -> None:
+        """Wait for the store ahead in the queue to release.
+
+        @return (None): nothing.
+        """
+        previous, mine = self._join()
+        _PENDING.set((*_PENDING.get(), mine))
+        try:
+            await asyncio.shield(asyncio.wrap_future(previous))
+        except BaseException:
+            _PENDING.set(_PENDING.get()[:-1])
+            previous.add_done_callback(lambda _done, _mine=mine: _mine.set_result(None))
+            raise
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        """Release the lock and hand the queue to the next waiter.
+
+        @param exc_info (object): the exception triple, ignored.
+        @return (None): nothing.
+        """
+        pending = _PENDING.get()
+        token = pending[-1]
+        _PENDING.set(pending[:-1])
+        token.set_result(None)
+
+
+_CACHE_LOCK = threading.Lock()
+_LOCKS: dict[str, _PathLock] = {}
+_WRITE_LOCKS: dict[str, _PathLock] = {}
 _OPEN_STORES: dict[str, int] = {}
 _MAX_SKIP = 10_000_000
 _RECONNECT_EVERY = 500
@@ -143,20 +199,23 @@ class KuzuStore(AutoCommitStore):
         path = os.path.expanduser(path)
         if path not in ("", ":memory:"):
             path = os.path.abspath(path)
-        if path not in _DATABASES:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            try:
-                _DATABASES[path] = kuzu.Database(path, **db_kwargs)
-            except Exception as exc:  # noqa: BLE001
-                raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
+        with _CACHE_LOCK:
+            db = _DATABASES.get(path)
+            if db is None:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                try:
+                    db = _DATABASES[path] = kuzu.Database(path, **db_kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
+            _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
+            self._lock = _LOCKS.setdefault(path, _PathLock())
+            self._write_lock = _WRITE_LOCKS.setdefault(path, _PathLock())
         self._path = path
-        self._db = _DATABASES[path]
-        self._connect = partial(kuzu.Connection, self._db)
+        self._db = db
+        self._connect = partial(kuzu.Connection, db)
         self._conn = self._connect()
         self._statements = 0
         self._raw = False
-        _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
-        self._lock = asyncio.Lock()
 
     async def _run(self, query: str, params: Mapping[str, Any] | None = None, *, raw: bool = False) -> CypherResult:
         def _exec():
@@ -216,10 +275,13 @@ class KuzuStore(AutoCommitStore):
                 return
             self._closed = True
             self._conn.close()
-            _OPEN_STORES[self._path] -= 1
-            if _OPEN_STORES[self._path] == 0:
-                del _OPEN_STORES[self._path]
-                _DATABASES.pop(self._path).close()
+            with _CACHE_LOCK:
+                _OPEN_STORES[self._path] -= 1
+                if _OPEN_STORES[self._path] == 0:
+                    del _OPEN_STORES[self._path]
+                    _DATABASES.pop(self._path).close()
+                    _LOCKS.pop(self._path, None)
+                    _WRITE_LOCKS.pop(self._path, None)
 
     async def get_node(self, ns: str, label: str, id: str) -> dict | None:
         res = await self._run(
