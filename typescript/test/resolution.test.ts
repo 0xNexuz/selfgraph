@@ -781,6 +781,54 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ entities: [{ type: "Person", name: "Jon Smyth" }] })).merges).toEqual([]);
     expect(no.calls).toHaveLength(1);
   });
+
+  it("matches entity types case-insensitively across resolvers and schema hierarchy", async () => {
+    let g = open({ resolver: "default" });
+    await seed(g, { type: "Person", name: "Robert", aliases: ["Bob"] });
+    let res = await g.insert.facts({ entities: [{ type: "person", name: "Bob" }] });
+    expect(res.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason])).toEqual([[BOB, ROBERT, "alias"]]);
+
+    g = open({ resolver: "fuzzy" });
+    res = await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Robert", aliases: ["Bob"] },
+        { type: "person", name: "Bob" },
+      ],
+    });
+    expect(res.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason])).toEqual([[BOB, ROBERT, "alias"]]);
+
+    g = open({ resolver: "fuzzy" });
+    await seed(g, { type: "Person", name: "Jane Doe" });
+    res = await g.insert.facts({ entities: [{ type: "person", name: "Jane Does" }] });
+    expect(res.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason])).toEqual([
+      [entityId("Person", "Jane Does"), entityId("Person", "Jane Doe"), "similarity"],
+    ]);
+
+    const yes = new FakeLLM(true);
+    g = open({ llm: yes, resolver: "llm" });
+    await seed(g, { type: "Person", name: "John Smith" });
+    res = await g.insert.facts({ entities: [{ type: "person", name: "Jon Smyth" }] });
+    expect(res.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason])).toEqual([
+      [entityId("Person", "Jon Smyth"), entityId("Person", "John Smith"), "llm"],
+    ]);
+    expect(yes.calls).toHaveLength(1);
+
+    const schema = {
+      entities: [
+        { name: "Organization", aliases: ["Org"] },
+        { name: "Company", parent: "Organization" },
+      ],
+    };
+    g = open({ resolver: "default", schema });
+    await seed(g, { type: "Organization", name: "International Business Machines", aliases: ["IBM"] });
+    const orgIbm = entityId("Organization", "International Business Machines");
+    res = await g.insert.facts({ entities: [{ type: "company", name: "IBM" }] });
+    expect(res.merges.map((m) => m.survivor_id)).toEqual([orgIbm]);
+    res = await g.insert.facts({ entities: [{ type: "org", name: "Big Blue", aliases: ["IBM"] }] });
+    expect(res.merges.map((m) => m.survivor_id)).toEqual([orgIbm]);
+    res = await g.insert.facts({ entities: [{ type: "thing", name: "IBM" }] });
+    expect(res.merges.map((m) => m.survivor_id)).toEqual([orgIbm]);
+  });
 }
 
 await forEachStore("entity resolution", suite);

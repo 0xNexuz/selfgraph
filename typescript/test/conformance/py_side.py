@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from selfgraph import EvidenceInput, Extraction, Schema, SelfGraph, ValidationError, _serde, ids
+from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
 from selfgraph.cli import _kv
 from selfgraph.retrieval import _tokens
@@ -621,6 +621,26 @@ async def write(graph):
         out["schema_null_required"] = str(exc)
     out["ent_delete"] = to_jsonable(await graph.entities.delete("thing:temp-thing"))
     out["rel_delete"] = to_jsonable(await graph.relations.delete(ids.relation_id(ZOE, "KNOWS", "person:jane-doe")))
+    prune_graph = SelfGraph(
+        store=graph.store,
+        namespace=f"{graph.namespace}:prune",
+        schema={
+            "entities": [{"name": "Person"}, {"name": "Company"}],
+            "relations": [{"type": "WORKS_AT", "aliases": ["employed_by"]}],
+        },
+    )
+    await prune_graph.initialize()
+    person = await prune_graph.entities.create("Alice", "Person")
+    company = await prune_graph.entities.create("Acme", "Company")
+    relation = await prune_graph.relations.create(person.id, "employed_by", company.id)
+    await prune_graph.maintenance.decay(now=datetime.now(timezone.utc), half_life_days=1e-9, dry_run=False)
+    by_alias = await prune_graph.maintenance.prune(min_relevance=1.0, relation_types=["employed_by"])
+    by_canonical = await prune_graph.maintenance.prune(min_relevance=1.0, relation_types=["WORKS_AT"])
+    out["prune_relation_alias"] = {
+        "relation_id": relation.id,
+        "alias": by_alias.relation_ids,
+        "canonical": by_canonical.relation_ids,
+    }
     await graph.insert.facts(
         {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
     )
@@ -672,6 +692,35 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    mixed = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_mixed_case", resolver="fuzzy")
+    await mixed.insert.facts({"entities": [{"type": "Person", "name": "Jane Doe", "aliases": ["JD"]}]})
+    mixed_fuzzy = await mixed.insert.facts(
+        {"entities": [{"type": "person", "name": "Jane Does"}, {"type": "thing", "name": "JD"}]}
+    )
+    org_schema = {
+        "entities": [
+            {"name": "Organization", "aliases": ["Org"]},
+            {"name": "Company", "parent": "Organization"},
+        ]
+    }
+    mixed_schema = SelfGraph(
+        store=graph.store, namespace=f"{graph.namespace}_mixed_schema", resolver="default", schema=org_schema
+    )
+    await mixed_schema.insert.facts(
+        {"entities": [{"type": "Organization", "name": "International Business Machines", "aliases": ["IBM"]}]}
+    )
+    mixed_org = await mixed_schema.insert.facts(
+        {
+            "entities": [
+                {"type": "company", "name": "IBM"},
+                {"type": "org", "name": "Big Blue", "aliases": ["IBM"]},
+            ]
+        }
+    )
+    out["mixed_case_merges"] = [
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
@@ -697,6 +746,31 @@ async def write(graph):
         except ValidationError as exc:
             require_identifier_cases[name] = str(exc)
     out["require_identifier"] = require_identifier_cases
+    extra_ns = f"{graph.namespace}:extra"
+    await graph.store.upsert_nodes(
+        extra_ns,
+        "Extra",
+        [
+            ("extra:batch-1", {"id": "extra:batch-1", "name": "batch-1"}),
+            ("extra:batch-2", {"id": "extra:batch-2", "name": "batch-2"}),
+        ],
+        extra_label="CustomLabel",
+    )
+    await graph.store.upsert_node(
+        extra_ns,
+        "Extra",
+        "extra:single",
+        {"id": "extra:single", "name": "single"},
+        extra_label="CustomLabel",
+    )
+    primary_node = await graph.store.get_node(extra_ns, "Extra", "extra:batch-1")
+    extra_batch_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:batch-2")
+    extra_single_node = await graph.store.get_node(extra_ns, "CustomLabel", "extra:single")
+    out["extra_label"] = {
+        "primary": primary_node["id"] if primary_node else None,
+        "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
+        "single_extra": extra_single_node["id"] if extra_single_node else None,
+    }
     return out
 
 
@@ -773,6 +847,70 @@ async def supersede(graph):
         [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
         for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
     ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Frank", "Grace", "Heidi", "Ivan")),
+                *({"type": "Company", "name": n} for n in ("Cyberdyne", "Tyrell", "Soylent", "Vandelay")),
+            ],
+            "relations": [
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:frank",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:tyrell",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+                {
+                    "from_entity": "person:grace",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:cyberdyne",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                },
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000100Z",
+                },
+                {
+                    "from_entity": "person:ivan",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:soylent",
+                    "event_time": "2024-01-01T00:00:00.000300Z",
+                },
+            ],
+        }
+    )
+    await graph.insert.facts(
+        {
+            "relations": [
+                {
+                    "from_entity": "person:heidi",
+                    "type": "WORKS_AT",
+                    "to_entity": "company:vandelay",
+                    "event_time": "2024-01-01T00:00:00.000200Z",
+                }
+            ]
+        }
+    )
+    out["subms"] = {}
+    for person, company in (("frank", "cyberdyne"), ("heidi", "soylent")):
+        rid = ids.relation_id(f"person:{person}", "WORKS_AT", f"company:{company}")
+        out["subms"][rid] = [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
     return out
 
 
@@ -823,6 +961,13 @@ async def dump(graph, ns):
     sources = await store.match_nodes(ns, "Source")
     decisions = [d async for d in graph.decisions.iterate()]
     raw_entities = {e.id: await store.get_node(ns, "Entity", e.id) for e in entities}
+    filters = {}
+    if isinstance(store, KuzuStore):
+        filters = {
+            "aliases_equals": await store.match_nodes(ns, "Entity", equals={"aliases": ["JD", "J. Doe"]}),
+            "aliases_any_of": await store.match_nodes(ns, "Entity", any_of={"aliases": [["JD", "J. Doe"]]}),
+            "empty_any_of": await store.match_nodes(ns, "Entity", any_of={"aliases": []}),
+        }
     evidence = {e.id: await all_evidence(graph.entities.evidence, e.id) for e in entities}
     evidence.update({rid: await all_evidence(graph.relations.evidence, rid) for rid in relations})
     raw_evidence = await store.match_nodes(ns, "Evidence")
@@ -866,6 +1011,7 @@ async def dump(graph, ns):
             "decisions": decisions,
             "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
+            "filters": filters,
             "evidence": evidence,
             "raw_evidence": sorted(raw_evidence, key=lambda r: r["id"]),
             "source_versions": sorted(source_versions, key=lambda s: s["id"]),
@@ -891,6 +1037,19 @@ async def dump(graph, ns):
 
 async def main():
     cmd = sys.argv[1]
+    if cmd == "kuzu_isolation":
+        from selfgraph import KuzuStore
+
+        result = []
+        for path in ("", ":memory:"):
+            async with SelfGraph(KuzuStore(path)) as first, SelfGraph(KuzuStore(path)) as second:
+                entity = await first.entities.create("Jane", "Person")
+                result.append(await second.entities.get(entity.id) is None)
+                await second.insert.facts({"entities": [{"name": "Jane", "type": "Person"}]})
+                await second.entities.delete(entity.id)
+                result.append(await first.entities.get(entity.id) == entity)
+        json.dump(result, sys.stdout)
+        return
     if cmd == "schema":
         json.dump(schema_warnings(), sys.stdout, sort_keys=True, ensure_ascii=False)
         return

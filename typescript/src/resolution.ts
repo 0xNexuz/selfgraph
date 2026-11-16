@@ -36,7 +36,7 @@ import {
 import * as ops from "./ops.js";
 import type { GraphPrimitives, LLMClient, Props } from "./protocols.js";
 import { fold, tokens } from "./retrieval.js";
-import { entityIndex, lineage, type ParsedSchema, requireMode } from "./schema.js";
+import { canonicalEntityType, entityIndex, lineage, type ParsedSchema, requireMode } from "./schema.js";
 import { decodeEntity, decodeEvidence } from "./serde.js";
 import { clamp, type Level } from "./tiers.js";
 import { checkOptions, requireInt, requireStr, typeName } from "./validate.js";
@@ -46,6 +46,7 @@ type Runner = GraphPrimitives;
 export const RESOLVER_MODES = ["exact", "default", "fuzzy", "llm"] as const;
 export type ResolverMode = (typeof RESOLVER_MODES)[number];
 
+const FALLBACK_KEY = ops.entityTypeKey(FALLBACK_TYPE);
 const DEFAULT_THRESHOLD = 0.92;
 const DEFAULT_BAND: readonly [number, number] = [0.8, 0.92];
 const MAX_QUESTIONS = 3;
@@ -324,6 +325,7 @@ export class DefaultResolver implements EntityResolver {
    */
   private scorer(candidate: ParsedEntityInput): (ent: Entity) => [number, string] | null {
     const ctype = ops.cleanText(candidate.type);
+    const ckey = ops.entityTypeKey(ctype);
     const forms = formsOf(candidate.name, candidate.aliases);
     let derived: string | undefined;
     const cid = (): string => {
@@ -331,7 +333,8 @@ export class DefaultResolver implements EntityResolver {
       return derived;
     };
     return (ent) => {
-      if (ctype === FALLBACK_TYPE && ent.type !== ctype) {
+      const ekey = ops.entityTypeKey(ent.type);
+      if (ckey === FALLBACK_KEY && ekey !== ckey) {
         return overlaps(forms, formsOf(ent.name, ent.aliases)) ? [ALIAS_CONFIDENCE, "alias"] : null;
       }
       if (cid() === ent.id) return [1, "id"];
@@ -339,7 +342,7 @@ export class DefaultResolver implements EntityResolver {
         return [1, "external_id"];
       }
       if (overlaps(forms, formsOf(ent.name, ent.aliases))) return [ALIAS_CONFIDENCE, "alias"];
-      if (this.fuzzy && ctype === ent.type && !distinctNames(candidate.name, ent.name, this.threshold)) {
+      if (this.fuzzy && ekey === ckey && !distinctNames(candidate.name, ent.name, this.threshold)) {
         const similarity = nameSimilarity(candidate.name, ent.name);
         if (similarity >= this.threshold) return [similarity, "similarity"];
       }
@@ -437,9 +440,9 @@ export class LLMResolver implements EntityResolver {
     const decision = this.lexical.decide(candidate, existing);
     if (decision.target_id !== null) return decision;
     const [low, high] = this.band;
-    const ctype = ops.cleanText(candidate.type);
+    const ckey = ops.entityTypeKey(candidate.type);
     const band = existing
-      .filter((ent) => ent.type === ctype && !distinctNames(candidate.name, ent.name, low))
+      .filter((ent) => ops.entityTypeKey(ent.type) === ckey && !distinctNames(candidate.name, ent.name, low))
       .map((ent) => [nameSimilarity(candidate.name, ent.name), ent] as const)
       .filter(([s]) => low <= s && s < high)
       .sort((p, q) => q[0] - p[0] || comparePy(p[1].id, q[1].id));
@@ -513,24 +516,27 @@ export function resolverFor(
 }
 
 /**
- * The entity type names a type may merge with: itself, plus its schema ancestors and descendants with aliases.
+ * The case-folded entity type keys a type may merge with: itself, plus schema ancestors, descendants, and aliases.
  *
  * @param etype (string): the cleaned entity type.
  * @param schema (ParsedSchema | null): the active schema.
- * @return (Set<string>): the compatible type names.
+ * @return (Set<string>): the compatible case-folded type keys.
  */
 function compatibleTypes(etype: string, schema: ParsedSchema | null): Set<string> {
-  const out = new Set([etype]);
+  const folded = ops.entityTypeKey(etype);
+  const out = new Set([folded]);
   if (schema === null) return out;
   const index = entityIndex(schema);
-  const own = index.get(etype);
+  const own = index.get(canonicalEntityType(etype, schema));
   if (own === undefined) return out;
   const related = new Set([...lineage(own, index)].map((t) => t.name));
   for (const ent of schema.entities) {
     if ([...lineage(ent, index)].some((t) => t.name === own.name)) related.add(ent.name);
   }
   for (const ent of schema.entities) {
-    if (related.has(ent.name)) for (const name of [ent.name, ...ent.aliases]) out.add(name);
+    if (related.has(ent.name)) {
+      for (const name of [ent.name, ...ent.aliases]) out.add(ops.entityTypeKey(name));
+    }
   }
   return out;
 }
@@ -708,7 +714,7 @@ function redirect(ent: ParsedEntityInput, target: Entity): ParsedEntityInput {
 }
 
 /**
- * Resolve each new entity without an explicit id against compatible stored and batch entities, and rewrite refs. A typed candidate is offered every stored entity of its compatible types, each type read once per insert in id-ordered pages. A candidate of the extraction fallback type (Thing) is also offered entities of other types, stored and from the same batch, whose name or alias matches its own, and is resolved after the others so a typed entity later in the batch can absorb it; of the stored entities of other types, only those are kept in memory. When the store indexes match keys (entitiesMatching), the default resolver is offered only the stored entities sharing a key with a candidate, the only ones it can merge with, instead of every entity of the compatible types.
+ * Resolve each new entity without an explicit id against compatible stored and batch entities, and rewrite refs. A typed candidate is offered every stored entity of its compatible types, read once per insert in id-ordered pages. A candidate of the extraction fallback type (Thing) is also offered entities of other types, stored and from the same batch, whose name or alias matches its own, and is resolved after the others so a typed entity later in the batch can absorb it; of the stored entities of other types, only those are kept in memory. When the store indexes match keys (entitiesMatching), the default resolver is offered only the stored entities sharing a key with a candidate, the only ones it can merge with, instead of every entity of the compatible types.
  *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
@@ -735,15 +741,16 @@ export async function planResolution(
   const stored = new Set(found.keys());
   const candidateTypes = new Set(keyed.filter((k) => !k.ent.id && !stored.has(k.eid)).map((k) => k.etype));
   if (!candidateTypes.size) return { facts, merges: [], warnings: [] };
-  const wanted = new Set<string | null>();
+  const wanted = new Set<string>();
   for (const etype of candidateTypes) for (const t of compatibleTypes(etype, schema)) wanted.add(t);
-  if (candidateTypes.has(FALLBACK_TYPE)) wanted.add(null);
   const fallbackForms = new Set(
-    keyed.filter((k) => k.etype === FALLBACK_TYPE && !k.ent.id).flatMap((k) => [...formsOf(k.ent.name, k.ent.aliases)]),
+    keyed
+      .filter((k) => ops.entityTypeKey(k.etype) === FALLBACK_KEY && !k.ent.id)
+      .flatMap((k) => [...formsOf(k.ent.name, k.ent.aliases)]),
   );
   const named = new Set(keyed.map((k) => k.eid));
   const keep = (props: Props): boolean =>
-    wanted.has(props.type as string) ||
+    wanted.has(ops.entityTypeKey(props.type as string)) ||
     named.has(props.id as string) ||
     overlaps(formsOf(props.name as string, (props.aliases as string[] | null) ?? []), fallbackForms);
   async function* candidates(): AsyncGenerator<Props[]> {
@@ -758,11 +765,7 @@ export async function planResolution(
       yield [...found.values(), ...(await runner.entitiesMatching(ns, keys))];
       return;
     }
-    const scans = wanted.has(null) ? [null] : [...wanted].sort((a, b) => comparePy(String(a), String(b)));
-    for (const etype of scans) {
-      const equals = etype === null ? {} : { type: etype };
-      yield* ops.keyset((after, limit) => runner.matchNodes(ns, L_ENTITY, { equals, limit, id_gt: after }));
-    }
+    yield* ops.keyset((after, limit) => runner.matchNodes(ns, L_ENTITY, { equals: {}, limit, id_gt: after }));
   }
   const pool = new Map<string, Entity>();
   for await (const rows of candidates()) {
@@ -775,7 +778,11 @@ export async function planResolution(
   const merges = new Map<string, PendingMerge>();
   const entities: ParsedEntityInput[] = [...facts.entities];
   const order = keyed.map((_, i) => i);
-  order.sort((a, b) => Number(keyed[a]!.etype === FALLBACK_TYPE) - Number(keyed[b]!.etype === FALLBACK_TYPE));
+  order.sort(
+    (a, b) =>
+      Number(ops.entityTypeKey(keyed[a]!.etype) === FALLBACK_KEY) -
+      Number(ops.entityTypeKey(keyed[b]!.etype) === FALLBACK_KEY),
+  );
   for (const i of order) {
     const { ent, eid, etype, ename } = keyed[i]!;
     const merged = merges.get(eid);
@@ -792,14 +799,16 @@ export async function planResolution(
       else if (ent.id && !stored.has(eid)) batch.set(eid, viewOf(ent, eid, etype, ename, createdAt));
       continue;
     }
-    const fallback = etype === FALLBACK_TYPE;
+    const fallback = ops.entityTypeKey(etype) === FALLBACK_KEY;
     const compatible = compatibleTypes(etype, schema);
     const existing = [...pool.values()]
-      .filter((e) => compatible.has(e.type) || (fallback && surfaceMatch(ent, e)))
+      .filter((e) => compatible.has(ops.entityTypeKey(e.type)) || (fallback && surfaceMatch(ent, e)))
       .sort((a, b) => comparePy(a.id, b.id));
     existing.push(
       ...[...batch.values()].filter(
-        (e) => (compatible.has(e.type) && within) || (fallback && !compatible.has(e.type) && surfaceMatch(ent, e)),
+        (e) =>
+          (compatible.has(ops.entityTypeKey(e.type)) && within) ||
+          (fallback && !compatible.has(ops.entityTypeKey(e.type)) && surfaceMatch(ent, e)),
       ),
     );
     const decision = await resolver.resolve(ent, existing);
