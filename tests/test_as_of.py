@@ -370,3 +370,47 @@ def test_known_at_keeps_the_retirement_a_late_middle_fact_corrected():
     [new, old] = run(g.relations.versions(acme.id))
     assert (old.invalidated_by, old.invalidated_at) == (initech.id, utc(2024))
     assert (new.invalidated_by, new.invalidated_at, new.revision) == (globex.id, utc(2022), old.revision + 1)
+
+
+def test_correcting_an_undated_relation_keeps_its_effective_time():
+    g = employment_graph("asof", contradiction="supersede")
+    run(g.insert.facts({"entities": [{"type": "Company", "name": "Initech"}]}))
+    start = instant()
+    acme = run(g.relations.create("person:ann", "WORKS_AT", "company:acme"))
+    run(g.relations.create("person:ann", "WORKS_AT", "company:initech", event_time=start + timedelta(days=1)))
+    point = instant()
+    before = instant()
+    globex = run(g.relations.create("person:ann", "WORKS_AT", "company:globex", event_time=point))
+    after = instant()
+
+    def held(**at):
+        return {r.id for r in run(g.retrieve("Ann", as_of=point, **at)).subgraph.relations}
+
+    assert held() == {globex.id}
+    assert held(known_at=after) == {globex.id}
+    assert held(known_at=before) == {acme.id}
+    [new, old] = run(g.relations.versions(acme.id))
+    assert new.event_time == old.created_at
+    assert new.created_at == new.invalidated_known_at
+    assert (new.invalidated_by, new.invalidated_at) == (globex.id, point)
+
+
+def test_resettling_a_corrected_undated_relation_keeps_its_effective_time():
+    g = employment_graph("asof", contradiction="supersede")
+    run(g.insert.facts({"entities": [{"type": "Company", "name": "Initech"}]}))
+    start = instant()
+    acme = run(g.relations.create("person:ann", "WORKS_AT", "company:acme"))
+    initech = run(g.relations.create("person:ann", "WORKS_AT", "company:initech", event_time=start + timedelta(days=2)))
+    point = instant()
+    globex = run(g.relations.create("person:ann", "WORKS_AT", "company:globex", event_time=point))
+    before = instant()
+    prior = {r.id for r in run(g.retrieve("Ann", as_of=point, known_at=before)).subgraph.relations}
+    assert prior == {globex.id}
+    run(g.relations.delete(globex.id))
+
+    held = {r.id for r in run(g.retrieve("Ann", as_of=point)).subgraph.relations}
+    assert held == {acme.id}
+    versions = run(g.relations.versions(acme.id))
+    assert versions[0].invalidated_by == initech.id
+    assert versions[0].event_time == versions[-1].created_at
+    assert versions[0].created_at == versions[0].invalidated_known_at

@@ -1105,6 +1105,34 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
+  const undated = await graph.relations.create("person:frank", "WORKS_AT", "company:acme");
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:initech",
+        event_time: new Date(Date.UTC(2999, 0, 1)),
+      },
+    ],
+  });
+  await graph.insert.facts({
+    relations: [
+      {
+        from_entity: "person:frank",
+        type: "WORKS_AT",
+        to_entity: "company:globex",
+        event_time: new Date(Date.UTC(2998, 0, 1)),
+      },
+    ],
+  });
+  const corrected = await graph.relations.versions(undated.id);
+  const firstCreated = corrected[corrected.length - 1]!.created_at.getTime();
+  const undated_correction = corrected.map((v) => [
+    v.revision,
+    v.invalidated_by,
+    v.event_time ? v.event_time.getTime() === firstCreated : false,
+  ]);
   return {
     warnings,
     versions,
@@ -1113,5 +1141,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     delete_restored: deleted.restored_relations,
     delete_versions,
     subms,
+    undated_correction,
   };
 }

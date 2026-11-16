@@ -2110,6 +2110,7 @@ function retiredEdge(edge: EdgeRow, by: string, at: Date, known: Date): EdgeRow 
   if (!edge.props.is_current) {
     props.revision = (edge.props.revision as number) + 1;
     props.created_at = toIso(known);
+    props.event_time = edge.props.event_time || edge.props.created_at;
   }
   return { ...edge, props };
 }

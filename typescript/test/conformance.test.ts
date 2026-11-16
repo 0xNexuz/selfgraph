@@ -124,6 +124,10 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
       expect(mask(fromTs)).toEqual(mask(fromPy));
       const ended = Object.values((fromTs as { versions: Record<string, unknown[][]> }).versions).map((v) => v[0]![3]);
       expect(ended.filter((at) => at !== null).sort()).toEqual(["2022-01-01T00:00:00Z", "2026-01-01T00:00:00Z"]);
+      expect((fromTs as { undated_correction: unknown[][] }).undated_correction.map((v) => v[2])).toEqual([
+        true,
+        false,
+      ]);
     });
 
     it.skipIf(!live.get(store))(
