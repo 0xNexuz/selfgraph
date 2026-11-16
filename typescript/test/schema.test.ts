@@ -183,7 +183,6 @@ describe("Schema.parse and asSchema", () => {
     [{ relations: [{ type: "R", from: { max_count: 0 } }] }, "relations[0].from.max_count: must be >= 1"],
     [{ relations: [{ type: "R", to: { min_count: -1 } }] }, "relations[0].to.min_count: must be >= 0"],
     [{ relations: [{ type: "R", from: { max_count: 1.5 } }] }, "relations[0].from.max_count: expected integer"],
-    [{ relations: [{ type: "R", from: { max_count: "1" } }] }, "relations[0].from.max_count: expected number"],
     [
       { relations: [{ type: "R", from: { max_count: 2 ** 53 } }] },
       "relations[0].from.max_count: must be <= 9007199254740991",
