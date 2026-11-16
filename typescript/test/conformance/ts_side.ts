@@ -1256,6 +1256,22 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await graph.retrieve("Grace Hopper COBOL Jane acme", { strategy: walk, k: 1, depth: 4, max_nodes: 3 });
     tight[walk] = { entities: r.subgraph.entities.map((e) => e.id), relations: r.subgraph.relations.map((x) => x.id) };
   }
+  const loops = new SelfGraph(store, { namespace: `${ns}_loops` });
+  await loops.insert.facts({
+    entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      { from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+      { from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+      ...Array.from({ length: 24 }, (_, i) => ({
+        id: `relation:self${i}`,
+        from_entity: "thing:middle",
+        type: "SELF",
+        to_entity: "thing:middle",
+      })),
+    ],
+  });
+  const loopResult = await loops.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true });
+  const loopReport = await loops.checkAnswerable("Ada Bob");
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
@@ -1314,6 +1330,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    self_loop_hubs: {
+      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
+      hubs: loopResult.hubs,
+      verdict: loopReport.verdict,
+      hub_only: loopReport.hub_only,
+    },
     raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,

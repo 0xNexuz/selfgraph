@@ -1408,6 +1408,27 @@ async def dump(graph, ns):
         walk: await graph.retrieve("Grace Hopper COBOL Jane acme", strategy=walk, k=1, depth=4, max_nodes=3)
         for walk in ("bfs", "dfs")
     }
+    loops = SelfGraph(store=store, namespace=f"{ns}_loops")
+    await loops.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Middle", "Bob")],
+            "relations": [
+                {"from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                {"from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                *[
+                    {
+                        "id": f"relation:self{i}",
+                        "from_entity": "thing:middle",
+                        "type": "SELF",
+                        "to_entity": "thing:middle",
+                    }
+                    for i in range(24)
+                ],
+            ],
+        }
+    )
+    loop_result = await loops.retrieve("Ada", k=1, depth=3, skip_hubs=True)
+    loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
     seeded = {
@@ -1452,6 +1473,12 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "self_loop_hubs": {
+                "entities": sorted(e.id for e in loop_result.subgraph.entities),
+                "hubs": loop_result.hubs,
+                "verdict": loop_report.verdict,
+                "hub_only": loop_report.hub_only,
+            },
             "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "filters": filters,
