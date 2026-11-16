@@ -305,6 +305,18 @@ function suite(spec: StoreSpec): void {
     expect(() => fromTables([{}])).toThrow(/each table needs a name/);
     expect(() => fromTables({} as never)).toThrow(/tables must be a list of table mappings/);
   });
+
+  it("fromTables maps only integer SQL types to integer", () => {
+    const types = ["int", "INT UNSIGNED", "hugeint", "point", "interval"];
+    const schema = fromTables([{ name: "t", columns: types.map((type, i) => ({ name: `c${i}`, type })) }]);
+    expect(schema.entities[0]!.properties.map((p) => p.type)).toEqual([
+      "integer",
+      "integer",
+      "integer",
+      "string",
+      "string",
+    ]);
+  });
 }
 
 await forEachStore("tiers", suite);
