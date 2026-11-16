@@ -476,6 +476,23 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    await graph.insert.facts({"entities": [{"type": "Person", "name": "Cid"}]})
+    await graph.insert.facts({"relations": [link("cid", "acme", 2020)]}, source_id="cid-withdrawn")
+    await graph.insert.text("nothing happened.", source_id="cid-withdrawn", replace_source=True)
+    cid_older = await graph.insert.facts({"relations": [link("cid", "globex", 2019)]}, source_id="cid-globex")
+    out["withdrawn_warnings"] = [w.code for w in cid_older.warnings]
+    out["withdrawn_versions"] = {}
+    for company in ("acme", "globex"):
+        rid = ids.relation_id("person:cid", "WORKS_AT", f"company:{company}")
+        out["withdrawn_versions"][rid] = [
+            [
+                v.revision,
+                v.is_current,
+                v.invalidated_by,
+                _serde.json_iso(v.invalidated_at) if v.invalidated_at else None,
+            ]
+            for v in await graph.relations.versions(rid)
+        ]
     return out
 
 

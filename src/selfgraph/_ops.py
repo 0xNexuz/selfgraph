@@ -2028,9 +2028,15 @@ async def _contradiction_check(
                 for edge in await _paged(partial(fetch, **anchor), page=_BATCH):
                     _keep_newest(found, edge)
     current = [_relation_of(e) for e in found.values() if e["props"]["is_current"]]
-    history = [
-        _relation_of(e) for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")
-    ]
+    retired = [e for e in found.values() if not e["props"]["is_current"] and e["props"].get("invalidated_at")]
+    sv_ids = _dedup_list(
+        inv
+        for e in retired
+        for inv in (e["props"].get("invalidated_by"),)
+        if isinstance(inv, str) and inv.startswith("sv:")
+    )
+    withdrawn = set(await _nodes_by_id(runner, ns, L_SOURCE_VERSION, sv_ids)) if sv_ids else set()
+    history = [_relation_of(e) for e in retired if e["props"].get("invalidated_by") not in withdrawn]
     return Contradictions(caps, contradiction, current, history), found
 
 
