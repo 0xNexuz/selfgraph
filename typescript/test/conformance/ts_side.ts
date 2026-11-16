@@ -250,10 +250,23 @@ export function schemaWarnings(): {
   tables: unknown;
   term_forms: unknown;
   terms: unknown[];
+  terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
 } {
   const terms = Schema.parse(TERMS_SPEC);
+  const subSchema = Schema.parse({
+    entities: [
+      {
+        name: "Employee",
+        aliases: ["Worker"],
+        synonyms: ["staff"],
+        definitions: [{ name: "Active Staff", expression: "a", synonyms: ["personnel"] }],
+      },
+      { name: "Engineer", parent: "Employee" },
+      { name: "PrincipalEngineer", parent: "Engineer" },
+    ],
+  });
   const schema = Schema.parse(SCHEMA_SPEC);
   return {
     warnings: SCHEMA_CASES.map((c) =>
@@ -270,6 +283,9 @@ export function schemaWarnings(): {
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
+    terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
+      [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
+    ),
   };
 }
 
