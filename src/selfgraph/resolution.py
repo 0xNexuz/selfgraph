@@ -1344,7 +1344,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         ]
         restored_steps = []
         for s in original.steps:
-            if s in dropped_sibling_ids:
+            if s in dropped_sibling_ids and s not in orig_restored:
                 continue
             if s in orig_restored:
                 restored_steps.append(orig_restored[s])

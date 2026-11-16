@@ -330,6 +330,32 @@ function suite(spec: StoreSpec) {
     });
   }
 
+  it("restores a step for a relation dropped by a later merge", async () => {
+    const g = open({ resolver: "fuzzy" });
+    await seed(g, { type: "Person", name: "Jane Doe", aliases: ["JD"] });
+    const rid = relationId(JD, "KNOWS", JANE_DOES);
+    const res = await g.insert.facts({
+      entities: [
+        { type: "Person", name: "JD" },
+        { type: "Person", name: "Jane Does" },
+      ],
+      relations: [{ from_entity: JD, type: "KNOWS", to_entity: JANE_DOES }],
+      decisions: [{ title: "knows", steps: [rid] }],
+    });
+    const [dec] = res.decisions;
+    const mergeJd = res.merges.find((m) => m.absorbed_id === JD)!;
+    const mergeJdDoes = res.merges.find((m) => m.absorbed_id === JANE_DOES)!;
+    const currentId = relationId(JD, "KNOWS", JANE);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([]);
+
+    const restored = await g.entities.unmerge(mergeJd.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([currentId]);
+    expect(restored.decisions[0]!.steps.map((s) => s.relation_id)).toEqual([currentId]);
+
+    await g.entities.unmerge(mergeJdDoes.id);
+    expect((await g.decisions.get(dec!.id))!.steps.map((s) => s.relation_id)).toEqual([rid]);
+  });
+
   it("lists each inserted entity and relation once and keeps the merge", async () => {
     const g = open({ resolver: "fuzzy" });
     const res = await g.insert.facts({

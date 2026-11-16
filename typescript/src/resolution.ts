@@ -1469,9 +1469,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     }
     const restoredSteps: string[] = [];
     for (const s of original.steps) {
-      if (droppedSiblingIds.has(s)) {
-        continue;
-      }
+      if (droppedSiblingIds.has(s) && !origRestored.has(s)) continue;
       if (origRestored.has(s)) {
         restoredSteps.push(origRestored.get(s)!);
       } else if (siblingStepMap.has(s)) {
