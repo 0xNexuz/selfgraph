@@ -88,6 +88,17 @@ _COUNT_RANGE = "count_range"
 _UNBOUNDED_COUNTS = "selfgraph_unbounded_counts"
 
 
+def _js_count(value: int) -> str:
+    """Render a count the way JavaScript renders the same number in a message.
+
+    @param value (int): the count.
+    @return (str): plain digits below 10**21, exponential notation at or above it, as JavaScript prints it.
+    """
+    if abs(value) < 10**21:
+        return str(value)
+    return repr(float(value))
+
+
 class RelationEndpoint(InputModel):
     input_label: ClassVar[str] = "relation endpoint"
 
@@ -148,9 +159,6 @@ class Schema(TopInputModel):
     @classmethod
     def _report_counts_with_consistency(cls, data: Any, handler: Any) -> Any:
         """Report the first consistency problem after counts outside the safe integer range, as TypeScript does.
-
-        zod's range check on an integer does not stop the schema refinement, so TypeScript lists both. When every
-        field error is a count range error, this builds the schema without the range and appends its first problem.
 
         @param data (Any): the raw schema.
         @param handler (Any): the inner validator.
@@ -247,7 +255,8 @@ class Schema(TopInputModel):
                     raise ValueError(f"{at}.min_count: must be >= 0")
                 if end.min_count is not None and end.max_count is not None and end.min_count > end.max_count:
                     raise ValueError(
-                        f"{at}.min_count: min_count {end.min_count} is greater than max_count {end.max_count}"
+                        f"{at}.min_count: min_count {_js_count(end.min_count)} is greater than "
+                        f"max_count {_js_count(end.max_count)}"
                     )
         for i, relation in enumerate(self.relations):
             for j, alias in enumerate(relation.aliases):
