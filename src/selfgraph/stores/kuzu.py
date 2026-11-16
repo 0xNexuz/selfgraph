@@ -56,8 +56,8 @@ _SCHEMA = (
     "CREATE REL TABLE IF NOT EXISTS R(FROM N TO N, sid STRING, ns STRING, etype STRING, "
     "is_current BOOLEAN, revision INT64, doc STRING)",
 )
-_DATABASES: dict[str, Any] = {}
-_OPEN_STORES: dict[str, int] = {}
+_DATABASES: dict[object, Any] = {}
+_OPEN_STORES: dict[object, int] = {}
 _MAX_SKIP = 10_000_000
 _RECONNECT_EVERY = 500
 _NOW = "RETURN current_timestamp()"
@@ -157,19 +157,21 @@ class KuzuStore(AutoCommitStore):
         path = os.path.expanduser(path)
         if path not in ("", ":memory:"):
             path = os.path.abspath(path)
-        if path not in _DATABASES:
+        key = object() if path in ("", ":memory:") else path
+        if key not in _DATABASES:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             try:
-                _DATABASES[path] = kuzu.Database(path, **db_kwargs)
+                _DATABASES[key] = kuzu.Database(path, **db_kwargs)
             except Exception as exc:  # noqa: BLE001
                 raise _kuzu_error(exc, f"could not open Kuzu database {path!r}") from exc
         self._path = path
-        self._db = _DATABASES[path]
+        self._cache_key = key
+        self._db = _DATABASES[key]
         self._connect = partial(kuzu.Connection, self._db)
         self._conn = self._connect()
         self._statements = 0
         self._raw = False
-        _OPEN_STORES[path] = _OPEN_STORES.get(path, 0) + 1
+        _OPEN_STORES[key] = _OPEN_STORES.get(key, 0) + 1
         self._lock = asyncio.Lock()
 
     async def _run(self, query: str, params: Mapping[str, Any] | None = None, *, raw: bool = False) -> CypherResult:
@@ -230,10 +232,10 @@ class KuzuStore(AutoCommitStore):
                 return
             self._closed = True
             self._conn.close()
-            _OPEN_STORES[self._path] -= 1
-            if _OPEN_STORES[self._path] == 0:
-                del _OPEN_STORES[self._path]
-                _DATABASES.pop(self._path).close()
+            _OPEN_STORES[self._cache_key] -= 1
+            if _OPEN_STORES[self._cache_key] == 0:
+                del _OPEN_STORES[self._cache_key]
+                _DATABASES.pop(self._cache_key).close()
 
     async def get_node(self, ns: str, label: str, id: str) -> dict | None:
         res = await self._run(

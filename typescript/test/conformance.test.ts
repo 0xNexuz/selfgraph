@@ -15,7 +15,7 @@ const PY = process.env.SELFGRAPH_PY;
 const SCRIPT = fileURLToPath(new URL("./conformance/py_side.py", import.meta.url));
 const KUZU = tempKuzu("selfgraph-conf-");
 
-function py(cmd: "write" | "dump" | "schema" | "supersede", store: string, ns: string): unknown {
+function py(cmd: "write" | "dump" | "schema" | "supersede" | "kuzu_isolation", store: string, ns: string): unknown {
   const out = execFileSync(PY!, [SCRIPT, cmd, store, ns, KUZU], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(out);
 }
@@ -95,6 +95,21 @@ const live = new Map<string, boolean>();
 for (const spec of specs) live.set(spec.name, await reachable(spec));
 
 describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
+  it.skipIf(!live.get("kuzu"))("isolates anonymous Kuzu databases in both languages", async () => {
+    const result: boolean[] = [];
+    for (const path of ["", ":memory:"]) {
+      await using first = new SelfGraph(new KuzuStore(path));
+      await using second = new SelfGraph(new KuzuStore(path));
+      const entity = await first.entities.create("Jane", "Person");
+      result.push((await second.entities.get(entity.id)) === null);
+      await second.insert.facts({ entities: [{ name: "Jane", type: "Person" }] });
+      await second.entities.delete(entity.id);
+      result.push((await first.entities.get(entity.id))?.id === entity.id);
+    }
+    expect(result).toEqual([true, true, true, true]);
+    expect(py("kuzu_isolation", "-", "-")).toEqual(result);
+  });
+
   it("schema validation produces identical warnings in both languages", () => {
     expect(schemaWarnings()).toEqual(py("schema", "-", "-"));
   });
