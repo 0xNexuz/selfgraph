@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 
 import { kv } from "../../src/cli.js";
+import { lenientTime } from "../../src/extraction/extractor.js";
 import type { Evidence, GraphStore, Page } from "../../src/index.js";
 import {
   FalkorDBStore,
@@ -24,6 +25,19 @@ import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
+
+const LENIENT_EVENT_TIMES = [
+  "2021",
+  "0000",
+  "0001",
+  "9999",
+  "\u00b2\u00b2\u00b2\u00b2",
+  "\uff12\uff10\uff12\uff11",
+  "March 2021",
+  "",
+  "2021-06-15T12:00:00Z",
+  null,
+] as const;
 
 const TERMS_SPEC = {
   entities: [
@@ -302,6 +316,7 @@ export function schemaWarnings(): {
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
+  lenient_event_times: Array<string | null>;
 } {
   const terms = Schema.parse(TERMS_SPEC);
   const subSchema = Schema.parse({
@@ -405,6 +420,10 @@ export function schemaWarnings(): {
     terms_subtypes: ["Employees", "staff", "personnel"].map((q) =>
       [...expandTokens(tokens(q), subSchema, tokens)].sort(comparePy),
     ),
+    lenient_event_times: LENIENT_EVENT_TIMES.map((value) => {
+      const parsed = lenientTime(value);
+      return parsed === null ? null : jsonIso(parsed);
+    }),
   };
 }
 

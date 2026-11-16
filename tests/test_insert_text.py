@@ -2,7 +2,7 @@ import logging
 import unicodedata
 
 import pytest
-from helpers import FakeLLM, extracting_llm, fresh_graph, new_graph, run
+from helpers import FakeLLM, extracting_llm, fresh_graph, new_graph, run, utc
 
 from selfgraph import (
     EntityInput,
@@ -21,6 +21,7 @@ from selfgraph.extraction.extractor import (
     LLMExtractor,
     _DecisionsOut,
     _DecOut,
+    _lenient_event_time,
     _PreferencesOut,
     _PrefOut,
     _RelOut,
@@ -347,3 +348,35 @@ def test_llm_restatement_keeps_the_stored_decision_fields():
     run(g.decisions.update(dec.id, status="active", rationale="needs temporal history"))
     [again] = run(g.insert.text("The team picked HydraDB again.", source_id="m2")).decisions
     assert (again.id, again.status, again.rationale) == (dec.id, "active", "needs temporal history")
+
+
+def test_lenient_event_time_reads_a_bare_year_and_drops_what_it_cannot_parse():
+    assert _lenient_event_time("2021") == utc(2021)
+    assert _lenient_event_time(" 0001 ") == utc(1)
+    assert _lenient_event_time("2021-06-15T12:00:00Z") == utc(2021, 6, 15).replace(hour=12)
+    for noise in ("0000", "\u00b2\u00b2\u00b2\u00b2", "\uff12\uff10\uff12\uff11", "March 2021", "", None):
+        assert _lenient_event_time(noise) is None
+
+
+def test_llm_year_event_time_is_stored_and_an_unparseable_one_keeps_its_relation():
+    times = {"JOINED": "2021", "KNOWS": "March 2021", "MET": "\u00b2\u00b2\u00b2\u00b2"}
+
+    class YearLLM(FakeLLM):
+        async def generate(self, *, system, user, output):
+            name = output.__name__
+            if name == "_EntitiesOut":
+                return {"entities": [{"type": "Person", "name": "Ann"}, {"type": "Company", "name": "Acme"}]}
+            if name == "_RelationsOut":
+                return {
+                    "relations": [
+                        {"from_name": "Ann", "type": rtype, "to_name": "Acme", "event_time": event_time}
+                        for rtype, event_time in times.items()
+                    ]
+                }
+            return {name[1:-3].lower(): []}
+
+    g = fresh_graph("extract-year", llm=YearLLM(), resolver="exact")
+    res = run(g.insert.text("Ann joined Acme in 2021.", source_id="doc"))
+    assert res.warnings == []
+    assert {r.type: r.event_time for r in res.relations} == {"JOINED": utc(2021), "KNOWS": None, "MET": None}
+    assert run(g.retrieve("Ann Acme", as_of="2000-01-01")).subgraph.relations == []
