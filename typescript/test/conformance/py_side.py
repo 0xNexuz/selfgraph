@@ -521,6 +521,7 @@ async def write(graph):
     out["text"] = to_jsonable(
         await graph.insert.text(TEXT, source_id="notes", metadata={"author": "conformance", "n": 1, "f": 0.5})
     )
+    out["unicode_text"] = to_jsonable(await graph.insert.text("Émile Zola met Łukasz Nowak.", source_id="unicode"))
     works_at = ids.relation_id("person:jane-doe", "WORKS_AT", "company:acme")
     out["rel_update"] = to_jsonable(
         await graph.relations.update(

@@ -146,6 +146,14 @@ def test_extracted_relation_with_an_invalid_endpoint_is_dropped_with_a_warning()
     ]
 
 
+def test_regex_extraction_keeps_names_that_start_with_a_non_ascii_capital():
+    g = fresh_graph("regex-unicode", extraction="regex")
+    res = run(g.insert.text("Émile Zola met Łukasz Nowak in Århus. Иван Петров wrote to Σωκράτης."))
+    names = {e.name for e in res.entities}
+    assert {"Émile Zola", "Łukasz Nowak", "Århus", "Иван Петров", "Σωκράτης"} <= names
+    assert "Zola" not in names
+
+
 def test_custom_extractor_bypasses_the_llm_and_receives_the_insert_metadata():
     seen = []
 
