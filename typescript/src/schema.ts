@@ -470,14 +470,14 @@ function checkProperties(
 ): InsertWarning[] {
   const warnings: InsertWarning[] = [];
   for (const spec of specs) {
-    if (spec.required && !(spec.name in properties)) {
+    if (spec.required && !Object.hasOwn(properties, spec.name)) {
       warnings.push(
         insertWarning("missing_required_property", `${kind} ${ref} is missing required property ${pyRepr(spec.name)}`),
       );
     }
   }
   for (const spec of specs) {
-    if (spec.name in properties && !typeOk(properties[spec.name], spec.type)) {
+    if (Object.hasOwn(properties, spec.name) && !typeOk(properties[spec.name], spec.type)) {
       warnings.push(
         insertWarning("property_type_mismatch", `${kind} ${ref} property ${pyRepr(spec.name)} should be ${spec.type}`),
       );
