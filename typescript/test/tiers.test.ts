@@ -13,6 +13,7 @@ import {
   ValidationError,
 } from "../src/index.js";
 import { callTool, close as closeMcp, configure as configureMcp } from "../src/mcp.js";
+import { stem } from "../src/terms.js";
 import { buildCli, forEachStore, freshGraphs, runCli, type StoreSpec, tempKuzu, uniqueNs, worksAt } from "./helpers.js";
 
 const ACME = ids.relationId("person:ann", "WORKS_AT", "company:acme");
@@ -295,6 +296,70 @@ function suite(spec: StoreSpec): void {
     expect(embedder.calls).toHaveLength(calls + 1);
     expect(embedder.calls.at(-1)).toEqual(["feline"]);
     expect(() => open({ embedder: {} as never })).toThrow(/embedder must have an embed method/);
+  });
+
+  it("stem singularizes -es plurals and keeps status and analysis", async () => {
+    const singular: Record<string, string> = {
+      addresses: "address",
+      boxes: "box",
+      dishes: "dish",
+      batches: "batch",
+      branches: "branch",
+      statuses: "status",
+      buses: "bus",
+      movies: "movie",
+      cookies: "cookie",
+      quizzes: "quiz",
+      buzzes: "buzz",
+      waltzes: "waltz",
+      menus: "menu",
+      excuses: "excuse",
+      abuses: "abuse",
+      status: "status",
+      analysis: "analysis",
+      class: "class",
+    };
+    for (const [word, expected] of Object.entries(singular)) {
+      expect([word, stem(word)]).toEqual([word, expected]);
+      expect(stem(expected)).toBe(expected);
+    }
+    const tables = [
+      "addresses",
+      "order_status",
+      "tax_classes",
+      "batches",
+      "analysis",
+      "movies",
+      "cookies",
+      "quizzes",
+      "businesses",
+    ];
+    expect(fromTables(tables.map((name) => ({ name }))).entities.map((e) => e.name)).toEqual([
+      "Address",
+      "OrderStatus",
+      "TaxClass",
+      "Batch",
+      "Analysis",
+      "Movie",
+      "Cookie",
+      "Quiz",
+      "Business",
+    ]);
+    const g = open({ schema: { entities: [{ name: "Address" }, { name: "Status" }] } });
+    await g.insert.facts({
+      entities: [
+        { type: "Address", name: "12 Main St" },
+        { type: "Status", name: "Shipped" },
+      ],
+    });
+    for (const [question, matched] of [
+      ["which addresses", "Address"],
+      ["which statuses", "Status"],
+      ["which status", "Status"],
+    ]) {
+      const report = await g.checkAnswerable(question!);
+      expect([report.verdict, report.terms.map((t) => t.matches)]).toEqual(["answerable", [[matched]]]);
+    }
   });
 
   it("fromTables drafts types, properties, relations, and mappings", async () => {

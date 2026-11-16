@@ -49,6 +49,8 @@ TABLES = [
     },
     {"name": "sales.invoices", "columns": [{"name": "invoice_date", "type": "date"}, {"name": "id", "type": "uuid"}]},
     {"name": "Customers", "columns": [{"name": "parent_id", "references": "Customers"}]},
+    {"name": "addresses", "columns": [{"name": "status_id", "references": "order_statuses"}]},
+    {"name": "movies"},
     {"name": "order_statuses"},
     {"name": "Companies", "columns": [{"name": "customer_id", "references": "Customers"}]},
 ]
