@@ -47,6 +47,12 @@ const SHARED_DEFINITION_SPEC = {
     },
   ],
 };
+const SHARED_SYNONYM_SPEC = {
+  entities: [
+    { name: "Employee", definitions: [{ name: "status", expression: "active", synonyms: ["state"] }] },
+    { name: "Project", definitions: [{ name: "phase", expression: "phase", synonyms: ["state"] }] },
+  ],
+};
 const TERM_QUESTIONS = [
   "What is the staff size of the firm Acme by ad spend?",
   "users employed by employers",
@@ -290,6 +296,7 @@ export function schemaWarnings(): {
   term_forms: unknown;
   terms: unknown[];
   shared_term_forms: unknown;
+  shared_synonym_term_forms: unknown;
   shared_terms: string[][];
   datetime_errors: string[];
   terms_subtypes: unknown[];
@@ -387,6 +394,12 @@ export function schemaWarnings(): {
     ),
     shared_term_forms: Object.fromEntries(
       Object.entries(schemaForms(sharedSchema)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
+    ),
+    shared_synonym_term_forms: Object.fromEntries(
+      Object.entries(schemaForms(Schema.parse(SHARED_SYNONYM_SPEC))).map(([kind, named]) => [
+        kind,
+        Object.fromEntries(named),
+      ]),
     ),
     shared_terms: ["employment state", "project state", "status"].map((q) =>
       [...expandTokens(tokens(q), sharedSchema, tokens)].sort(comparePy),
@@ -840,6 +853,13 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
+  const sharedTermsGraph = new SelfGraph(store, {
+    namespace: `${ns}:shared-synonym`,
+    schema: SHARED_SYNONYM_SPEC,
+    extraction: "regex",
+  });
+  await sharedTermsGraph.insert.facts({ entities: [{ type: "Employee", name: "Alice" }] });
+  const sharedSynonymAnswerable = await sharedTermsGraph.checkAnswerable("state");
   const seeded: Record<string, unknown> = {};
   for (const tier of ["bm25", "synonyms"] as const) {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
@@ -848,6 +868,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
     answerable,
+    shared_synonym_answerable: sharedSynonymAnswerable,
     prune_types: pruned,
     known_at_sources: {
       seeds: historical.seeds.map((s) => s.id),

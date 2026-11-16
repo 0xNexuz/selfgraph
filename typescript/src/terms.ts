@@ -5,7 +5,7 @@ import { canonicalEntityType, canonicalRelationType, entityIndex, lineage, type 
 export type Tokenize = (text: string) => Set<string>;
 
 export type SchemaTermKind = "type" | "definition" | "relation";
-export type DefinitionEntry = readonly [string, string, boolean];
+export type DefinitionInfo = readonly [string, string, string[], boolean];
 
 const SINGULARS = new Map([
   ["calories", "calorie"],
@@ -83,21 +83,25 @@ function forms(names: readonly string[]): string[] {
 }
 
 /**
- * Map each definition surface form to every entity that declares it.
+ * Map each definition, keyed by entity and name, to its declaring entity, name, surface forms, and certified flag.
  *
- * Definitions are keyed by entity and name, so one name shared by several entities keeps all of its owners.
+ * Keying by entity and name keeps definitions with a shared name or synonym distinct, so callers can tell which
+ * declaring entity a form belongs to.
  *
  * @param schema (ParsedSchema | null): the schema, or null for no definitions.
- * @return (Map<string, DefinitionEntry[]>): each form's declaring entity name, definition name, and certified flag.
+ * @return (Map<string, DefinitionInfo>): each definition's owner, name, forms, and certified flag.
  */
-export function definitionForms(schema: ParsedSchema | null): Map<string, DefinitionEntry[]> {
-  const found = new Map<string, DefinitionEntry[]>();
+export function definitionForms(schema: ParsedSchema | null): Map<string, DefinitionInfo> {
+  const found = new Map<string, DefinitionInfo>();
   if (schema === null) return found;
   for (const entity of schema.entities) {
     for (const definition of entity.definitions) {
-      for (const form of forms([definition.name, ...definition.synonyms])) {
-        found.set(form, [...(found.get(form) ?? []), [entity.name, definition.name, definition.certified]]);
-      }
+      found.set(`${entity.name}\u0000${definition.name}`, [
+        entity.name,
+        definition.name,
+        forms([definition.name, ...definition.synonyms]),
+        definition.certified,
+      ]);
     }
   }
   return found;
@@ -156,16 +160,16 @@ export function schemaForms(
   };
   if (schema === null) return found;
   const note = (kind: SchemaTermKind, term: string, names: readonly string[], certified: boolean): void => {
-    for (const form of forms(names)) {
-      const previous = found[kind].get(form);
-      if (previous === undefined) found[kind].set(form, [term, certified]);
-      else if (kind === "definition") found[kind].set(form, [term, previous[1] && certified]);
-    }
+    for (const form of forms(names)) if (!found[kind].has(form)) found[kind].set(form, [term, certified]);
   };
   for (const entity of schema.entities) {
     note("type", entity.name, [entity.name, ...entity.aliases, ...entity.synonyms], entity.certified);
-    for (const definition of entity.definitions) {
-      note("definition", definition.name, [definition.name, ...definition.synonyms], definition.certified);
+  }
+  for (const [, name, defForms, certified] of definitionForms(schema).values()) {
+    for (const form of defForms) {
+      const previous = found.definition.get(form);
+      if (previous === undefined) found.definition.set(form, [name, certified]);
+      else found.definition.set(form, [previous[0], previous[1] && certified]);
     }
   }
   for (const relation of schema.relations) {
@@ -204,10 +208,10 @@ export function expandTokens(
       }
     }
   }
-  for (const [form, owners] of definitions) {
-    const words = [...tokenize(form)].map(stem);
-    if (!words.length || !words.every((w) => stems.has(w))) continue;
-    for (const [owner] of owners) {
+  for (const [owner, , defForms] of definitions.values()) {
+    for (const form of defForms) {
+      const words = [...tokenize(form)].map(stem);
+      if (!words.length || !words.every((w) => stems.has(w))) continue;
       for (const entity of schema.entities) {
         if ([...lineage(entity, index)].some((t) => t.name === owner)) {
           for (const token of tokenize(entity.name)) out.add(token);

@@ -1255,7 +1255,14 @@ export function answerability(
   depth: number,
 ): AnswerabilityReport {
   const found = schemaForms(schema);
-  const definitions = definitionForms(schema);
+  const definitionEntries = new Map<string, Array<readonly [string, string, boolean]>>();
+  for (const [owner, name, defForms, certified] of definitionForms(schema).values()) {
+    for (const form of defForms) {
+      const entries = definitionEntries.get(form) ?? [];
+      entries.push([owner, name, certified]);
+      definitionEntries.set(form, entries);
+    }
+  }
   const asked =
     terms ??
     questionTerms(question, [
@@ -1266,9 +1273,6 @@ export function answerability(
     schema,
     entities.map((e) => e.type),
     relations.map((r) => r.type),
-  );
-  const liveDefinitions = new Set(
-    [...definitions].filter(([, owners]) => owners.some(([owner]) => held.type.has(owner))).map(([form]) => form),
   );
   const isHeld = (kind: TermCoverage["status"], term: string): boolean =>
     !(kind in held) || held[kind as keyof typeof held].has(term);
@@ -1295,12 +1299,20 @@ export function answerability(
       let declared: Array<readonly [string, boolean]> = [];
       for (const [kind, named] of kinds) {
         const hits = words.length ? [...named].filter(([form]) => covers(words, form)).map(([, hit]) => hit) : [];
-        const live =
-          kind === "definition"
-            ? [...named]
-                .filter(([form]) => words.length && covers(words, form) && liveDefinitions.has(form))
-                .map(([, hit]) => hit)
-            : hits.filter(([t]) => isHeld(kind, t));
+        let live: Array<readonly [string, boolean]> = [];
+        if (kind === "definition") {
+          for (const [form] of named) {
+            if (!words.length || !covers(words, form)) continue;
+            const entries = definitionEntries.get(form) ?? [];
+            if (!entries.some(([owner]) => held.type.has(owner))) continue;
+            const allCertified = entries.every(([, , certified]) => certified);
+            for (const [owner, name] of entries) {
+              if (held.type.has(owner)) live.push([name, allCertified]);
+            }
+          }
+        } else {
+          live = hits.filter(([t]) => isHeld(kind, t));
+        }
         if (live.length) {
           status = kind;
           matched = live.map(([t]) => t);

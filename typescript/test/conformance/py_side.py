@@ -42,6 +42,15 @@ SHARED_DEFINITION_SPEC = {
         },
     ]
 }
+SHARED_SYNONYM_SPEC = {
+    "entities": [
+        {
+            "name": "Employee",
+            "definitions": [{"name": "status", "expression": "active", "synonyms": ["state"]}],
+        },
+        {"name": "Project", "definitions": [{"name": "phase", "expression": "phase", "synonyms": ["state"]}]},
+    ]
+}
 TERM_QUESTIONS = [
     "What is the staff size of the firm Acme by ad spend?",
     "users employed by employers",
@@ -307,6 +316,7 @@ def schema_warnings():
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
         "shared_term_forms": to_jsonable(schema_forms(Schema.model_validate(SHARED_DEFINITION_SPEC))),
+        "shared_synonym_term_forms": to_jsonable(schema_forms(Schema.model_validate(SHARED_SYNONYM_SPEC))),
         "shared_terms": [
             sorted(expand_tokens(_tokens(q), shared_schema, _tokens))
             for shared_schema in [Schema.model_validate(SHARED_DEFINITION_SPEC)]
@@ -885,6 +895,11 @@ async def dump(graph, ns):
     }
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
+    shared_terms_graph = SelfGraph(
+        store=store, namespace=f"{ns}:shared-synonym", schema=SHARED_SYNONYM_SPEC, extraction="regex"
+    )
+    await shared_terms_graph.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]})
+    shared_synonym_answerable = await shared_terms_graph.check_answerable("state")
     seeded = {
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
@@ -893,6 +908,7 @@ async def dump(graph, ns):
     return to_jsonable(
         {
             "answerable": answerable,
+            "shared_synonym_answerable": shared_synonym_answerable,
             "prune_types": pruned,
             "known_at_sources": {
                 "seeds": [s.id for s in historical.seeds],
