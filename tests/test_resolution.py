@@ -829,3 +829,53 @@ def test_unmerging_chained_merges_in_any_order_restores_the_exact_relations(orde
         assert out.entity.updated_at == res.created_at
     assert [(r.from_entity, r.type, r.to_entity) for r in run(g.relations.list()).items] == [(JD, "KNOWS", JANE_DOES)]
     assert _ids(g) == [JANE, JANE_DOES, JD]
+
+
+def test_resolution_matches_entity_types_case_insensitively():
+    g = fresh_graph("res", resolver="default")
+    _seed(g, {"type": "Person", "name": "Robert", "aliases": ["Bob"]})
+    res = run(g.insert.facts({"entities": [{"type": "person", "name": "Bob"}]}))
+    assert [(m.absorbed_id, m.survivor_id, m.reason) for m in res.merges] == [(BOB_ID, ROBERT_ID, "alias")]
+
+    g = fresh_graph("res", resolver="fuzzy")
+    res = run(
+        g.insert.facts(
+            {
+                "entities": [
+                    {"type": "Person", "name": "Robert", "aliases": ["Bob"]},
+                    {"type": "person", "name": "Bob"},
+                ]
+            }
+        )
+    )
+    assert [(m.absorbed_id, m.survivor_id, m.reason) for m in res.merges] == [(BOB_ID, ROBERT_ID, "alias")]
+
+    g = fresh_graph("res", resolver="fuzzy")
+    _seed(g, {"type": "Person", "name": "Jane Doe"})
+    res = run(g.insert.facts({"entities": [{"type": "person", "name": "Jane Does"}]}))
+    assert [(m.absorbed_id, m.survivor_id, m.reason) for m in res.merges] == [(JANE_DOES, JANE, "similarity")]
+
+    yes = FakeLLM({"_SameEntity": _SameEntity(same=True)})
+    g = fresh_graph("res", llm=yes, resolver="llm")
+    _seed(g, {"type": "Person", "name": "John Smith"})
+    res = run(g.insert.facts({"entities": [{"type": "person", "name": "Jon Smyth"}]}))
+    assert [(m.absorbed_id, m.survivor_id, m.reason) for m in res.merges] == [
+        (entity_id("Person", "Jon Smyth"), entity_id("Person", "John Smith"), "llm")
+    ]
+    assert len(yes.calls) == 1
+
+    schema = {
+        "entities": [
+            {"name": "Organization", "aliases": ["Org"]},
+            {"name": "Company", "parent": "Organization"},
+        ]
+    }
+    g = fresh_graph("res", resolver="default", schema=schema)
+    _seed(g, {"type": "Organization", "name": "International Business Machines", "aliases": ["IBM"]})
+    org_ibm = entity_id("Organization", "International Business Machines")
+    res = run(g.insert.facts({"entities": [{"type": "company", "name": "IBM"}]}))
+    assert [m.survivor_id for m in res.merges] == [org_ibm]
+    res = run(g.insert.facts({"entities": [{"type": "org", "name": "Big Blue", "aliases": ["IBM"]}]}))
+    assert [m.survivor_id for m in res.merges] == [org_ibm]
+    res = run(g.insert.facts({"entities": [{"type": "thing", "name": "IBM"}]}))
+    assert [m.survivor_id for m in res.merges] == [org_ibm]
