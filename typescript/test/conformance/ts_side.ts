@@ -752,5 +752,30 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
       v.invalidated_at ? jsonIso(v.invalidated_at) : null,
     ]);
   }
-  return { warnings, versions, withdrawn_warnings: cidOlder.warnings.map((w) => w.code), withdrawn_versions };
+  await graph.insert.facts({
+    entities: [
+      ...["Dan", "Eve"].map((name) => ({ type: "Person", name })),
+      ...["Hooli", "Umbrella", "Wayne"].map((name) => ({ type: "Company", name })),
+    ],
+  });
+  for (const [person, company, year] of [
+    ["dan", "hooli", 2020],
+    ["dan", "umbrella", 2021],
+    ["eve", "hooli", 2022],
+  ] as const) {
+    await graph.insert.facts({ relations: [link(person, company, year)] });
+  }
+  await graph.insert.facts({ relations: [link("eve", "wayne", 2023)] });
+  const deleted = await graph.relations.delete(ids.relationId("person:dan", "WORKS_AT", "company:umbrella"));
+  const delete_versions = (
+    await graph.relations.versions(ids.relationId("person:dan", "WORKS_AT", "company:hooli"))
+  ).map((v) => [v.revision, v.is_current, v.invalidated_by, v.invalidated_at ? jsonIso(v.invalidated_at) : null]);
+  return {
+    warnings,
+    versions,
+    withdrawn_warnings: cidOlder.warnings.map((w) => w.code),
+    withdrawn_versions,
+    delete_restored: deleted.restored_relations,
+    delete_versions,
+  };
 }

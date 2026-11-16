@@ -639,6 +639,23 @@ async def supersede(graph):
             ]
             for v in await graph.relations.versions(rid)
         ]
+    await graph.insert.facts(
+        {
+            "entities": [
+                *({"type": "Person", "name": n} for n in ("Dan", "Eve")),
+                *({"type": "Company", "name": n} for n in ("Hooli", "Umbrella", "Wayne")),
+            ]
+        }
+    )
+    for person, company, year in (("dan", "hooli", 2020), ("dan", "umbrella", 2021), ("eve", "hooli", 2022)):
+        await graph.insert.facts({"relations": [link(person, company, year)]})
+    await graph.insert.facts({"relations": [link("eve", "wayne", 2023)]})
+    deleted = await graph.relations.delete(ids.relation_id("person:dan", "WORKS_AT", "company:umbrella"))
+    out["delete_restored"] = deleted.restored_relations
+    out["delete_versions"] = [
+        [v.revision, v.is_current, v.invalidated_by, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await graph.relations.versions(ids.relation_id("person:dan", "WORKS_AT", "company:hooli"))
+    ]
     return out
 
 

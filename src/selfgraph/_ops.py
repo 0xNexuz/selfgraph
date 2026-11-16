@@ -2143,12 +2143,13 @@ async def resettle_after_delete(
     """Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
 
     Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
-    Contradictions.settle keeps the newest max_count current there. One that comes back is written as a new current
-    revision with its properties and source count, taking effect when the retired version did, so as_of reads show it
-    valid from its start. One that stays retired is re-pointed in place when settle names another relation or time,
-    keeping when its retirement was written for known_at reads. A current one settle retires is retired as a
-    supersede retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so it is
-    left as it is. Both endpoints of each deleted relation are locked before they are read.
+    Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
+    counted at each one. One that comes back is written as a new current revision with its properties and source
+    count, taking effect when the retired version did, so as_of reads show it valid from its start. One that stays
+    retired, or a retired one whose invalidation settle corrects, takes a new revision naming the relation and time
+    that now displace it, so known_at reads still see the earlier retirement. A current one settle retires is retired
+    as a supersede retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so
+    it is left as it is. Both endpoints of each deleted relation are locked before they are read.
 
     @param runner (Any): graph runner.
     @param ns (str): namespace.
@@ -2181,46 +2182,33 @@ async def resettle_after_delete(
     ]
     if not stale:
         return 0
-    more = await _endpoint_edges(runner, ns, caps, [(e["type"], e["from_id"], e["to_id"]) for e in stale])
-    for rid, edge in more.items():
-        found.setdefault(rid, edge)
-    rels = {rid: _relation_of(edge) for rid, edge in found.items()}
-    tracker = Contradictions(
-        caps,
-        "supersede",
-        [rel for rel in rels.values() if rel.is_current],
-        [rel for rel in rels.values() if not rel.is_current and rel.invalidated_at],
-    )
+    ends = [(e["type"], e["from_id"], e["to_id"]) for e in stale]
+    tracker, found = await _contradiction_check(runner, ns, "supersede", caps, ends)
     for edge in stale:
-        rel = rels[edge["props"]["id"]]
+        rel = _relation_of(edge)
         tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, _rank(rel))
     ended, _ = tracker.settle()
     rows = []
-    restored = 0
     for edge in stale:
-        rel = rels[edge["props"]["id"]]
-        if rel.id not in ended:
-            props = encode_relation_props(
-                ns=ns,
-                id=rel.id,
-                revision=rel.revision + 1,
-                properties=rel.properties,
-                event_time=effective_time(rel),
-                created_at=at,
-                is_current=True,
-                source_count=rel.source_count,
-            )
-            restored += 1
-        else:
-            by, when = ended[rel.id]
-            if (by, to_iso(when)) == (edge["props"].get("invalidated_by"), edge["props"].get("invalidated_at")):
-                continue
-            props = {**edge["props"], "invalidated_at": to_iso(when), "invalidated_by": by}
+        if edge["props"]["id"] in ended:
+            continue
+        rel = _relation_of(edge)
+        props = encode_relation_props(
+            ns=ns,
+            id=rel.id,
+            revision=rel.revision + 1,
+            properties=rel.properties,
+            event_time=effective_time(rel),
+            created_at=at,
+            is_current=True,
+            source_count=rel.source_count,
+        )
         rows.append((edge["type"], edge["from_id"], edge["to_id"], props))
-    stale_ids = {edge["props"]["id"] for edge in stale}
+    restored = len(rows)
     for rid, (by, when) in ended.items():
-        if rid not in stale_ids:
-            gone = _retired(found[rid], by, when, at)
+        edge = found[rid]
+        if (by, to_iso(when)) != (edge["props"].get("invalidated_by"), edge["props"].get("invalidated_at")):
+            gone = _retired(edge, by, when, at)
             rows.append((gone["type"], gone["from_id"], gone["to_id"], gone["props"]))
     for row in rows:
         await _precheck_write(runner, row[3])

@@ -549,7 +549,6 @@ def test_withdrawn_relations_do_not_trigger_supersede_or_lose_invalidation():
     assert run(g.relations.list(from_entity="person:ann", type="WORKS_AT")).items == []
 
 
-
 def test_deleting_the_relation_that_superseded_another_restores_it():
     for remove in (lambda g: g.relations.delete(GLOBEX), lambda g: g.entities.delete("company:globex")):
         g = graph(contradiction="supersede")
@@ -629,3 +628,29 @@ def test_a_delete_settles_the_whole_endpoint_again_newest_first():
     g = tools("a", "b", "c")
     assert run(g.relations.delete(uses("b"))).restored_relations == 1
     assert sorted(run(collect(g.relations.iterate(from_entity="person:ann")))) == sorted([uses("a"), uses("c")])
+
+
+def test_a_delete_counts_retired_history_at_the_other_endpoint():
+    spec = {
+        "entities": [{"name": "Person"}, {"name": "Company"}],
+        "relations": [
+            {
+                "type": "WORKS_AT",
+                "from": {"types": ["Person"], "max_count": 1},
+                "to": {"types": ["Company"], "max_count": 1},
+            }
+        ],
+    }
+    people = [{"type": "Person", "name": n} for n in ("Ann", "Bob")]
+    people += [{"type": "Company", "name": n} for n in ("Acme", "Globex", "Initech")]
+    g = fresh_graph("contra", schema=spec, contradiction="supersede")
+    run(g.insert.facts({"entities": people}))
+    for person, company, year in (("ann", "acme", 2020), ("ann", "globex", 2021), ("bob", "acme", 2022)):
+        insert(g, works_at(company, year, person=person))
+    insert(g, works_at("initech", 2023, person="bob"))
+    bob_acme = ids.relation_id("person:bob", "WORKS_AT", "company:acme")
+    assert run(g.relations.delete(GLOBEX)).restored_relations == 0
+    newest, first = run(g.relations.versions(ACME))
+    assert (newest.is_current, newest.invalidated_by, newest.invalidated_at) == (False, bob_acme, utc(2022))
+    assert (newest.revision, first.invalidated_by) == (first.revision + 1, GLOBEX)
+    assert {r.id for r in run(g.retrieve("Ann", as_of=utc(2021, 6))).subgraph.relations} == {ACME}

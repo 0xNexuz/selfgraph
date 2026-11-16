@@ -2223,10 +2223,11 @@ export async function retireRelations(
  * Settle again each max_count endpoint a deleted relation sat at, as supersede would have settled it without it.
  *
  * Every relation a supersede retired at such an endpoint is admitted back with its stored rank, and
- * Contradictions.settle keeps the newest max_count current there. One that comes back is written as a new current
- * revision with its properties and source count, taking effect when the retired version did, so as_of reads show it
- * valid from its start. One that stays retired is re-pointed in place when settle names another relation or time,
- * keeping when its retirement was written for known_at reads. A current one settle retires is retired as a supersede
+ * Contradictions.settle settles every endpoint those relations sit at, as an insert settles it, with retired history
+ * counted at each one. One that comes back is written as a new current revision with its properties and source count,
+ * taking effect when the retired version did, so as_of reads show it valid from its start. One that stays retired, or a
+ * retired one whose invalidation settle corrects, takes a new revision naming the relation and time that now displace
+ * it, so known_at reads still see the earlier retirement. A current one settle retires is retired as a supersede
  * retires it. A retirement by replace_source or the LLM judge names no relation of the endpoint, so it is left as it
  * is. Both endpoints of each deleted relation are locked before they are read.
  *
@@ -2271,50 +2272,38 @@ export async function resettleAfterDelete(
       }),
   );
   if (!stale.length) return 0;
-  for (const [rid, edge] of await endpointEdges(runner, ns, limits, endsOf(stale))) {
-    if (!found.has(rid)) found.set(rid, edge);
-  }
-  const rels = new Map([...found].map(([rid, edge]) => [rid, relationOf(edge)]));
-  const tracker = new Contradictions(
-    limits,
-    "supersede",
-    [...rels.values()].filter((rel) => rel.is_current),
-    [...rels.values()].filter((rel) => !rel.is_current && rel.invalidated_at),
+  const [tracker, read] = await contradictionCheck(
+    runner,
+    ns,
+    { contradiction: "supersede", caps: limits },
+    endsOf(stale),
   );
   for (const edge of stale) {
-    const rel = rels.get(idOf(edge.props))!;
-    tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, rankOf(rel), effectiveTime(rel));
+    const rel = relationOf(edge);
+    tracker!.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, rankOf(rel), effectiveTime(rel));
   }
-  const [ended] = tracker.settle();
+  const [ended] = tracker!.settle();
   const rows: EdgeWrite[] = [];
-  let restored = 0;
   for (const edge of stale) {
-    const rel = rels.get(idOf(edge.props))!;
-    const moved = ended.get(rel.id);
-    let props: Props;
-    if (moved === undefined) {
-      props = encodeRelationProps({
-        ns,
-        id: rel.id,
-        revision: rel.revision + 1,
-        properties: rel.properties,
-        event_time: effectiveTime(rel),
-        created_at: at,
-        is_current: true,
-        source_count: rel.source_count,
-      });
-      restored += 1;
-    } else {
-      const [by, when] = moved;
-      if (by === edge.props.invalidated_by && toIso(when) === edge.props.invalidated_at) continue;
-      props = { ...edge.props, invalidated_at: toIso(when), invalidated_by: by };
-    }
+    if (ended.has(idOf(edge.props))) continue;
+    const rel = relationOf(edge);
+    const props = encodeRelationProps({
+      ns,
+      id: rel.id,
+      revision: rel.revision + 1,
+      properties: rel.properties,
+      event_time: effectiveTime(rel),
+      created_at: at,
+      is_current: true,
+      source_count: rel.source_count,
+    });
     rows.push([edge.type, edge.from_id, edge.to_id, props]);
   }
-  const staleIds = new Set(stale.map((edge) => idOf(edge.props)));
+  const restored = rows.length;
   for (const [rid, [by, when]] of ended) {
-    if (staleIds.has(rid)) continue;
-    const gone = retiredEdge(found.get(rid)!, by, when, at);
+    const edge = read.get(rid)!;
+    if (by === edge.props.invalidated_by && toIso(when) === edge.props.invalidated_at) continue;
+    const gone = retiredEdge(edge, by, when, at);
     rows.push([gone.type, gone.from_id, gone.to_id, gone.props]);
   }
   for (const row of rows) precheckWrite(runner, row[3]);

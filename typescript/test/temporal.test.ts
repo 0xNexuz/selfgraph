@@ -845,6 +845,39 @@ function suite(spec: StoreSpec): void {
     expect((await current(g)).sort()).toEqual([uses("a"), uses("c")].sort());
   });
 
+  it("a delete counts retired history at the other endpoint", async () => {
+    const spec: Schema = {
+      entities: [{ name: "Person" }, { name: "Company" }],
+      relations: [
+        { type: "WORKS_AT", from: { types: ["Person"], max_count: 1 }, to: { types: ["Company"], max_count: 1 } },
+      ],
+    };
+    const g = open({ schema: spec, contradiction: "supersede" });
+    await g.insert.facts({
+      entities: [
+        ...["Ann", "Bob"].map((name) => ({ type: "Person", name })),
+        ...["Acme", "Globex", "Initech"].map((name) => ({ type: "Company", name })),
+      ],
+    });
+    for (const [person, company, year] of [
+      ["ann", "acme", 2020],
+      ["ann", "globex", 2021],
+      ["bob", "acme", 2022],
+      ["bob", "initech", 2023],
+    ] as const) {
+      await insert(g, [
+        { from_entity: `person:${person}`, type: "WORKS_AT", to_entity: `company:${company}`, event_time: at(year) },
+      ]);
+    }
+    const bobAcme = ids.relationId("person:bob", "WORKS_AT", "company:acme");
+    expect((await g.relations.delete(GLOBEX)).restored_relations).toBe(0);
+    const [newest, first] = await g.relations.versions(ACME);
+    expect([newest!.is_current, newest!.invalidated_by, newest!.invalidated_at]).toEqual([false, bobAcme, at(2022)]);
+    expect([newest!.revision, first!.invalidated_by]).toEqual([first!.revision + 1, GLOBEX]);
+    const valid = await g.retrieve("Ann", { as_of: new Date(Date.UTC(2021, 5, 1)) });
+    expect(valid.subgraph.relations.map((r) => r.id)).toEqual([ACME]);
+  });
+
   it("rejects an invalid as_of and a closed graph", async () => {
     const g = await graph();
     await expect(g.retrieve("Ann", { as_of: 5 as never })).rejects.toThrow("as_of must be a datetime, got number");
