@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { errorMessage, StoreError, ValidationError } from "../errors.js";
+import { errorMessage, SelfGraphError, StoreError, ValidationError } from "../errors.js";
 import { Lazy } from "../internal/lazy.js";
 import { loadOptional } from "../internal/optional.js";
 import { pyJsonDumps, pyRepr, pyStr } from "../internal/py.js";
@@ -86,12 +86,21 @@ interface KuzuModule {
   Connection: new (db: KuzuDatabase) => KuzuConnection;
 }
 
+interface KuzuDatabaseOptions {
+  buffer_pool_size: number;
+  compression: boolean;
+  read_only: boolean;
+  max_db_size: number;
+}
+
 const DATABASES = new Map<string | symbol, KuzuDatabase>();
+const DATABASE_OPTIONS = new Map<string | symbol, KuzuDatabaseOptions>();
 const OPEN_STORES = new Map<string | symbol, number>();
 const WRITE_QUEUES = new Map<string | symbol, object>();
 const PATH_QUEUES = new Map<string | symbol, Promise<unknown>>();
 const MAX_SKIP = 10_000_000;
 const RECONNECT_EVERY = 500;
+const MAX_DB_SIZE_DEFAULT = 8_796_093_022_208;
 const NOW = "RETURN current_timestamp() AS now";
 const CLOCK_TICK_MS = 20;
 
@@ -219,22 +228,39 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       StoreError,
     );
     const kuzu = mod.default ?? mod;
+    const o = this.options;
+    const options: KuzuDatabaseOptions = {
+      buffer_pool_size: o.buffer_pool_size ?? 0,
+      compression: o.compression ?? true,
+      read_only: o.read_only ?? false,
+      max_db_size: o.max_db_size ?? MAX_DB_SIZE_DEFAULT,
+    };
     let db = DATABASES.get(this.cacheKey);
     if (db === undefined) {
       mkdirSync(dirname(this.path), { recursive: true });
-      const o = this.options;
       try {
         db = new kuzu.Database(
           this.path,
-          o.buffer_pool_size ?? 0,
-          o.compression ?? true,
-          o.read_only ?? false,
-          o.max_db_size ?? 0,
+          options.buffer_pool_size,
+          options.compression,
+          options.read_only,
+          options.max_db_size,
         );
       } catch (exc) {
         throw kuzuError(exc, `could not open Kuzu database ${pyRepr(this.path)}`);
       }
       DATABASES.set(this.cacheKey, db);
+      DATABASE_OPTIONS.set(this.cacheKey, options);
+    } else {
+      const open = DATABASE_OPTIONS.get(this.cacheKey);
+      const diffs = (Object.keys(options) as (keyof KuzuDatabaseOptions)[])
+        .filter((k) => o[k] !== undefined && o[k] !== open?.[k])
+        .sort()
+        .map((k) => `${k} ${pyRepr(open?.[k])} vs ${pyRepr(o[k])}`)
+        .join(", ");
+      if (diffs) {
+        throw new ValidationError(`KuzuStore(${pyRepr(this.path)}) is already open with different options: ${diffs}`);
+      }
     }
     OPEN_STORES.set(this.cacheKey, (OPEN_STORES.get(this.cacheKey) ?? 0) + 1);
     this.connect = () => new kuzu.Connection(db);
@@ -262,7 +288,8 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
    * An embedded, in-process Kuzu graph over a generic single-table schema.
    *
    * @param path (string): the database directory or file.
-   * @param options (KuzuStoreOptions): Kuzu database settings, used when this process first opens the path.
+   * @param options (KuzuStoreOptions): Kuzu database settings, applied when this process first opens the path;
+   *     a second store on the path must not pass different values.
    */
   constructor(
     path = "selfgraph_kuzu",
@@ -356,7 +383,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
     try {
       return await this.onPath(() => this.exec(query, params, raw));
     } catch (exc) {
-      if (exc instanceof StoreError) throw exc;
+      if (exc instanceof SelfGraphError) throw exc;
       throw kuzuError(exc, "Kuzu query failed");
     }
   }
@@ -378,6 +405,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
   private static async closeCachedDatabase(key: string | symbol): Promise<void> {
     const db = DATABASES.get(key);
     DATABASES.delete(key);
+    DATABASE_OPTIONS.delete(key);
     WRITE_QUEUES.delete(key);
     PATH_QUEUES.delete(key);
     await db?.close?.();

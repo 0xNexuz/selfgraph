@@ -1389,6 +1389,31 @@ describe("store setup errors", () => {
     }
   });
 
+  it("rejects a Kuzu store whose options differ from the open database", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-options-"));
+    const path = join(dir, "opts.kuzu");
+    try {
+      const first = new KuzuStore(path);
+      await first.initialize();
+      await expect(new KuzuStore(path, { read_only: true }).initialize()).rejects.toBeInstanceOf(ValidationError);
+      await expect(new KuzuStore(path, { max_db_size: 1024 }).initialize()).rejects.toThrow("max_db_size");
+      const same = new KuzuStore(path, { read_only: false });
+      await same.initialize();
+      await same.close();
+      await first.close();
+
+      const sizedPath = join(dir, "sized.kuzu");
+      const sized = new KuzuStore(sizedPath, { max_db_size: 1 << 30 });
+      await sized.initialize();
+      const bare = new KuzuStore(sizedPath);
+      await bare.initialize();
+      await bare.close();
+      await sized.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("checks store options, expands ~ in a Kuzu path, and explains lock and mmap failures", async () => {
     for (const size of [-1, 0, 1.5]) {
       expect(() => new KuzuStore("x.kuzu", { max_db_size: size })).toThrow(

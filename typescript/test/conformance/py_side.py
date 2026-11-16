@@ -1546,7 +1546,7 @@ async def dump(graph, ns):
 async def main():
     cmd = sys.argv[1]
     if cmd == "kuzu_isolation":
-        from selfgraph import KuzuStore
+        from selfgraph import KuzuStore, ValidationError
 
         result = []
         for path in ("", ":memory:"):
@@ -1556,6 +1556,16 @@ async def main():
                 await second.insert.facts({"entities": [{"name": "Jane", "type": "Person"}]})
                 await second.entities.delete(entity.id)
                 result.append(await first.entities.get(entity.id) == entity)
+        path = sys.argv[4]
+        first = KuzuStore(path)
+        for db_kwargs in ({"read_only": True}, {"read_only": True, "max_db_size": 1024}):
+            try:
+                KuzuStore(path, **db_kwargs)
+            except ValidationError as exc:
+                result.append(str(exc))
+            else:
+                result.append("no error")
+        await first.close()
         json.dump(result, sys.stdout)
         return
     if cmd == "schema":
