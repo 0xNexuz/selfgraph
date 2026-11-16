@@ -16,7 +16,7 @@ from .._ops import (
     _validate_strength,
     parse_time,
 )
-from .._serde import EDGE_TYPES, aware, preference_stance_of
+from .._serde import EDGE_TYPES, preference_stance_of
 from ..errors import ExtractionError, ValidationError
 from ..llm.base import summarize_error
 from ..models import (
@@ -68,10 +68,10 @@ def _lenient_event_time(value: str | None) -> datetime | None:
     text = value.strip()
     if not text:
         return None
-    if len(text) == 4 and text.isdigit():
+    if len(text) == 4 and text.isascii() and text.isdigit():
         year = int(text)
         if 1 <= year <= 9999:
-            return aware(datetime(year, 1, 1, tzinfo=timezone.utc))
+            return datetime(year, 1, 1, tzinfo=timezone.utc)
         return None
     try:
         return parse_time(text, "event_time")

@@ -26,7 +26,18 @@ import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
 
-const LENIENT_EVENT_TIMES = ["2021", "0000", "0001", "9999", "March 2021", "", "2021-06-15T12:00:00Z", null] as const;
+const LENIENT_EVENT_TIMES = [
+  "2021",
+  "0000",
+  "0001",
+  "9999",
+  "\u00b2\u00b2\u00b2\u00b2",
+  "\uff12\uff10\uff12\uff11",
+  "March 2021",
+  "",
+  "2021-06-15T12:00:00Z",
+  null,
+] as const;
 
 const TERMS_SPEC = {
   entities: [
