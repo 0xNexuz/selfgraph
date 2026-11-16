@@ -100,6 +100,7 @@ const WRITE_QUEUES = new Map<string | symbol, object>();
 const PATH_QUEUES = new Map<string | symbol, Promise<unknown>>();
 const MAX_SKIP = 10_000_000;
 const RECONNECT_EVERY = 500;
+const MAX_DB_SIZE_DEFAULT = 8_796_093_022_208;
 const NOW = "RETURN current_timestamp() AS now";
 const CLOCK_TICK_MS = 20;
 
@@ -232,7 +233,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       buffer_pool_size: o.buffer_pool_size ?? 0,
       compression: o.compression ?? true,
       read_only: o.read_only ?? false,
-      max_db_size: o.max_db_size ?? 0,
+      max_db_size: o.max_db_size ?? MAX_DB_SIZE_DEFAULT,
     };
     let db = DATABASES.get(this.cacheKey);
     if (db === undefined) {
@@ -254,6 +255,7 @@ export class KuzuStore extends AutoCommitStore implements GraphStore {
       const open = DATABASE_OPTIONS.get(this.cacheKey);
       const diffs = (Object.keys(options) as (keyof KuzuDatabaseOptions)[])
         .filter((k) => o[k] !== undefined && o[k] !== open?.[k])
+        .sort()
         .map((k) => `${k} ${pyRepr(open?.[k])} vs ${pyRepr(o[k])}`)
         .join(", ");
       if (diffs) {
