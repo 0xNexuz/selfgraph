@@ -194,3 +194,73 @@ def test_insert_facts_event_time_accepts_iso_text():
     with pytest.raises(ValidationError):
         run(g.insert.facts(PAYLOAD, event_time="soon"))
     run(g.close())
+
+
+def test_facts_bare_years_and_string_strengths_are_rejected():
+    g = new_graph()
+    t_entities(g, "a", "b")
+    joined = {"from_entity": "t:a", "type": "R", "to_entity": "t:b"}
+    likes = {"subject_entity": "t:a", "key": "k", "value_entity": "t:b"}
+    cases = [
+        ({"relations": [{**joined, "event_time": "2021"}]}, 'relations[0].event_time: invalid ISO 8601 string: "2021"'),
+        ({"relations": [{**joined, "event_time": 2021}]}, "relations[0].event_time: invalid input"),
+        ({"relations": [{**joined, "event_time": True}]}, "relations[0].event_time: invalid input"),
+        (
+            {"relations": [{**joined, "evidence": [{"source_id": "s", "confidence": "0.5"}]}]},
+            "relations[0].evidence[0].confidence: expected number",
+        ),
+        ({"preferences": [{**likes, "strength": "0.9"}]}, "preferences[0].strength: expected number"),
+        ({"preferences": [{**likes, "strength": False}]}, "preferences[0].strength: expected number"),
+        (
+            {"preferences": [{**likes, "event_time": "20210304T"}]},
+            'preferences[0].event_time: invalid ISO 8601 string: "20210304T"',
+        ),
+        ({"decisions": [{"title": "t", "event_time": 1700000000}]}, "decisions[0].event_time: invalid input"),
+        (
+            {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
+            'decisions[0].event_time: invalid ISO 8601 string: "soon"',
+        ),
+    ]
+    for facts, message in cases:
+        with pytest.raises(ValidationError) as exc:
+            run(g.insert.facts(facts))
+        assert str(exc.value) == f"invalid facts: {message}"
+    assert run(g.relations.list()).items == []
+    run(g.close())
+
+
+def test_facts_times_accept_iso_text_and_strengths_accept_integers():
+    g = fresh_graph("strict_facts")
+    t_entities(g, "a", "b")
+    res = run(
+        g.insert.facts(
+            {
+                "relations": [
+                    {
+                        "from_entity": "t:a",
+                        "type": "R",
+                        "to_entity": "t:b",
+                        "event_time": "2021-03-04",
+                        "evidence": [{"source_id": "s", "confidence": 1}],
+                    }
+                ],
+                "preferences": [
+                    {
+                        "subject_entity": "t:a",
+                        "key": "k",
+                        "value_entity": "t:b",
+                        "strength": 1,
+                        "event_time": "2021-03-04T10:15:00Z",
+                    }
+                ],
+                "decisions": [{"title": "t", "event_time": "2021-03-04T10:15:00+05:30"}],
+            }
+        )
+    )
+    assert res.relations[0].event_time.isoformat() == "2021-03-04T00:00:00+00:00"
+    assert (res.preferences[0].strength, res.preferences[0].event_time.isoformat()) == (
+        1.0,
+        "2021-03-04T10:15:00+00:00",
+    )
+    assert res.decisions[0].event_time.isoformat() == "2021-03-04T04:45:00+00:00"
+    run(g.close())
