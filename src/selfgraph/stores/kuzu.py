@@ -60,13 +60,10 @@ _SCHEMA = (
 _DATABASES: dict[str, Any] = {}
 
 
-# One token per wait per task or thread, so a lock hands over in order without anyone holding an event loop.
 _PENDING: ContextVar[tuple[Future[None], ...]] = ContextVar("selfgraph_kuzu_locks", default=())
 
 
 class _PathLock:
-    # A FIFO queue of futures: a waiter parks on the previous holder's future instead of on a thread, so the executor
-    # pool cannot starve the holder, and a cancelled wait hands its place on rather than taking the lock later.
     def __init__(self) -> None:
         released: Future[None] = Future()
         released.set_result(None)
@@ -85,18 +82,17 @@ class _PathLock:
         return previous, mine
 
     async def __aenter__(self) -> None:
-        """Wait for the store ahead in the queue to release, parking the task rather than a worker thread.
+        """Wait for the store ahead in the queue to release.
 
         @return (None): nothing.
         """
         previous, mine = self._join()
         _PENDING.set((*_PENDING.get(), mine))
         try:
-            # shielded: a cancelled waiter must not cancel the token it is waiting on, which is the holder's
             await asyncio.shield(asyncio.wrap_future(previous))
         except BaseException:
             _PENDING.set(_PENDING.get()[:-1])
-            mine.set_result(None)
+            previous.add_done_callback(lambda _done, _mine=mine: _mine.set_result(None))
             raise
 
     async def __aexit__(self, *exc_info: object) -> None:

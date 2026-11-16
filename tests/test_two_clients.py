@@ -207,6 +207,52 @@ def test_a_cancelled_waiter_does_not_keep_the_lock():
     run(store.close())
 
 
+@pytest.mark.skipif(not KUZU, reason="one embedded database per path")
+def test_a_cancelled_waiter_does_not_unblock_the_waiter_behind_it():
+    path = a_path()
+    store = KuzuStore(path)
+    lock = store._lock  # noqa: SLF001
+    holding = asyncio.Event()
+    released = asyncio.Event()
+    entered = asyncio.Event()
+    entered_while_holding = asyncio.Event()
+
+    async def hold() -> None:
+        async with lock:
+            holding.set()
+            await asyncio.sleep(0.3)
+            released.set()
+
+    async def wait() -> None:
+        async with lock:
+            pass
+
+    async def wait_and_check() -> None:
+        async with lock:
+            entered.set()
+            if holding.is_set() and not released.is_set():
+                entered_while_holding.set()
+
+    async def scenario() -> None:
+        holder = asyncio.create_task(hold())
+        await holding.wait()
+        first = asyncio.create_task(wait())
+        await asyncio.sleep(0.05)
+        second = asyncio.create_task(wait_and_check())
+        await asyncio.sleep(0.05)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert not entered.is_set(), "the waiter behind the cancelled one entered while the lock was held"
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert not entered_while_holding.is_set(), "the second waiter took the lock before the holder released it"
+        await second
+        await holder
+
+    run(scenario())
+    run(store.close())
+
+
 @pytest.mark.skipif(not KUZU, reason="the executor pool is Kuzu's")
 def test_many_writers_on_one_store_do_not_starve_the_pool():
     result = subprocess.run(
