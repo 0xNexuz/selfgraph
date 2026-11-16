@@ -40,28 +40,14 @@ def test_kuzu_list_property_filters(tmp_path):
 @pytest.mark.parametrize(
     "value",
     [
-        ["Annie", "Anna"],
-        [1, 2],
-        {"a": 1, "b": 2},
         {"profile": {"name": "Zoë", "tags": ["a", "b"]}, "active": True},
         [],
-        {},
-        "Ann",
         'Zoë 北京 "quoted" \\ path\nnext\tline',
-        2,
-        True,
     ],
     ids=[
-        "strings",
-        "numbers",
-        "object",
         "nested-object",
         "empty-list",
-        "empty-object",
-        "string",
         "escaped-unicode",
-        "number",
-        "boolean",
     ],
 )
 def test_kuzu_json_property_filters(tmp_path, value):

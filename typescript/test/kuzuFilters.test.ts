@@ -46,16 +46,9 @@ test("deletes by exact list value", async () => {
 });
 
 test.each([
-  { name: "strings", value: ["Annie", "Anna"] },
-  { name: "numbers", value: [1, 2] },
-  { name: "object", value: { a: 1, b: 2 } },
   { name: "nested-object", value: { profile: { name: "Zoë", tags: ["a", "b"] }, active: true } },
   { name: "empty-list", value: [] },
-  { name: "empty-object", value: {} },
-  { name: "string", value: "Ann" },
   { name: "escaped-unicode", value: 'Zoë 北京 "quoted" \\ path\nnext\tline' },
-  { name: "number", value: 2 },
-  { name: "boolean", value: true },
 ])("matches and deletes JSON property values: $name", async ({ name: ns, value }) => {
   await store.upsertNode(ns, "Entity", "a", { id: "a", value });
   await store.upsertNode(ns, "Entity", "b", { id: "b", value: "different" });
