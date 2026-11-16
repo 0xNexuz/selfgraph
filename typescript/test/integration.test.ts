@@ -987,6 +987,34 @@ describe("store setup errors", () => {
 describe("property values", () => {
   const open = freshGraphs(KUZU_SPEC, "props");
 
+  it("matches and deletes a nested object property", async () => {
+    const g = open();
+    await g.initialize();
+    const { store, namespace: ns } = g;
+    const value = { profile: { name: "Zoë", tags: ["a", "b"] }, active: true };
+    await store.upsertNode(ns, "Entity", "a", { id: "a", value });
+    await store.upsertNode(ns, "Entity", "b", { id: "b", value: "different" });
+    await store.createEdge(ns, "KNOWS", "Entity", "a", "Entity", "b", {
+      id: "edge:a",
+      revision: 1,
+      is_current: true,
+      value,
+    });
+    const rows = await store.matchNodes(ns, "Entity", { equals: { value } });
+    expect(rows.map((row) => row.id)).toEqual(["a"]);
+    const candidates = await store.matchNodes(ns, "Entity", {
+      equals: { id: "a" },
+      any_of: { value: ["not a match", value], id: ["a", "b"] },
+    });
+    expect(candidates.map((row) => row.id)).toEqual(["a"]);
+    expect(await store.matchNodes(ns, "Entity", { equals: { value }, any_of: { id: [] } })).toEqual([]);
+    const edges = await store.matchEdges(ns, { from_label: "Entity", equals: { value } });
+    expect(edges.map((row) => row.props.id)).toEqual(["edge:a"]);
+    expect(await store.deleteNodesBy(ns, "Entity", { value })).toBe(1);
+    expect(await store.getNode(ns, "Entity", "a")).toBeNull();
+    expect(await store.getNode(ns, "Entity", "b")).not.toBeNull();
+  });
+
   it("clears null property keys, rejects unsafe values and blank keys, and trims aliases", async () => {
     const g = open();
     let e = await g.entities.create("Ann", "Person", { properties: { m: 1, gone: null } });
