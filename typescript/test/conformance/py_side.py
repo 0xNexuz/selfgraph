@@ -692,6 +692,35 @@ async def write(graph):
         out["repeated_merges"][mode] = to_jsonable(
             {"absorbed": record.absorbed, "merged": merged, "restored": restored.entity, "survivor": restored.survivor}
         )
+    mixed = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_mixed_case", resolver="fuzzy")
+    await mixed.insert.facts({"entities": [{"type": "Person", "name": "Jane Doe", "aliases": ["JD"]}]})
+    mixed_fuzzy = await mixed.insert.facts(
+        {"entities": [{"type": "person", "name": "Jane Does"}, {"type": "thing", "name": "JD"}]}
+    )
+    org_schema = {
+        "entities": [
+            {"name": "Organization", "aliases": ["Org"]},
+            {"name": "Company", "parent": "Organization"},
+        ]
+    }
+    mixed_schema = SelfGraph(
+        store=graph.store, namespace=f"{graph.namespace}_mixed_schema", resolver="default", schema=org_schema
+    )
+    await mixed_schema.insert.facts(
+        {"entities": [{"type": "Organization", "name": "International Business Machines", "aliases": ["IBM"]}]}
+    )
+    mixed_org = await mixed_schema.insert.facts(
+        {
+            "entities": [
+                {"type": "company", "name": "IBM"},
+                {"type": "org", "name": "Big Blue", "aliases": ["IBM"]},
+            ]
+        }
+    )
+    out["mixed_case_merges"] = [
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
+        [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
