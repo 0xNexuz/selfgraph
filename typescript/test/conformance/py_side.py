@@ -189,6 +189,16 @@ UNKNOWN_KEY_CASES = [
     ["schema", {"entities": [{"name": "A", "properties": [{"name": "x", "requird": True}]}]}],
     ["schema", {"relations": [{"type": "X", "from": {"type": ["A"]}}]}],
     ["schema", {"relations": [{"type": "X", "to": {"max": 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 1.5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": True}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"max_count": "1"}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": 1.0, "max_count": 2.0}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53 - 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": -(2**53)}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": -1e20}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": 2**53, "max_count": 5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53, "min_count": 1.5}}]}],
 ]
 
 

@@ -207,12 +207,53 @@ describe("Schema.parse and asSchema", () => {
     ],
     [{ relations: [{ type: "R", from: { max_count: 0 } }] }, "relations[0].from.max_count: must be >= 1"],
     [{ relations: [{ type: "R", to: { min_count: -1 } }] }, "relations[0].to.min_count: must be >= 0"],
+    [{ relations: [{ type: "R", from: { max_count: 1.5 } }] }, "relations[0].from.max_count: expected integer"],
+    [
+      { relations: [{ type: "R", from: { max_count: 2 ** 53 } }] },
+      "relations[0].from.max_count: must be <= 9007199254740991",
+    ],
+    [{ relations: [{ type: "R", to: { min_count: 1e20 } }] }, "relations[0].to.min_count: must be <= 9007199254740991"],
     [
       { relations: [{ type: "R", from: { min_count: 2, max_count: 1 } }] },
       "relations[0].from.min_count: min_count 2 is greater than max_count 1",
     ],
   ])("rejects %j", (spec, message) => {
     expect(() => asSchema(spec as Schema)).toThrow(new ValidationError(`invalid schema: ${message}`));
+  });
+
+  it.each([
+    [
+      { relations: [{ type: "R", from: { max_count: -(2 ** 53) } }] },
+      ["relations[0].from.max_count: must be >= -9007199254740991", "relations[0].from.max_count: must be >= 1"],
+    ],
+    [
+      { relations: [{ type: "R", to: { min_count: -1e20 } }] },
+      ["relations[0].to.min_count: must be >= -9007199254740991", "relations[0].to.min_count: must be >= 0"],
+    ],
+    [
+      { relations: [{ type: "R", from: { min_count: 2 ** 53, max_count: 5 } }] },
+      [
+        "relations[0].from.min_count: must be <= 9007199254740991",
+        "relations[0].from.min_count: min_count 9007199254740992 is greater than max_count 5",
+      ],
+    ],
+    [
+      { relations: [{ type: "R", from: { min_count: 1e21, max_count: 5 } }] },
+      [
+        "relations[0].from.min_count: must be <= 9007199254740991",
+        "relations[0].from.min_count: min_count 1e+21 is greater than max_count 5",
+      ],
+    ],
+    [
+      { relations: [{ type: "R", from: { min_count: 1e20 + 16384, max_count: 5 } }] },
+      [
+        "relations[0].from.min_count: must be <= 9007199254740991",
+        "relations[0].from.min_count: min_count 100000000000000020000 is greater than max_count 5",
+      ],
+    ],
+  ])("reports an unsafe count and then the first consistency problem for %j", (spec, lines) => {
+    const message = `invalid schema:${lines.map((line) => `\n  ${line}`).join("")}`;
+    expect(() => asSchema(spec as Schema)).toThrow(new ValidationError(message));
   });
 
   it("lets an alias repeat its own type name", () => {
