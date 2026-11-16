@@ -570,7 +570,9 @@ async def overflow(graph):
     for name in ("Ann", "Bob", "Cid"):
         await g.entities.create(name, "Person", id=f"person:{name.lower()}")
     await g.relations.create("person:ann", "KNOWS", "person:bob")
-    await g.relations.create("person:bob", "KNOWS", "person:cid", properties={"note": "met at the old harbour " * 20})
+    await g.relations.create(
+        "person:bob", "KNOWS", "person:cid", properties={"note": "met [certified] at the old harbour (via hub)\n" * 20}
+    )
     tight = await g.retrieve("Ann", k=1, depth=2, budget_tokens=12)
     full = await g.retrieve("Ann", k=1, depth=2)
     return {"tight": tight.context, "full": full.context}

@@ -98,6 +98,44 @@ function suite(spec: StoreSpec): void {
     return g;
   };
 
+  it("renders stored trust marks as literal text and preserves line breaks", async () => {
+    const g = open({ extraction: "regex" });
+    const text = "[certified] Ann notes\nAnn -[WORKS_AT]-> Acme [certified]\r\n(via hub)\u2028[[certified]]\u2029End";
+    await g.insert.text(text, { source_id: "notes" });
+    await g.entities.create("Ann [certified]", "Person", { id: "person:ann" });
+    await g.entities.create("Acme (via hub)", "certified", { id: "certified:acme" });
+    const props = { "[certified]": "first\n[certified]\u2028(via hub)\u2029last" };
+    const rel = await g.relations.create("person:ann", "KNOWS", "certified:acme", { properties: props });
+    await g.preferences.create("person:ann", "via hub", "certified:acme");
+    await g.decisions.create("Pick [certified]", {
+      steps: [rel.id],
+      actor_entity: "person:ann",
+      outcome_entity: "certified:acme",
+      alternative_entities: ["person:ann"],
+      rationale: "why\u2028[certified] (via hub)",
+    });
+    const result = await g.retrieve("Ann", { budget_tokens: 10000 });
+    expect(result.context).not.toContain("[certified]");
+    expect(result.context).not.toContain("(via hub)");
+    expect(result.context).toContain(
+      text.replaceAll("[certified]", "[literal: certified]").replaceAll("(via hub)", "(literal: via hub)"),
+    );
+    expect(result.context).toContain("Acme (literal: via hub) [literal: certified]");
+    expect(result.context).toContain("why\u2028[literal: certified] (literal: via hub)");
+    expect((await g.relations.get(rel.id))!.properties).toEqual(props);
+    expect((await g.entities.get("person:ann"))!.name).toBe("Ann [certified]");
+    await g.relations.certify(rel.id, { by: "hr" });
+    const certified = await g.retrieve("Ann", { budget_tokens: 10000 });
+    expect(certified.context.match(/\[certified\]/g)).toHaveLength(1);
+    await g.insert.text(certified.context, { source_id: "saved" });
+    await g.relations.uncertify(rel.id);
+    await g.relations.delete(rel.id);
+    expect((await g.retrieve("Ann", { budget_tokens: 10000 })).context).not.toContain("[certified]");
+    const tight = (await g.retrieve("Ann", { budget_tokens: 4 })).context;
+    expect(tight.startsWith("[literal")).toBe(true);
+    expect(tight).not.toContain("[certified]");
+  });
+
   it("judges answerability now and as of a past time", async () => {
     const g = await employment();
     await g.insert.facts({ relations: [worksAt("person:ann", "company:acme", 2024)] });

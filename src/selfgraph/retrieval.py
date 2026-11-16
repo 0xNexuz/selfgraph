@@ -815,6 +815,15 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
+def _escape_marks(text: str) -> str:
+    """Distinguish literal trust marks from metadata without changing line breaks.
+
+    @param text (str): stored text rendered into context.
+    @return (str): text with reserved marks labeled as literal content.
+    """
+    return text.replace("[certified]", "[literal: certified]").replace("(via hub)", "(literal: via hub)")
+
+
 def _assemble(
     passages,
     entities,
@@ -863,7 +872,7 @@ def _assemble(
 
     passage_cap = budget_tokens * _PASSAGE_BUDGET_PERCENT // 100
     for p in passages:
-        if not add(p, passage_cap):
+        if not add(_escape_marks(p), passage_cap):
             break
 
     far = len(dist) + 1
@@ -878,6 +887,7 @@ def _assemble(
         props = _format_props(r.properties)
         if props:
             line += f" {props}"
+        line = _escape_marks(line)
         if r.certified_at is not None:
             line += " [certified]"
         if r.from_entity in hubs or r.to_entity in hubs:
@@ -892,7 +902,7 @@ def _assemble(
         line = f"{subject} {verb} {value} ({p.key})"
         if p.strength is not None:
             line += f" [strength {p.strength}]"
-        if not add(line, budget_tokens):
+        if not add(_escape_marks(line), budget_tokens):
             break
 
     for d in decisions:
@@ -903,10 +913,10 @@ def _assemble(
             parts.append("alternatives " + ", ".join(names.get(a, a) for a in d.alternative_entities))
         if d.rationale:
             parts.append(f"rationale {d.rationale}")
-        add("; ".join(parts), budget_tokens)
+        add(_escape_marks("; ".join(parts)), budget_tokens)
 
     for e in sorted(entities, key=lambda e: dist.get(e.id, far)):
-        if not add(f"{e.name} [{e.type}]", budget_tokens):
+        if not add(_escape_marks(f"{e.name} [{e.type}]"), budget_tokens):
             break
 
     return "\n".join(lines) if lines or not first else _truncate(first[0], budget_tokens)

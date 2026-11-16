@@ -836,6 +836,16 @@ async function collectPreferences(
 }
 
 /**
+ * Distinguish literal trust marks from metadata without changing line breaks.
+ *
+ * @param text (string): stored text rendered into context.
+ * @return (string): text with reserved marks labeled as literal content.
+ */
+function escapeMarks(text: string): string {
+  return text.replaceAll("[certified]", "[literal: certified]").replaceAll("(via hub)", "(literal: via hub)");
+}
+
+/**
  * Fill the token budget with passages, then relations, preferences, decisions, and entities, nearest first.
  *
  * @param passages (string[]): the ranked source passages.
@@ -876,7 +886,7 @@ function assemble(
   };
 
   const passageCap = Math.floor((budgetTokens * PASSAGE_BUDGET_PERCENT) / 100);
-  for (const p of passages) if (!add(p, passageCap)) break;
+  for (const p of passages) if (!add(escapeMarks(p), passageCap)) break;
 
   const distOf = distanceIn(dist);
   const relRank = (r: Relation): [number, number, number, number] => {
@@ -893,6 +903,7 @@ function assemble(
     let line = `${nameOf(r.from_entity)} -[${r.type}]-> ${nameOf(r.to_entity)}`;
     const props = formatProps(r.properties);
     if (props) line += ` ${props}`;
+    line = escapeMarks(line);
     if (r.certified_at !== null) line += " [certified]";
     if (hubs.has(r.from_entity) || hubs.has(r.to_entity)) line += " (via hub)";
     if (!add(line, budgetTokens)) break;
@@ -902,7 +913,7 @@ function assemble(
     const verb = preferenceEdgeType(p.stance).toLowerCase();
     let line = `${nameOf(p.subject_entity)} ${verb} ${nameOf(p.value_entity)} (${p.key})`;
     if (p.strength !== null) line += ` [strength ${pyFloatRepr(p.strength)}]`;
-    if (!add(line, budgetTokens)) break;
+    if (!add(escapeMarks(line), budgetTokens)) break;
   }
 
   for (const d of decisions) {
@@ -910,11 +921,11 @@ function assemble(
     if (d.outcome_entity) parts.push(`outcome ${nameOf(d.outcome_entity)}`);
     if (d.alternative_entities.length) parts.push(`alternatives ${d.alternative_entities.map(nameOf).join(", ")}`);
     if (d.rationale) parts.push(`rationale ${d.rationale}`);
-    add(parts.join("; "), budgetTokens);
+    add(escapeMarks(parts.join("; ")), budgetTokens);
   }
 
   for (const e of [...entities].sort((a, b) => distOf(a.id) - distOf(b.id))) {
-    if (!add(`${e.name} [${e.type}]`, budgetTokens)) break;
+    if (!add(escapeMarks(`${e.name} [${e.type}]`), budgetTokens)) break;
   }
 
   return lines.length || first === null ? lines.join("\n") : truncate(first, budgetTokens, countTokens);
