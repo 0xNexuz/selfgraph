@@ -337,6 +337,98 @@ def test_merge_rewrites_every_reference_and_unmerge_restores_them():
         run(g.entities.unmerge("entitymerge:missing"))
 
 
+def _merge_with_references(g, **facts):
+    hammer = entity_id("Tool", "Hammer")
+    _seed(g, ROBERT, {"type": "Person", "name": "Ada"})
+    res = run(g.insert.facts({"entities": [BOB, {"type": "Tool", "name": "Hammer"}], **facts}, source_id="doc-1"))
+    [merge] = res.merges
+    return merge, hammer
+
+
+def test_unmerge_skips_preferences_and_decisions_removed_with_a_deleted_entity():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    facts = {
+        "preferences": [{"subject_entity": BOB_ID, "key": "tool", "value_entity": hammer}],
+        "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "outcome_entity": hammer}],
+    }
+    merge, _ = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert run(g.entities.get(BOB_ID)) is not None
+    assert (out.preferences, out.decisions) == ([], [])
+    assert run(g.preferences.list(limit=100)).items == []
+    assert run(g.decisions.list(limit=100)).items == []
+
+
+def test_unmerge_does_not_report_a_relation_to_a_deleted_entity_as_restored():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    uses = {"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}
+    merge, _ = _merge_with_references(g, relations=[uses])
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.relations == []
+    assert run(g.relations.get(relation_id(BOB_ID, "USES", hammer))) is None
+
+
+def test_unmerge_skips_a_decision_whose_step_relation_was_deleted():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    uses = relation_id(BOB_ID, "USES", hammer)
+    facts = {
+        "relations": [{"from_entity": BOB_ID, "type": "USES", "to_entity": hammer}],
+        "decisions": [{"title": "Pick a hammer", "actor_entity": BOB_ID, "steps": [uses]}],
+    }
+    merge, _ = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.decisions == []
+    assert run(g.decisions.list(limit=100)).items == []
+
+
+def test_unmerge_skips_a_preference_whose_subject_was_deleted():
+    g = fresh_graph("res", resolver="default")
+    ada = entity_id("Person", "Ada")
+    facts = {"preferences": [{"subject_entity": ada, "key": "friend", "value_entity": BOB_ID, "about_entity": BOB_ID}]}
+    merge, _ = _merge_with_references(g, **facts)
+    run(g.entities.delete(ada))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    assert out.preferences == []
+    assert run(g.entities.get(BOB_ID)) is not None
+
+
+def test_unmerge_restores_a_kept_decision_and_preference_without_the_deleted_reference():
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    facts = {
+        "preferences": [{"subject_entity": BOB_ID, "key": "friend", "value_entity": ADA, "about_entity": hammer}],
+        "decisions": [{"title": "Pick", "actor_entity": BOB_ID, "alternative_entities": [hammer, ADA]}],
+    }
+    merge, _ = _merge_with_references(g, **facts)
+    run(g.entities.delete(hammer))
+
+    out = run(g.entities.unmerge(merge.id))
+
+    assert out.merge.reverted_at is not None
+    [pref] = out.preferences
+    assert (pref.subject_entity, pref.value_entity, pref.about_entity) == (BOB_ID, ADA, None)
+    [dec] = out.decisions
+    assert (dec.actor_entity, dec.alternative_entities) == (BOB_ID, [ADA])
+
+
 def test_unmerge_restores_a_retired_merge_relation_without_superseding():
     g = fresh_graph("res", resolver="default", schema=WORKS_AT_SPEC, contradiction="supersede")
     acme, globex, initech = (entity_id("Company", n) for n in ("Acme", "Globex", "Initech"))

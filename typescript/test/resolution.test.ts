@@ -417,6 +417,91 @@ function suite(spec: StoreSpec) {
     await expect(g.entities.unmerge("entitymerge:missing")).rejects.toThrow(NotFoundError);
   });
 
+  const mergeWithReferences = async (g: SelfGraph, facts: Extraction) => {
+    await seed(g, { type: "Person", name: "Robert", aliases: ["Bob"] }, { type: "Person", name: "Ada" });
+    const res = await g.insert.facts(
+      {
+        entities: [
+          { type: "Person", name: "Bob" },
+          { type: "Tool", name: "Hammer" },
+        ],
+        ...facts,
+      },
+      { source_id: "doc-1" },
+    );
+    return res.merges[0]!;
+  };
+
+  it("skips preferences and decisions removed with a deleted entity on unmerge", async () => {
+    const g = open({ resolver: "default" });
+    const merge = await mergeWithReferences(g, {
+      preferences: [{ subject_entity: BOB, key: "tool", value_entity: TOOL }],
+      decisions: [{ title: "Pick a hammer", actor_entity: BOB, outcome_entity: TOOL }],
+    });
+    await g.entities.delete(TOOL);
+
+    const out = await g.entities.unmerge(merge.id);
+    expect(out.merge.reverted_at).not.toBeNull();
+    expect(await g.entities.get(BOB)).not.toBeNull();
+    expect([out.preferences, out.decisions]).toEqual([[], []]);
+    expect((await g.preferences.list(null, { limit: 100 })).items).toEqual([]);
+    expect((await g.decisions.list({ limit: 100 })).items).toEqual([]);
+  });
+
+  it("does not report a relation to a deleted entity as restored on unmerge", async () => {
+    const g = open({ resolver: "default" });
+    const merge = await mergeWithReferences(g, { relations: [{ from_entity: BOB, type: "USES", to_entity: TOOL }] });
+    await g.entities.delete(TOOL);
+
+    const out = await g.entities.unmerge(merge.id);
+    expect(out.merge.reverted_at).not.toBeNull();
+    expect(out.relations).toEqual([]);
+    expect(await g.relations.get(relationId(BOB, "USES", TOOL))).toBeNull();
+  });
+
+  it("skips a decision whose step relation was deleted on unmerge", async () => {
+    const g = open({ resolver: "default" });
+    const merge = await mergeWithReferences(g, {
+      relations: [{ from_entity: BOB, type: "USES", to_entity: TOOL }],
+      decisions: [{ title: "Pick a hammer", actor_entity: BOB, steps: [relationId(BOB, "USES", TOOL)] }],
+    });
+    await g.entities.delete(TOOL);
+
+    const out = await g.entities.unmerge(merge.id);
+    expect(out.merge.reverted_at).not.toBeNull();
+    expect(out.decisions).toEqual([]);
+    expect((await g.decisions.list({ limit: 100 })).items).toEqual([]);
+  });
+
+  it("skips a preference whose subject was deleted on unmerge", async () => {
+    const g = open({ resolver: "default" });
+    const merge = await mergeWithReferences(g, {
+      preferences: [{ subject_entity: ADA, key: "friend", value_entity: BOB, about_entity: BOB }],
+    });
+    await g.entities.delete(ADA);
+
+    const out = await g.entities.unmerge(merge.id);
+    expect(out.merge.reverted_at).not.toBeNull();
+    expect(out.preferences).toEqual([]);
+    expect(await g.entities.get(BOB)).not.toBeNull();
+  });
+
+  it("restores a kept decision and preference without the deleted reference on unmerge", async () => {
+    const g = open({ resolver: "default" });
+    const merge = await mergeWithReferences(g, {
+      preferences: [{ subject_entity: BOB, key: "friend", value_entity: ADA, about_entity: TOOL }],
+      decisions: [{ title: "Pick", actor_entity: BOB, alternative_entities: [TOOL, ADA] }],
+    });
+    await g.entities.delete(TOOL);
+
+    const out = await g.entities.unmerge(merge.id);
+    expect(out.merge.reverted_at).not.toBeNull();
+    const [pref] = out.preferences;
+    expect([pref!.subject_entity, pref!.value_entity, pref!.about_entity]).toEqual([BOB, ADA, null]);
+    const [dec] = out.decisions;
+    expect([dec!.actor_entity, dec!.alternative_entities]).toEqual([BOB, [ADA]]);
+  });
+
   it("restores a retired merge relation on unmerge without superseding", async () => {
     const g = open({ resolver: "default", contradiction: "supersede", schema: SINGLE_EMPLOYER });
     const [acme, globex, initech] = ["Acme", "Globex", "Initech"].map((n) => entityId("Company", n));
