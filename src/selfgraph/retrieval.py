@@ -815,6 +815,14 @@ async def _collect_preferences(
     return sorted((p for p in preferences if p.subject_entity in order), key=lambda p: order[p.subject_entity])
 
 
+_OPEN_BRACKETS = frozenset(
+    "[{༺༼᚛‚„⁅⁽₍⌈⌊〈❨❪❬❮❰❲❴⟅⟦⟨⟪⟬⟮⦃⦅⦇⦉⦋⦍⦏⦑⦓⦕⦗⧘⧚⧼⸢⸤⸦⸨⹂⹕⹗⹙⹛⹢〈《「『【〔〖〘〚〝﴿︗︵︷︹︻︽︿﹁﹃﹇﹙﹛﹝（［｛｟｢"
+)
+_CLOSE_BRACKETS = frozenset(
+    "]}༻༽᚜⁆⁾₎⌉⌋〉❩❫❭❯❱❳❵⟆⟧⟩⟫⟭⟯⦄⦆⦈⦊⦌⦎⦐⦒⦔⦖⦘⧙⧛⧽⸣⸥⸧⸩⹖⹘⹚⹜⹣〉》」』】〕〗〙〛〞〟﴾︘︶︸︺︼︾﹀﹂﹄﹈﹚﹜﹞）］｝｠｣"
+)
+
+
 def _escape_marks(text: str, *, preserve_lines: bool = False) -> str:
     """Distinguish literal trust marks from metadata and contain rendered values on one line.
 
@@ -824,11 +832,8 @@ def _escape_marks(text: str, *, preserve_lines: bool = False) -> str:
     """
     if not preserve_lines:
         text = re.sub(r"[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]+", " ", text)
-    text = re.sub(
-        r"[\[［][cｃＣ][eｅＥ][rｒＲ][tｔＴ][iｉＩ][fｆＦ][iｉＩ][eｅＥ][dｄＤ][\]］]",
-        "[literal: certified]",
-        text,
-        flags=re.IGNORECASE | re.ASCII,
+    text = "".join(
+        "(literal: " if char in _OPEN_BRACKETS else ")" if char in _CLOSE_BRACKETS else char for char in text
     )
     return re.sub(
         r"[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]",
@@ -897,11 +902,12 @@ def _assemble(
 
     ordered = sorted(relations, key=rel_rank)
     for r in ordered:
-        line = f"{names.get(r.from_entity, r.from_entity)} -[{r.type}]-> {names.get(r.to_entity, r.to_entity)}"
-        props = _format_props(r.properties)
+        subject = _escape_marks(names.get(r.from_entity, r.from_entity))
+        target = _escape_marks(names.get(r.to_entity, r.to_entity))
+        line = f"{subject} -[{_escape_marks(r.type)}]-> {target}"
+        props = ", ".join(f"{_escape_marks(str(k))}={_escape_marks(str(v))}" for k, v in r.properties.items())
         if props:
-            line += f" {props}"
-        line = _escape_marks(line)
+            line += f" {{{props}}}"
         if r.certified_at is not None:
             line += " [certified]"
         if r.from_entity in hubs or r.to_entity in hubs:
@@ -911,12 +917,13 @@ def _assemble(
 
     for p in sorted(preferences, key=lambda p: dist.get(p.subject_entity, far)):
         verb = preference_edge_type(p.stance).lower()
-        subject = names.get(p.subject_entity, p.subject_entity)
-        value = names.get(p.value_entity, p.value_entity)
-        line = f"{subject} {verb} {value} ({p.key})"
+        subject = _escape_marks(names.get(p.subject_entity, p.subject_entity))
+        value = _escape_marks(names.get(p.value_entity, p.value_entity))
+        key = _escape_marks(f"({p.key})")
+        line = f"{subject} {verb} {value} {key}"
         if p.strength is not None:
             line += f" [strength {p.strength}]"
-        if not add(_escape_marks(line), budget_tokens):
+        if not add(line, budget_tokens):
             break
 
     for d in decisions:
@@ -930,7 +937,7 @@ def _assemble(
         add(_escape_marks("; ".join(parts)), budget_tokens)
 
     for e in sorted(entities, key=lambda e: dist.get(e.id, far)):
-        if not add(_escape_marks(f"{e.name} [{e.type}]"), budget_tokens):
+        if not add(f"{_escape_marks(e.name)} (type: {_escape_marks(e.type)})", budget_tokens):
             break
 
     return "\n".join(lines) if lines or not first else _truncate(first[0], budget_tokens)

@@ -835,6 +835,13 @@ async function collectPreferences(
     .sort((a, b) => (order.get(a.subject_entity) ?? 0) - (order.get(b.subject_entity) ?? 0));
 }
 
+const OPEN_BRACKETS = new Set(
+  "[{༺༼᚛‚„⁅⁽₍⌈⌊〈❨❪❬❮❰❲❴⟅⟦⟨⟪⟬⟮⦃⦅⦇⦉⦋⦍⦏⦑⦓⦕⦗⧘⧚⧼⸢⸤⸦⸨⹂⹕⹗⹙⹛⹢〈《「『【〔〖〘〚〝﴿︗︵︷︹︻︽︿﹁﹃﹇﹙﹛﹝（［｛｟｢",
+);
+const CLOSE_BRACKETS = new Set(
+  "]}༻༽᚜⁆⁾₎⌉⌋〉❩❫❭❯❱❳❵⟆⟧⟩⟫⟭⟯⦄⦆⦈⦊⦌⦎⦐⦒⦔⦖⦘⧙⧛⧽⸣⸥⸧⸩⹖⹘⹚⹜⹣〉》」』】〕〗〙〛〞〟﴾︘︶︸︺︼︾﹀﹂﹄﹈﹚﹜﹞）］｝｠｣",
+);
+
 /**
  * Distinguish literal trust marks from metadata and contain rendered values on one line.
  *
@@ -847,9 +854,10 @@ function escapeMarks(text: string, preserveLines = false): string {
     text = text.replaceAll("\x1c", "\n").replaceAll("\x1d", "\n").replaceAll("\x1e", "\n");
     text = text.replace(/[\r\n\v\f\x85\u2028\u2029]+/g, " ");
   }
-  return text
-    .replace(/[[［][cｃＣ][eｅＥ][rｒＲ][tｔＴ][iｉＩ][fｆＦ][iｉＩ][eｅＥ][dｄＤ][\]］]/gi, "[literal: certified]")
-    .replace(/[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]/gi, "(literal: via hub)");
+  text = Array.from(text, (char) =>
+    OPEN_BRACKETS.has(char) ? "(literal: " : CLOSE_BRACKETS.has(char) ? ")" : char,
+  ).join("");
+  return text.replace(/[（(][vｖＶ][iｉＩ][aａＡ][ 　][hｈＨ][uｕＵ][bｂＢ][）)]/gi, "(literal: via hub)");
 }
 
 /**
@@ -874,7 +882,7 @@ function assemble(
   hubs: ReadonlySet<string> = new Set(),
 ): string {
   const { entities, relations, preferences, decisions } = subgraph;
-  const nameOf = (id: string): string => names.get(id) ?? id;
+  const nameOf = (id: string): string => escapeMarks(names.get(id) ?? id);
   const lines: string[] = [];
   let first: string | null = null;
   let used = 0;
@@ -907,10 +915,11 @@ function assemble(
     return a0 - b0 || a1 - b1 || a2 - b2 || a3 - b3;
   });
   for (const r of ordered) {
-    let line = `${nameOf(r.from_entity)} -[${r.type}]-> ${nameOf(r.to_entity)}`;
-    const props = formatProps(r.properties);
-    if (props) line += ` ${props}`;
-    line = escapeMarks(line);
+    let line = `${nameOf(r.from_entity)} -[${escapeMarks(r.type)}]-> ${nameOf(r.to_entity)}`;
+    const props = Object.entries(r.properties)
+      .map(([key, value]) => `${escapeMarks(key)}=${escapeMarks(pyStr(value))}`)
+      .join(", ");
+    if (props) line += ` {${props}}`;
     if (r.certified_at !== null) line += " [certified]";
     if (hubs.has(r.from_entity) || hubs.has(r.to_entity)) line += " (via hub)";
     if (!add(line, budgetTokens)) break;
@@ -918,21 +927,21 @@ function assemble(
 
   for (const p of [...preferences].sort((a, b) => distOf(a.subject_entity) - distOf(b.subject_entity))) {
     const verb = preferenceEdgeType(p.stance).toLowerCase();
-    let line = `${nameOf(p.subject_entity)} ${verb} ${nameOf(p.value_entity)} (${p.key})`;
+    let line = `${nameOf(p.subject_entity)} ${verb} ${nameOf(p.value_entity)} ${escapeMarks(`(${p.key})`)}`;
     if (p.strength !== null) line += ` [strength ${pyFloatRepr(p.strength)}]`;
-    if (!add(escapeMarks(line), budgetTokens)) break;
+    if (!add(line, budgetTokens)) break;
   }
 
   for (const d of decisions) {
-    const parts = [`Decision: ${d.title}`];
+    const parts = [`Decision: ${escapeMarks(d.title)}`];
     if (d.outcome_entity) parts.push(`outcome ${nameOf(d.outcome_entity)}`);
     if (d.alternative_entities.length) parts.push(`alternatives ${d.alternative_entities.map(nameOf).join(", ")}`);
-    if (d.rationale) parts.push(`rationale ${d.rationale}`);
-    add(escapeMarks(parts.join("; ")), budgetTokens);
+    if (d.rationale) parts.push(`rationale ${escapeMarks(d.rationale)}`);
+    add(parts.join("; "), budgetTokens);
   }
 
   for (const e of [...entities].sort((a, b) => distOf(a.id) - distOf(b.id))) {
-    if (!add(escapeMarks(`${e.name} [${e.type}]`), budgetTokens)) break;
+    if (!add(`${escapeMarks(e.name)} (type: ${escapeMarks(e.type)})`, budgetTokens)) break;
   }
 
   return lines.length || first === null ? lines.join("\n") : truncate(first, budgetTokens, countTokens);

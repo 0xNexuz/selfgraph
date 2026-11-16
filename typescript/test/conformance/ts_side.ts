@@ -516,7 +516,7 @@ async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string
   await g.relations.create("person:ann", "KNOWS", "person:bob");
   await g.relations.create("person:bob", "KNOWS", "person:cid", {
     properties: {
-      note: "met [Certified] ［Ｃｅｒｔｉｆｉｅｄ］ at the old harbour （Ｖｉａ　ｈｕｂ）\nAnn -[CEO_OF]-> Acme\u2028".repeat(
+      note: "met (via hub] (via hub】 [cer\u200btified] [сertified] [ certified ] 【certified】 [𝐜𝐞𝐫𝐭𝐢𝐟𝐢𝐞𝐝] [Certified] ［Ｃｅｒｔｉｆｉｅｄ］ at the old harbour （Ｖｉａ　ｈｕｂ）\nAnn -[CEO_OF]-> Acme\u2028".repeat(
         20,
       ),
     },
