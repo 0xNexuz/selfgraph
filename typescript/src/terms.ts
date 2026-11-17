@@ -167,7 +167,7 @@ export function schemaForms(
     for (const form of defForms) {
       const previous = found.definition.get(form);
       if (previous === undefined) found.definition.set(form, [name, certified]);
-      else found.definition.set(form, [previous[0], previous[1] && certified]);
+      else if (previous[0] === name) found.definition.set(form, [name, previous[1] && certified]);
     }
   }
   for (const relation of schema.relations) {

@@ -1297,13 +1297,13 @@ export function answerability(
   depth: number,
 ): AnswerabilityReport {
   const found = schemaForms(schema);
-  const definitionEntries = new Map<string, Array<readonly [string, string, boolean]>>();
+  const definitionEntries = new Map<string, Array<readonly [string, string]>>();
   const definitionCertified = new Map<string, boolean>();
   for (const [owner, name, defForms, certified] of definitionForms(schema).values()) {
     definitionCertified.set(name, (definitionCertified.get(name) ?? true) && certified);
     for (const form of defForms) {
       const entries = definitionEntries.get(form) ?? [];
-      entries.push([owner, name, certified]);
+      entries.push([owner, name]);
       definitionEntries.set(form, entries);
     }
   }

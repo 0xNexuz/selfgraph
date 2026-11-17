@@ -129,8 +129,8 @@ def schema_forms(schema: Schema | None) -> dict[str, dict[str, tuple[str, bool]]
             previous = found["definition"].get(form)
             if previous is None:
                 found["definition"][form] = (name, certified)
-            else:
-                found["definition"][form] = (previous[0], previous[1] and certified)
+            elif previous[0] == name:
+                found["definition"][form] = (name, previous[1] and certified)
     for relation in schema.relations:
         note("relation", relation.type, [relation.type, *relation.aliases, *relation.synonyms], relation.certified)
     return found
