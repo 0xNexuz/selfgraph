@@ -174,6 +174,71 @@ function suite(spec: StoreSpec) {
     expect((await g.insert.facts({ decisions: [{ title: "Fresh" }] })).decisions[0]!.status).toBe("completed");
   });
 
+  it.each(["stored", "batch", "generated", "generated-other-source"])(
+    "rejects conflicting relation ids before writing (%s)",
+    async (collision) => {
+      const g = fresh();
+      await g.entities.create("Ada", "Person");
+      await g.entities.create("Bob", "Person");
+      const original = { id: "relation:team", from_entity: "person:ada", type: "KNOWS", to_entity: "person:bob" };
+      const conflicting = {
+        ...original,
+        id: collision.startsWith("generated") ? undefined : original.id,
+        to_entity: "person:cy",
+      };
+      if (collision.startsWith("generated")) {
+        original.id = ids.relationId("person:ada", "KNOWS", "person:cy");
+        if (collision === "generated-other-source") original.from_entity = "person:bob";
+      }
+      const stored = collision !== "batch";
+      if (stored) await g.relations.create(original.from_entity, "KNOWS", "person:bob", { id: original.id });
+
+      await expect(
+        g.insert.facts(
+          { entities: [{ type: "Person", name: "Cy" }], relations: stored ? [conflicting] : [original, conflicting] },
+          { source_id: "bad-import" },
+        ),
+      ).rejects.toThrow(/already exists with different endpoints\/type/);
+
+      expect(await g.entities.get("person:cy")).toBeNull();
+      expect(await g.store.matchNodes(g.namespace, "SourceVersion")).toEqual([]);
+      const relation = await g.relations.get(original.id);
+      if (stored) expect(relation?.to_entity).toBe("person:bob");
+      else expect(relation).toBeNull();
+    },
+  );
+
+  it.runIf(spec.name === "kuzu")("batches relation ID preflight reads", async () => {
+    const g = fresh();
+    await g.entities.create("Ada", "Person");
+    const runner = g.store as unknown as {
+      _run(query: string, params?: Record<string, unknown>): Promise<unknown>;
+    };
+    const execute = vi.spyOn(runner, "_run");
+    try {
+      const contacts = Array.from({ length: 257 }, (_, i) => i);
+      const result = await g.insert.facts({
+        entities: contacts.map((i) => ({ type: "Person", name: `Contact ${i}` })),
+        relations: contacts.map((i) => ({
+          from_entity: "person:ada",
+          type: "KNOWS",
+          to_entity: `person:contact-${i}`,
+        })),
+      });
+      expect(result.relations).toHaveLength(257);
+      expect(
+        execute.mock.calls
+          .filter(([query]) => query.includes("r.sid IN $ids"))
+          .map(([, params]) => (Array.isArray(params?.ids) ? params.ids.length : 0)),
+      ).toEqual([256, 1]);
+      expect(
+        execute.mock.calls.filter(([query]) => query.includes("r.sid = $sid") && query.includes("RETURN r.doc")),
+      ).toEqual([]);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   it("reports a bad stance or status with the Python text, after the id check", async () => {
     const g = fresh();
     await g.entities.create("X", "T", { id: "t:x" });
@@ -232,6 +297,16 @@ function suite(spec: StoreSpec) {
     expect(result.preferences.map((p) => [p.id, p.strength])).toEqual([
       [ids.preferenceId("person:jane-doe", "preference", "database", "database:hydradb"), 0.7],
     ]);
+  });
+
+  it("reads back and reinserts a type with a digit before a letter", async () => {
+    const g = fresh();
+    await g.insert.facts({ entities: ["App", "Cluster"].map((name) => ({ type: "Thing", name })) });
+    const rel = await g.relations.create("thing:app", "uses k8s", "thing:cluster");
+    expect(rel.type).toBe("USES_K8_S");
+    expect((await g.relations.list({ type: rel.type })).items.map((r) => r.id)).toEqual([rel.id]);
+    const facts = { relations: [{ from_entity: "thing:app", type: "uses k8s", to_entity: "thing:cluster" }] };
+    expect((await g.insert.facts(facts)).relations.map((r) => r.id)).toEqual([rel.id]);
   });
 
   it("creates, conflicts on, reads, pages, merges updates, and deletes entities", async () => {
@@ -647,6 +722,81 @@ function suite(spec: StoreSpec) {
     await expect(graph.insert.text("bad\u0000text")).rejects.toBeInstanceOf(ValidationError);
   });
 
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    for (const depth of [0, 1]) {
+      it(`collects boundary relations and their decisions: ${strategy}, depth ${depth}`, async () => {
+        const g = fresh();
+        await g.insert.facts({
+          entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+          relations: [
+            { id: "relation:ab", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:bob" },
+            { id: "relation:ac", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:cy" },
+            { id: "relation:bc", from_entity: "thing:bob", type: "KNOWS", to_entity: "thing:cy" },
+          ],
+          decisions: [{ title: "Choose Cy", steps: ["relation:bc"] }],
+        });
+        const result = await g.retrieve(depth ? "Ada" : "Ada Bob Cy", { k: depth ? 1 : 3, depth, strategy });
+        expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(["thing:ada", "thing:bob", "thing:cy"]);
+        expect(result.subgraph.relations.map((r) => r.id).sort()).toEqual([
+          "relation:ab",
+          "relation:ac",
+          "relation:bc",
+        ]);
+        expect(result.subgraph.decisions.map((d) => d.title)).toEqual(["Choose Cy"]);
+      });
+    }
+    it(`marks boundary hubs without expanding them: ${strategy}`, async () => {
+      const g = fresh();
+      const names = ["Ada", ...Array.from({ length: HUB_DEGREE - 1 }, (_, i) => `Leaf${i}`)];
+      await g.insert.facts({
+        entities: ["Hub", ...names].map((name) => ({ type: "Thing", name })),
+        relations: names.map((n) => ({ from_entity: "thing:hub", type: "HAS", to_entity: `thing:${n.toLowerCase()}` })),
+      });
+      const result = await g.retrieve("Ada", { k: 1, depth: 1, skip_hubs: true, strategy });
+      expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(["thing:ada", "thing:hub"]);
+      expect(result.hubs).toEqual(["thing:hub"]);
+      expect(result.context.split("\n")).toContain("GRAPH (via hub) | Hub -[HAS]-> Ada");
+    });
+    it(`obeys time filters when completing boundary relations: ${strategy}`, async () => {
+      const g = fresh();
+      await g.insert.facts({
+        entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+        relations: [
+          ...["bob", "cy"].map((b) => ({
+            id: `relation:${b}`,
+            from_entity: "thing:ada",
+            type: "LINKS",
+            to_entity: `thing:${b}`,
+            event_time: "2020-01-01",
+          })),
+          {
+            id: "relation:bc",
+            from_entity: "thing:bob",
+            type: "KNOWS",
+            to_entity: "thing:cy",
+            event_time: "2030-01-01",
+          },
+        ],
+      });
+      for (const [as_of, expected] of [
+        ["2025-01-01", ["relation:bob", "relation:cy"]],
+        ["2035-01-01", ["relation:bc", "relation:bob", "relation:cy"]],
+      ] as const) {
+        const result = await g.retrieve("Ada", { k: 1, depth: 1, strategy, as_of });
+        expect(result.subgraph.relations.map((r) => r.id).sort()).toEqual(expected);
+      }
+      const unknown = await g.retrieve("Ada", {
+        k: 1,
+        depth: 1,
+        strategy,
+        as_of: "2035-01-01",
+        known_at: "2000-01-01",
+      });
+      expect(unknown.subgraph.entities).toEqual([]);
+      expect(unknown.subgraph.relations).toEqual([]);
+    });
+  }
+
   describe("retrieval context", () => {
     const ENTITIES = [
       { type: "Person", name: "Ann" },
@@ -891,6 +1041,39 @@ function suite(spec: StoreSpec) {
     });
   });
 
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    it(`counts self relations once toward hub threshold: ${strategy}`, async () => {
+      for (const loops of [24, 48]) {
+        const g = fresh();
+        await g.insert.facts({
+          entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+          relations: [
+            { id: "relation:am", from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+            { id: "relation:mb", from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+            ...Array.from({ length: loops }, (_, i) => ({
+              id: `relation:self${i}`,
+              from_entity: "thing:middle",
+              type: "SELF",
+              to_entity: "thing:middle",
+            })),
+          ],
+        });
+        expect((await g.relations.list()).items.length).toBe(loops + 2);
+        const isHub = loops + 2 >= 50;
+        const result = await g.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true, strategy });
+        expect(result.hubs).toEqual(isHub ? ["thing:middle"] : []);
+        expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(
+          isHub ? ["thing:ada", "thing:middle"] : ["thing:ada", "thing:bob", "thing:middle"],
+        );
+        expect(result.context.includes("(via hub)")).toBe(isHub);
+        const report = await g.checkAnswerable("Ada Bob");
+        expect(report.connected).toBe(true);
+        expect(report.verdict).toBe(isHub ? "uncertain" : "answerable");
+        expect(report.hub_only).toEqual(isHub ? [["ada", "bob"]] : []);
+      }
+    });
+  }
+
   it("retrieves context by keyword seeds and traversal", async () => {
     const result = await graph.retrieve("what did Grace Hopper write", { depth: 2 });
     expect(result.seeds[0]!.id).toBe("thing:grace-hopper");
@@ -1037,11 +1220,53 @@ function suite(spec: StoreSpec) {
     });
   }
 
-  it.runIf(spec.name === "hydradb")("rejects a document over HydraDB's 32 KB string limit before writing", async () => {
-    await expect(graph.entities.create("Huge", "Thing", { properties: { blob: "x".repeat(40_000) } })).rejects.toThrow(
-      /32000 bytes/,
-    );
-    expect(await graph.entities.get("thing:huge")).toBeNull();
+  it("stores and reads back an entity and a relation whose documents are over 32 KB", async () => {
+    const blob = "x".repeat(40_000);
+    await graph.entities.create("Huge", "Thing", { properties: { blob } });
+    await graph.entities.create("Other", "Thing");
+    const rel = await graph.relations.create("thing:huge", "LINKS", "thing:other", { properties: { blob } });
+    expect((await graph.entities.get("thing:huge"))?.properties.blob).toBe(blob);
+    expect((await graph.relations.get(rel.id))?.properties.blob).toBe(blob);
+  });
+
+  it.runIf(spec.name === "hydradb")(
+    "rejects an update over HydraDB's message limit before retiring the current version",
+    async () => {
+      const g = fresh();
+      const blob = "x".repeat(1_100_000);
+      await g.entities.create("Ann", "Person");
+      await g.entities.create("Beta", "Company");
+      const rel = await g.relations.create("person:ann", "WORKS_AT", "company:beta");
+      await expect(g.relations.update(rel.id, { set_properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.relations.get(rel.id)).toMatchObject({ revision: 1, properties: {} });
+      const pref = await g.preferences.create("person:ann", "employer", "company:beta");
+      await expect(g.preferences.update(pref.id, { properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.preferences.get(pref.id)).toMatchObject({ revision: 1, properties: {} });
+    },
+  );
+
+  it.runIf(spec.name === "hydradb")(
+    "rejects an update whose edge row is over HydraDB's message limit before retiring the current version",
+    async () => {
+      const g = fresh();
+      await g.entities.create("Ann", "Person");
+      await g.entities.create("Beta", "Company");
+      const rel = await g.relations.create("person:ann", `LINKS_${"X".repeat(20_000)}`, "company:beta");
+      const blob = "x".repeat(1_010_000);
+      await expect(g.relations.update(rel.id, { set_properties: { blob } })).rejects.toThrow(/Bolt message/);
+      expect(await g.relations.get(rel.id)).toMatchObject({ revision: 1, properties: {} });
+    },
+  );
+
+  it.runIf(spec.name === "hydradb")("writes every entity of an insert larger than one HydraDB message", async () => {
+    const g = fresh();
+    const blob = "x".repeat(700_000);
+    await g.insert.facts({ entities: [0, 1].map((i) => ({ type: "Doc", name: `Doc ${i}`, properties: { blob } })) });
+    const docs = (await g.entities.list()).items.map((e) => [e.name, String(e.properties.blob).length]);
+    expect(docs).toEqual([
+      ["Doc 0", 700_000],
+      ["Doc 1", 700_000],
+    ]);
   });
 }
 
@@ -1201,6 +1426,86 @@ describe("store setup errors", () => {
       }
       expect((await first.entities.get(entity.id)) === null).toBe(shared);
       await first.entities.create("Ann", "Person");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back the Kuzu cache when a store cannot connect", async () => {
+    const mod = await import("kuzu");
+    const kuzu = (mod.default ?? mod) as { Connection: unknown; Database: unknown };
+    const opened: { closed: boolean }[] = [];
+    const RealDB = kuzu.Database as new (...args: unknown[]) => { close?: () => unknown };
+    kuzu.Database = new Proxy(RealDB, {
+      construct(target, args) {
+        const db = new target(...args);
+        const record = { closed: false };
+        const close = db.close?.bind(db);
+        if (close)
+          db.close = async () => {
+            record.closed = true;
+            return close();
+          };
+        opened.push(record);
+        return db;
+      },
+    });
+    const refuse = class {
+      async init() {
+        throw new Error("connection refused");
+      }
+    };
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-conn-"));
+    try {
+      const path = join(dir, "g.kuzu");
+      const first = new KuzuStore(path);
+      await first.initialize();
+      const RealConn = kuzu.Connection;
+      kuzu.Connection = refuse;
+      try {
+        await expect(new KuzuStore(path).initialize()).rejects.toThrow("connection refused");
+      } finally {
+        kuzu.Connection = RealConn;
+      }
+      await first.close();
+      expect(opened[0].closed).toBe(true);
+
+      const dead = join(dir, "dead.kuzu");
+      kuzu.Connection = refuse;
+      try {
+        await expect(new KuzuStore(dead).initialize()).rejects.toThrow("connection refused");
+      } finally {
+        kuzu.Connection = RealConn;
+      }
+      expect(opened[1].closed).toBe(true);
+      const reopened = new KuzuStore(dead);
+      await reopened.initialize();
+      await reopened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a Kuzu store whose options differ from the open database", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selfgraph-options-"));
+    const path = join(dir, "opts.kuzu");
+    try {
+      const first = new KuzuStore(path);
+      await first.initialize();
+      await expect(new KuzuStore(path, { read_only: true }).initialize()).rejects.toBeInstanceOf(ValidationError);
+      await expect(new KuzuStore(path, { max_db_size: 1024 }).initialize()).rejects.toThrow("max_db_size");
+      const same = new KuzuStore(path, { read_only: false });
+      await same.initialize();
+      await same.close();
+      await first.close();
+
+      const sizedPath = join(dir, "sized.kuzu");
+      const sized = new KuzuStore(sizedPath, { max_db_size: 1 << 30 });
+      await sized.initialize();
+      const bare = new KuzuStore(sizedPath);
+      await bare.initialize();
+      await bare.close();
+      await sized.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

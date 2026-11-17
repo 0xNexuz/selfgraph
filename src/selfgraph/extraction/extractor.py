@@ -44,8 +44,14 @@ from .prompts import check_prompts, effective_instruction, effective_prompt, ren
 __all__ = ["LLMExtractor"]
 
 
+class _EntityOut(BaseModel):
+    type: str
+    name: str
+    aliases: list[str] | None = None
+
+
 class _EntitiesOut(BaseModel):
-    entities: list[EntityInput] = Field(default_factory=list)
+    entities: list[_EntityOut] = Field(default_factory=list)
 
 
 class _RelOut(BaseModel):
@@ -271,7 +277,10 @@ class LLMExtractor(_WarningSink):
                 try:
                     system, user = self._messages(kind, chunk.text)
                     result = await self._llm.generate(system=system, user=user, output=schema)
-                    return getattr(_checked_output(result, schema, kind), kind)
+                    items = getattr(_checked_output(result, schema, kind), kind)
+                    if kind == "entities":
+                        return [EntityInput(type=e.type, name=e.name, aliases=e.aliases or []) for e in items]
+                    return items
                 except ExtractionError:
                     raise
                 except Exception as exc:  # noqa: BLE001

@@ -472,6 +472,36 @@ def test_unmerge_skips_a_decision_whose_step_relation_was_deleted():
     assert run(g.decisions.list(limit=100)).items == []
 
 
+@pytest.mark.parametrize("edit", ["add", "replace", "clear"])
+def test_unmerge_preserves_post_merge_decision_step_edits(edit):
+    g = fresh_graph("res", resolver="default")
+    hammer = entity_id("Tool", "Hammer")
+    original = relation_id(BOB_ID, "USES", hammer)
+    redirected = relation_id(ROBERT_ID, "USES", hammer)
+    checked = relation_id(ADA, "CHECKED", hammer)
+    merge = _merge_with_references(
+        g,
+        relations=[
+            {"from_entity": BOB_ID, "type": "USES", "to_entity": hammer},
+            {"from_entity": ADA, "type": "CHECKED", "to_entity": hammer},
+        ],
+        decisions=[{"title": "Pick", "actor_entity": BOB_ID, "steps": [original]}],
+    )
+    trace_id = decision_id(ROBERT_ID, "Pick")
+    edited = {"add": [checked, redirected], "replace": [checked], "clear": []}[edit]
+    run(g.decisions.update(trace_id, steps=edited, summary="reviewed later"))
+    assert not next(r for r in merge.rewrites if r.kind == "decision").existed
+
+    out = run(g.entities.unmerge(merge.id))
+
+    expected = [original if s == redirected else s for s in edited]
+    restored = run(g.decisions.get(decision_id(BOB_ID, "Pick")))
+    assert [s.relation_id for s in restored.steps] == expected
+    assert [s.relation_id for s in out.decisions[0].steps] == expected
+    assert restored.summary == "reviewed later"
+    assert run(g.decisions.get(trace_id)) is None
+
+
 def test_unmerge_skips_a_preference_whose_subject_was_deleted():
     g = fresh_graph("res", resolver="default")
     ada = entity_id("Person", "Ada")
@@ -865,6 +895,25 @@ def test_a_thing_merges_into_a_typed_entity_by_name_but_never_the_reverse():
     assert _ids(g) == ["person:robert-johnson", "thing:bob-j"]
     assert run(g.insert.facts({"entities": [{"type": "Company", "name": "Bob J"}]})).merges == []
     assert _ids(g) == ["company:bob-j", "person:robert-johnson", "thing:bob-j"]
+
+
+def test_batch_merge_preserves_the_survivor_name_and_unmerges_aliases():
+    for reverse in (True, False):
+        g = fresh_graph("res", resolver="default")
+        entities = [
+            {"type": "Thing", "name": "Bob", "aliases": ["Robert"]},
+            {"type": "Person", "name": "Robert"},
+        ]
+        res = run(g.insert.facts({"entities": entities[::-1] if reverse else entities}))
+        [merge] = res.merges
+        assert (merge.absorbed_id, merge.survivor_id, merge.added_aliases) == ("thing:bob", "person:robert", ["Bob"])
+        [entity] = res.entities
+        assert (entity.id, entity.type, entity.name, entity.aliases) == ("person:robert", "Person", "Robert", ["Bob"])
+        stored = run(g.entities.get("person:robert"))
+        assert (stored.name, stored.aliases) == ("Robert", ["Bob"])
+        restored = run(g.entities.unmerge(merge.id))
+        assert (restored.survivor.name, restored.survivor.aliases) == ("Robert", [])
+        assert (restored.entity.id, restored.entity.name, restored.entity.aliases) == ("thing:bob", "Bob", ["Robert"])
 
 
 def test_cli_and_mcp_resolver_merges_and_unmerge(capsys, tmp_path):

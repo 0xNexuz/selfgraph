@@ -46,6 +46,26 @@ async function instant(): Promise<Date> {
 function suite(spec: StoreSpec): void {
   const open = freshGraphs(spec, "temporal");
 
+  it("requires visible endpoints for decision steps", async () => {
+    const g = open();
+    await g.insert.facts({ entities: ["Ada", "Bob", "Cy", "Dee"].map((name) => ({ type: "Person", name })) });
+    const old = await g.relations.create("person:ada", "KNOWS", "person:bob", { event_time: at(2020) });
+    const future = await g.relations.create("person:cy", "KNOWS", "person:dee", { event_time: at(2030) });
+    const decision = await g.decisions.create("Choose supplier", {
+      steps: [old.id, future.id],
+      event_time: at(2020),
+    });
+    const result = await g.retrieve("Ada", { k: 1, as_of: at(2025) });
+    expect(result.subgraph.entities.map((e) => e.id).sort()).toEqual(["person:ada", "person:bob"]);
+    expect(result.subgraph.relations.map((r) => r.id)).toEqual([old.id]);
+    expect(result.subgraph.decisions).toEqual([]);
+    expect((await g.retrieve("Ada", { k: 1 })).subgraph.decisions.map((d) => d.id)).toEqual([decision.id]);
+    await g.relations.update(future.id, { event_time: at(2022) });
+    expect((await g.retrieve("Ada", { k: 1, as_of: at(2025) })).subgraph.decisions.map((d) => d.id)).toEqual([
+      decision.id,
+    ]);
+  });
+
   for (const side of ["from", "to"] as const) {
     for (const defaultTime of [false, true]) {
       it(`strict retired historical replay at ${side}, default time ${defaultTime}`, async () => {

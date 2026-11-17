@@ -247,6 +247,7 @@ export class Insert {
       const found: InsertWarning[] = [];
       if (mode === "strict" && conflicts === "warn")
         await ops.requireMaxCount(tx, ns, caps, resolved.relations, source.default_event_time, createdAt);
+      await ops.requireRelationIdentities(tx, ns, resolved.relations);
       let sourceVersion: string | null = null;
       let baseEvidence: Evidence[] = [];
       const prior =

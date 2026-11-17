@@ -29,6 +29,23 @@ LENIENT_EVENT_TIMES = [
     None,
 ]
 
+ISO_TIMES = [
+    "2021-03-04T10:15:00Z",
+    "2021-03-04 10:15",
+    "2021-03-04T10:15:00.5",
+    "2021-03-04T10:15:00,123456789",
+    "2021-03-04T10:15:00+0530",
+    "2021-03-04T10:15:00+05",
+    "2021-03-04T10:15:00 -05:30:15",
+    "20210304",
+    "2021-W09-4",
+    "2021-03-04T1015",
+    "2021-03-04X10:15:00",
+    "2021-03-04T10:15:00+24:00",
+    "2021-03-04T10:15:00+05:60",
+    "2021-02-29",
+]
+
 TERMS_SPEC = {
     "entities": [
         {
@@ -217,6 +234,16 @@ UNKNOWN_KEY_CASES = [
     ["schema", {"entities": [{"name": "A", "properties": [{"name": "x", "requird": True}]}]}],
     ["schema", {"relations": [{"type": "X", "from": {"type": ["A"]}}]}],
     ["schema", {"relations": [{"type": "X", "to": {"max": 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 1.5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": True}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"max_count": "1"}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": 1.0, "max_count": 2.0}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53 - 1}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": -(2**53)}}]}],
+    ["schema", {"relations": [{"type": "X", "to": {"min_count": -1e20}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"min_count": 2**53, "max_count": 5}}]}],
+    ["schema", {"relations": [{"type": "X", "from": {"max_count": 2**53, "min_count": 1.5}}]}],
 ]
 
 
@@ -330,6 +357,28 @@ def schema_warnings():
         except ValidationError as exc:
             return str(exc)
 
+    endpoint_specs = [
+        {
+            "entities": [{"name": "Person", "aliases": ["Human"]}, {"name": "Company", "aliases": ["Org"]}],
+            "relations": [
+                {"type": "WORKS_AT", "from": {"types": ["person", "Human"]}, "to": {"types": ["Org", "company"]}},
+                {"type": "KNOWS", "from": {"types": ["Person"]}, "to": {"types": ["Human"]}},
+            ],
+        },
+        {"relations": [{"type": "R", "from": {"types": ["CustomFrom"]}, "to": {"types": ["CustomTo"]}}]},
+        {
+            "entities": [{"name": "Person"}],
+            "relations": [{"type": "R", "to": {"types": ["Missing"]}}],
+        },
+    ]
+
+    def endpoint_outcome(spec):
+        try:
+            parsed = Schema.model_validate(spec)
+            return [[r.from_.types, r.to.types] for r in parsed.relations]
+        except ValidationError as exc:
+            return str(exc)
+
     return {
         "warnings": [
             [
@@ -345,6 +394,7 @@ def schema_warnings():
             for facts in (Extraction.model_validate(case) for case in OWN_KEY_CASES)
         ],
         "parents": [parent_outcome(spec) for spec in parent_specs],
+        "endpoint_types": [endpoint_outcome(spec) for spec in endpoint_specs],
         "unknown_keys": [unknown_key_error(kind, value) for kind, value in UNKNOWN_KEY_CASES],
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "tables_errors": tables_reference_errors(),
@@ -364,6 +414,7 @@ def schema_warnings():
             for q in TERM_QUESTIONS
         ],
         "datetime_errors": datetime_errors(),
+        "iso_times": iso_times(),
         "terms_subtypes": [
             sorted(expand_tokens(_tokens(q), sub_schema, _tokens))
             for sub_schema in [
@@ -401,6 +452,20 @@ def datetime_errors():
         except ValidationError as exc:
             errors.append(str(exc))
     return errors
+
+
+def iso_times():
+    """Parse each ISO_TIMES string as a time argument.
+
+    @return (list[str]): each time in UTC, or the validation error.
+    """
+    out = []
+    for text in ISO_TIMES:
+        try:
+            out.append(json_iso(parse_time(text, "as_of")))
+        except ValidationError as exc:
+            out.append(str(exc))
+    return out
 
 
 STORES = {
@@ -500,6 +565,20 @@ FACTS = {
     ],
 }
 
+_JOINED = {"from_entity": "company:acme", "type": "JOINED", "to_entity": "person:jane-doe"}
+_LIKES = {"subject_entity": "person:jane-doe", "key": "employer", "value_entity": "company:acme"}
+FACTS_TYPE_CASES = [
+    {"relations": [{**_JOINED, "event_time": "2021"}]},
+    {"relations": [{**_JOINED, "event_time": 2021}]},
+    {"relations": [{**_JOINED, "event_time": True}]},
+    {"relations": [{**_JOINED, "evidence": [{"source_id": "s", "confidence": "0.5"}]}]},
+    {"preferences": [{**_LIKES, "strength": "0.9"}]},
+    {"preferences": [{**_LIKES, "strength": False}]},
+    {"preferences": [{**_LIKES, "event_time": "20210304T"}]},
+    {"decisions": [{"title": "t", "event_time": 1700000000}]},
+    {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
+]
+
 USES_SPEC = {
     "entities": [{"name": "Person"}, {"name": "Tool"}],
     "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
@@ -596,6 +675,8 @@ async def write(graph):
     )
     pref = ids.preference_id("person:jane-doe", "preference", "database", "database:hydradb")
     out["pref_update"] = to_jsonable(await graph.preferences.update(pref, strength=0.25))
+    await graph.store.update_current_edge(graph.namespace, pref, {"event_time": "2024-02-29T23:59:59Z"})
+    out["stored_z"] = to_jsonable((await graph.preferences.versions(pref))[0])["event_time"]
     dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
     out["dec_update"] = to_jsonable(await graph.decisions.update(dec, status="active", rationale=None))
     restated = {"title": "Pick HydraDB", "actor_entity": "person:jane-doe"}
@@ -702,6 +783,13 @@ async def write(graph):
         out["facts_none"] = "accepted"
     except ValidationError as exc:
         out["facts_none"] = str(exc)
+    out["facts_types"] = []
+    for facts in FACTS_TYPE_CASES:
+        try:
+            await graph.insert.facts(facts)
+            out["facts_types"].append("accepted")
+        except ValidationError as exc:
+            out["facts_types"].append(str(exc))
     try:
         await graph.entities.create("Unsafe", "Thing", properties={"n": 2**53})
         out["unsafe_integer"] = "accepted"
@@ -823,6 +911,38 @@ async def write(graph):
         "returned_after_bb": [s.relation_id for s in after_bb_merge.decisions[0].steps],
         "returned_after_bob": [s.relation_id for s in after_bob_merge.decisions[0].steps],
     }
+    edited_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:edited-steps", resolver="default")
+    await edited_graph.insert.facts(
+        {
+            "entities": [
+                {"type": "Person", "name": "Robert", "aliases": ["Bob"]},
+                {"type": "Person", "name": "Ada"},
+                {"type": "Tool", "name": "Hammer"},
+            ]
+        }
+    )
+    original_step = ids.relation_id("person:bob", "USES", "tool:hammer")
+    edited_merge = await edited_graph.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": "Bob"}],
+            "relations": [
+                {"from_entity": "person:bob", "type": "USES", "to_entity": "tool:hammer"},
+                {"from_entity": "person:ada", "type": "CHECKED", "to_entity": "tool:hammer"},
+            ],
+            "decisions": [{"title": "Pick", "actor_entity": "person:bob", "steps": [original_step]}],
+        }
+    )
+    edited_steps = [
+        ids.relation_id("person:ada", "CHECKED", "tool:hammer"),
+        ids.relation_id("person:robert", "USES", "tool:hammer"),
+    ]
+    await edited_graph.decisions.update(edited_merge.decisions[0].id, steps=edited_steps)
+    edited_undo = await edited_graph.entities.unmerge(edited_merge.merges[0].id)
+    edited_read = await edited_graph.decisions.get(ids.decision_id("person:bob", "Pick"))
+    out["unmerge_edited_steps"] = {
+        "returned": [s.relation_id for s in edited_undo.decisions[0].steps],
+        "stored": [s.relation_id for s in edited_read.steps],
+    }
     out["repeated_merges"] = {}
     first = {
         "type": "Person",
@@ -899,6 +1019,17 @@ async def write(graph):
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_fuzzy.merges],
         [(m.absorbed_id, m.survivor_id, m.reason) for m in mixed_org.merges],
     ]
+    batch_names = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_batch_names", resolver="default")
+    merged_names = await batch_names.insert.facts(
+        {"entities": [{"type": "Thing", "name": "Bob", "aliases": ["Robert"]}, {"type": "Person", "name": "Robert"}]}
+    )
+    stored_name = await batch_names.entities.get("person:robert")
+    restored_names = await batch_names.entities.unmerge(merged_names.merges[0].id)
+    out["batch_survivor_name"] = [
+        [stored_name.id, stored_name.name, stored_name.aliases],
+        [restored_names.survivor.name, restored_names.survivor.aliases],
+        [restored_names.entity.id, restored_names.entity.name, restored_names.entity.aliases],
+    ]
     replaced_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_src", extraction="regex")
     rv1 = await replaced_src.insert.text("Alice works at Acme. Alice knows Bob.", source_id="hr")
     await replaced_src.relations.certify(rv1.relations[1].id, by="hr")
@@ -923,6 +1054,26 @@ async def write(graph):
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    try:
+        await graph.insert.facts(
+            {
+                "entities": [{"type": "Thing", "name": "Rejected"}],
+                "relations": [
+                    {
+                        "id": works_at,
+                        "type": "WORKS_AT",
+                        "from_entity": "person:jane-doe",
+                        "to_entity": "thing:rejected",
+                    }
+                ],
+            },
+            source_id="rejected",
+        )
+    except ValidationError as exc:
+        out["rejected_relation"] = str(exc)
+    else:
+        raise AssertionError("relation id was accepted with a different destination")
+    assert await graph.entities.get("thing:rejected") is None
     out["context_boundary"] = await context_boundary(graph)
     capped = SelfGraph(store=graph.store, namespace=graph.namespace, schema=USES_SPEC, contradiction="supersede")
     await capped.insert.facts(
@@ -1000,6 +1151,8 @@ async def write(graph):
         "relations": [(r.id, r.revision, r.is_current) for r in replayed.relations],
         "warnings": [w.code for w in replayed.warnings],
     }
+    await graph.insert.text("Mira knows Niko.", source_id="diff-source")
+    await graph.insert.text("Mira knows Omar.", source_id="diff-source", replace_source=True)
     extra_ns = f"{graph.namespace}:extra"
     await graph.store.upsert_nodes(
         extra_ns,
@@ -1024,6 +1177,14 @@ async def write(graph):
         "primary": primary_node["id"] if primary_node else None,
         "batch_extra": extra_batch_node["id"] if extra_batch_node else None,
         "single_extra": extra_single_node["id"] if extra_single_node else None,
+    }
+    blob = "x" * 40_000
+    await graph.entities.create("Large Doc", "Note", properties={"blob": blob})
+    await graph.entities.create("Small Doc", "Note")
+    large_rel = await graph.relations.create("note:large-doc", "LINKS", "note:small-doc", properties={"blob": blob})
+    out["large_document"] = {
+        "entity": len((await graph.entities.get("note:large-doc")).properties["blob"]),
+        "relation": len((await graph.relations.get(large_rel.id)).properties["blob"]),
     }
     return out
 
@@ -1261,6 +1422,37 @@ async def all_evidence(list_fn, oid):
         cursor = page.next_cursor
 
 
+async def diff_windows(graph):
+    d = await graph.diff("1900-01-01", "2100-01-01")
+    times = sorted(
+        {
+            at
+            for r in [*d.relations_added, *d.relations_revised, *d.relations_retired]
+            for at in (r.created_at, r.invalidated_known_at)
+            if at is not None
+        }
+    )
+    if not times:
+        return []
+    first, middle, last = times[0], times[len(times) // 2], times[-1]
+    windows = [("1900-01-01", first), (first, first), (first, middle), (middle, last), (last, "2100-01-01")]
+    out = []
+    for since, until in windows:
+        d = await graph.diff(since, until)
+        out.append(
+            {
+                "since": d.since.isoformat().replace("+00:00", "Z"),
+                "until": d.until.isoformat().replace("+00:00", "Z"),
+                "added": [[r.id, r.revision] for r in d.relations_added],
+                "revised": [[r.id, r.revision] for r in d.relations_revised],
+                "retired": [[r.id, r.revision, r.invalidated_by] for r in d.relations_retired],
+                "entities": [e.id for e in d.entities_created],
+                "limitations": d.limitations,
+            }
+        )
+    return out
+
+
 async def dump(graph, ns):
     store = graph.store
     entities = [e async for e in graph.entities.iterate(limit=3)]
@@ -1302,6 +1494,27 @@ async def dump(graph, ns):
         walk: await graph.retrieve("Grace Hopper COBOL Jane acme", strategy=walk, k=1, depth=4, max_nodes=3)
         for walk in ("bfs", "dfs")
     }
+    loops = SelfGraph(store=store, namespace=f"{ns}_loops")
+    await loops.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Middle", "Bob")],
+            "relations": [
+                {"from_entity": "thing:ada", "type": "LINKS", "to_entity": "thing:middle"},
+                {"from_entity": "thing:middle", "type": "LINKS", "to_entity": "thing:bob"},
+                *[
+                    {
+                        "id": f"relation:self{i}",
+                        "from_entity": "thing:middle",
+                        "type": "SELF",
+                        "to_entity": "thing:middle",
+                    }
+                    for i in range(24)
+                ],
+            ],
+        }
+    )
+    loop_result = await loops.retrieve("Ada", k=1, depth=3, skip_hubs=True)
+    loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
     shared_terms_graph = SelfGraph(
@@ -1313,9 +1526,52 @@ async def dump(graph, ns):
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")
     }
+    boundary = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_boundary")
+    await boundary.insert.facts(
+        {
+            "entities": [{"type": "Thing", "name": n} for n in ("Ada", "Bob", "Cy")],
+            "relations": [
+                {"id": f"relation:{a}{b}", "from_entity": f"thing:{a}", "type": "LINKS", "to_entity": f"thing:{b}"}
+                for a, b in (("ada", "bob"), ("ada", "cy"), ("bob", "cy"))
+            ],
+            "decisions": [{"title": "Choose Cy", "steps": ["relation:bobcy"]}],
+        }
+    )
+    boundary_results = {}
+    for walk in ("bfs", "dfs", "ppr"):
+        result = await boundary.retrieve("Ada", k=1, depth=1, strategy=walk)
+        boundary_results[walk] = {
+            "relations": sorted(r.id for r in result.subgraph.relations),
+            "decisions": [d.title for d in result.subgraph.decisions],
+        }
+    temporal = SelfGraph(store=store, namespace=f"{ns}_step_visibility")
+    await temporal.insert.facts(
+        {
+            "entities": [{"type": "Person", "name": n} for n in ("Ada", "Bob", "Cy", "Dee")],
+            "relations": [
+                {
+                    "id": f"relation:{label}",
+                    "from_entity": f"person:{source}",
+                    "type": "KNOWS",
+                    "to_entity": f"person:{target}",
+                    "event_time": f"{year}-01-01",
+                }
+                for label, source, target, year in (("old", "ada", "bob", 2020), ("future", "cy", "dee", 2030))
+            ],
+            "decisions": [
+                {"title": "Choose supplier", "steps": ["relation:old", "relation:future"], "event_time": "2020-01-01"}
+            ],
+        }
+    )
+    hidden_steps = await temporal.retrieve("Ada", k=1, as_of="2025-01-01")
+    assert hidden_steps.subgraph.decisions == []
+    visible_steps = await temporal.retrieve("Ada", k=1)
+    assert [d.title for d in visible_steps.subgraph.decisions] == ["Choose supplier"]
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
     return to_jsonable(
         {
+            "diff": await graph.diff("1900-01-01", "2100-01-01"),
+            "diff_windows": await diff_windows(graph),
             "answerable": answerable,
             "shared_synonym_answerable": shared_synonym_answerable,
             "prune_types": pruned,
@@ -1324,6 +1580,10 @@ async def dump(graph, ns):
                 "counts": {e.id: e.source_count for e in historical.subgraph.entities},
             },
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
+            "retrieval_boundary": boundary_results,
+            "decision_step_visibility": [
+                [d.title for d in r.subgraph.decisions] for r in (hidden_steps, visible_steps)
+            ],
             "tiers": termed.tiers,
             "entities": sorted(entities, key=lambda e: e.id),
             "relations": dict(sorted(relations.items())),
@@ -1331,6 +1591,12 @@ async def dump(graph, ns):
             "preference_versions": dict(sorted(preference_versions.items())),
             "sources": sorted(sources, key=lambda s: s["id"]),
             "decisions": decisions,
+            "self_loop_hubs": {
+                "entities": sorted(e.id for e in loop_result.subgraph.entities),
+                "hubs": loop_result.hubs,
+                "verdict": loop_report.verdict,
+                "hub_only": loop_report.hub_only,
+            },
             "raw_steps": sorted(await store.match_nodes(ns, "DecisionStep"), key=lambda row: row["id"]),
             "raw_entities": raw_entities,
             "filters": filters,
@@ -1361,7 +1627,7 @@ async def dump(graph, ns):
 async def main():
     cmd = sys.argv[1]
     if cmd == "kuzu_isolation":
-        from selfgraph import KuzuStore
+        from selfgraph import KuzuStore, ValidationError
 
         result = []
         for path in ("", ":memory:"):
@@ -1371,6 +1637,16 @@ async def main():
                 await second.insert.facts({"entities": [{"name": "Jane", "type": "Person"}]})
                 await second.entities.delete(entity.id)
                 result.append(await first.entities.get(entity.id) == entity)
+        path = sys.argv[4]
+        first = KuzuStore(path)
+        for db_kwargs in ({"read_only": True}, {"read_only": True, "max_db_size": 1024}):
+            try:
+                KuzuStore(path, **db_kwargs)
+            except ValidationError as exc:
+                result.append(str(exc))
+            else:
+                result.append("no error")
+        await first.close()
         json.dump(result, sys.stdout)
         return
     if cmd == "schema":

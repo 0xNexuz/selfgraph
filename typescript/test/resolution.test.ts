@@ -214,6 +214,68 @@ function suite(spec: StoreSpec) {
     expect(await ids(g)).toEqual(["company:bob-j", "person:robert-johnson", "thing:bob-j"]);
   });
 
+  it.each(["add", "replace", "clear"])("preserves post-merge decision step edits: %s", async (edit) => {
+    const g = open({ resolver: "default" });
+    await seed(g, { type: "Person", name: "Robert", aliases: ["Bob"] }, { type: "Person", name: "Ada" });
+    const original = relationId(BOB, "USES", TOOL);
+    const redirected = relationId(ROBERT, "USES", TOOL);
+    const checked = relationId(ADA, "CHECKED", TOOL);
+    const res = await g.insert.facts({
+      entities: [
+        { type: "Person", name: "Bob" },
+        { type: "Tool", name: "Hammer" },
+      ],
+      relations: [
+        { from_entity: BOB, type: "USES", to_entity: TOOL },
+        { from_entity: ADA, type: "CHECKED", to_entity: TOOL },
+      ],
+      decisions: [{ title: "Pick", actor_entity: BOB, steps: [original] }],
+    });
+    const traceId = decisionId(ROBERT, "Pick");
+    const edited = edit === "add" ? [checked, redirected] : edit === "replace" ? [checked] : [];
+    await g.decisions.update(traceId, { steps: edited, summary: "reviewed later" });
+    expect(res.merges[0]!.rewrites.find((r) => r.kind === "decision")!.existed).toBe(false);
+
+    const out = await g.entities.unmerge(res.merges[0]!.id);
+
+    const expected = edited.map((s) => (s === redirected ? original : s));
+    const restored = (await g.decisions.get(decisionId(BOB, "Pick")))!;
+    expect(restored.steps.map((s) => s.relation_id)).toEqual(expected);
+    expect(out.decisions[0]!.steps.map((s) => s.relation_id)).toEqual(expected);
+    expect(restored.summary).toBe("reviewed later");
+    expect(await g.decisions.get(traceId)).toBeNull();
+  });
+
+  it("preserves the batch survivor name and unmerges aliases in either input order", async () => {
+    for (const reverse of [true, false]) {
+      const g = open({ resolver: "default" });
+      const entities = [
+        { type: "Thing", name: "Bob", aliases: ["Robert"] },
+        { type: "Person", name: "Robert" },
+      ];
+      const res = await g.insert.facts({ entities: reverse ? entities.reverse() : entities });
+      expect(res.merges).toHaveLength(1);
+      const merge = res.merges[0]!;
+      expect([merge.absorbed_id, merge.survivor_id, merge.added_aliases]).toEqual([
+        "thing:bob",
+        "person:robert",
+        ["Bob"],
+      ]);
+      expect(res.entities.map((e) => [e.id, e.type, e.name, e.aliases])).toEqual([
+        ["person:robert", "Person", "Robert", ["Bob"]],
+      ]);
+      const stored = (await g.entities.get("person:robert"))!;
+      expect([stored.name, stored.aliases]).toEqual(["Robert", ["Bob"]]);
+      const restored = await g.entities.unmerge(merge.id);
+      expect([restored.survivor!.name, restored.survivor!.aliases]).toEqual(["Robert", []]);
+      expect([restored.entity.id, restored.entity.name, restored.entity.aliases]).toEqual([
+        "thing:bob",
+        "Bob",
+        ["Robert"],
+      ]);
+    }
+  });
+
   it("merges within one batch only when fuzzy", async () => {
     const batch: Extraction = {
       entities: [

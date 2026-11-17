@@ -764,14 +764,14 @@ def _redirect(ent: EntityInput, target: Entity) -> EntityInput:
 
     @param ent (EntityInput): the candidate, already folded into the target view.
     @param target (Entity): the target view, whose values win for every key the candidate shares with it.
-    @return (EntityInput): an input with the target's id and type, the candidate's surface forms, and the target's
-        values for the candidate's external id and property keys.
+    @return (EntityInput): an input with the target's id, name, and type, the candidate's surface forms as aliases,
+        and the target's values for the candidate's external id and property keys.
     """
     return EntityInput(
         id=target.id,
         type=target.type,
-        name=ent.name,
-        aliases=list(ent.aliases),
+        name=target.name,
+        aliases=[*ent.aliases, ent.name],
         external_ids={k: target.external_ids[k] for k in ent.external_ids},
         properties={k: target.properties[k] for k in ent.properties if k in target.properties},
     )
@@ -891,7 +891,7 @@ def _encode_merge(ns: str, rec: MergeRecord) -> dict[str, Any]:
     """The merge record node, without its sources and rewrites, which live in EntityMergeEntry rows.
 
     A record repeats every time an insert merges the same pair again, so its sources and rewrites grow without bound;
-    kept inline they would outgrow a store's per-document limit (32000 bytes on HydraDB).
+    kept inline they would outgrow a store's per-document limit.
 
     @param ns (str): namespace.
     @param rec (MergeRecord): the record.
@@ -996,8 +996,8 @@ async def _write_merges(
         nodes.append((rec.id, _encode_merge(ns, rec)))
         have = {row["id"]: row.get("value_json") for row in rows}
         entries += [(eid, row) for eid, row in _entry_rows(ns, rec).items() if have.get(eid) != row["value_json"]]
-    for _, props in [*nodes, *entries]:
-        await _ops._precheck_write(runner, props)
+    await _ops._precheck_nodes(runner, ns, L_MERGE_ENTRY, entries)
+    await _ops._precheck_nodes(runner, ns, L_MERGE, nodes)
     if entries:
         await runner.upsert_nodes(ns, L_MERGE_ENTRY, entries)
     await runner.upsert_nodes(ns, L_MERGE, nodes)
@@ -1340,12 +1340,18 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
         actor = await end(original.actor_entity, rewritten.actor_entity)
         outcome = await end(original.outcome_entity, rewritten.outcome_entity)
         steps = [restored.get(s, s) for s in rewritten.steps]
+        current = await _ops.get_trace(runner, ns, rw.id)
+        step_inputs = original.steps
+        if current is not None and not rw.existed:
+            current_steps = [restored.get(s.relation_id, s.relation_id) for s in current.steps]
+            if current_steps != steps:
+                step_inputs = current_steps
+            steps = current_steps
         if not all([actor is None or await exists(actor), outcome is None or await exists(outcome)]):
             continue
         if not all([await _ops.relation_exists(runner, ns, s) for s in steps]):
             continue
         base = original
-        current = await _ops.get_trace(runner, ns, rw.id)
         if current is not None and not rw.existed:
             base = original.model_copy(
                 update={
@@ -1361,7 +1367,7 @@ async def unmerge(runner: Any, ns: str, merge_id: str) -> UnmergeResult:
             await end(o, r) for o, r in zip(original.alternative_entities, rewritten.alternative_entities, strict=True)
         ]
         restored_steps = []
-        for s in original.steps:
+        for s in step_inputs:
             if s in dropped_sibling_ids and s not in orig_restored:
                 continue
             if s in orig_restored:

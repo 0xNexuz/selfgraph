@@ -63,7 +63,9 @@ function mask(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => {
-        if (k === "created_at" || k === "updated_at" || k === "invalidated_known_at") return [k, "<ts>"];
+        if (k === "invalidated_at" && String((value as Record<string, unknown>).invalidated_by).startsWith("sv:"))
+          return [k, "<ts>"];
+        if (["created_at", "updated_at", "invalidated_known_at", "since", "until"].includes(k)) return [k, "<ts>"];
         if (k === "ns") return [k, "<ns>"];
         if (k === "message") return [k, "<message>"];
         if (k === "evidence_json" && typeof v === "string") return [k, mask(v)];
@@ -96,7 +98,7 @@ for (const spec of specs) live.set(spec.name, await reachable(spec));
 
 describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
   it.skipIf(!live.get("kuzu"))("isolates anonymous Kuzu databases in both languages", async () => {
-    const result: boolean[] = [];
+    const result: (boolean | string)[] = [];
     for (const path of ["", ":memory:"]) {
       await using first = new SelfGraph(new KuzuStore(path));
       await using second = new SelfGraph(new KuzuStore(path));
@@ -106,7 +108,18 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
       await second.entities.delete(entity.id);
       result.push((await first.entities.get(entity.id))?.id === entity.id);
     }
-    expect(result).toEqual([true, true, true, true]);
+    const shared = new KuzuStore(KUZU);
+    await shared.initialize();
+    for (const options of [{ read_only: true }, { read_only: true, max_db_size: 1024 }]) {
+      try {
+        await new KuzuStore(KUZU, options).initialize();
+        result.push("no error");
+      } catch (exc) {
+        result.push(exc instanceof Error ? exc.message : String(exc));
+      }
+    }
+    await shared.close();
+    expect(result.slice(0, 4)).toEqual([true, true, true, true]);
     expect(py("kuzu_isolation", "-", "-")).toEqual(result);
   });
 
@@ -205,6 +218,9 @@ describe.skipIf(!PY)("cross-language conformance with the Python SDK", () => {
               single_extra: "extra:single",
             });
           }
+        }
+        for (const ops of [pyOps, tsOps]) {
+          expect((ops as { large_document: unknown }).large_document).toEqual({ entity: 40_000, relation: 40_000 });
         }
         rmSync(evidence, { recursive: true, force: true });
       },

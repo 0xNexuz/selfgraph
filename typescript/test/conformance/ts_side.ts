@@ -25,6 +25,7 @@ import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
 import { STORE_SPECS } from "../helpers.js";
+import { diffWindows } from "./diff.js";
 
 const LENIENT_EVENT_TIMES = [
   "2021",
@@ -38,6 +39,23 @@ const LENIENT_EVENT_TIMES = [
   "2021-06-15T12:00:00Z",
   null,
 ] as const;
+
+const ISO_TIMES = [
+  "2021-03-04T10:15:00Z",
+  "2021-03-04 10:15",
+  "2021-03-04T10:15:00.5",
+  "2021-03-04T10:15:00,123456789",
+  "2021-03-04T10:15:00+0530",
+  "2021-03-04T10:15:00+05",
+  "2021-03-04T10:15:00 -05:30:15",
+  "20210304",
+  "2021-W09-4",
+  "2021-03-04T1015",
+  "2021-03-04X10:15:00",
+  "2021-03-04T10:15:00+24:00",
+  "2021-03-04T10:15:00+05:60",
+  "2021-02-29",
+];
 
 const TERMS_SPEC = {
   entities: [
@@ -241,6 +259,16 @@ const UNKNOWN_KEY_CASES: Array<["facts" | "schema", unknown]> = [
   ["schema", { entities: [{ name: "A", properties: [{ name: "x", requird: true }] }] }],
   ["schema", { relations: [{ type: "X", from: { type: ["A"] } }] }],
   ["schema", { relations: [{ type: "X", to: { max: 1 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 1.5 } }] }],
+  ["schema", { relations: [{ type: "X", from: { min_count: true } }] }],
+  ["schema", { relations: [{ type: "X", to: { max_count: "1" } }] }],
+  ["schema", { relations: [{ type: "X", to: { min_count: 1.0, max_count: 2.0 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53 - 1 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: -(2 ** 53) } }] }],
+  ["schema", { relations: [{ type: "X", to: { min_count: -1e20 } }] }],
+  ["schema", { relations: [{ type: "X", from: { min_count: 2 ** 53, max_count: 5 } }] }],
+  ["schema", { relations: [{ type: "X", from: { max_count: 2 ** 53, min_count: 1.5 } }] }],
 ];
 
 /**
@@ -326,6 +354,7 @@ export function schemaWarnings(): {
   alias_errors: string[];
   own_keys: Array<Array<{ code: string; message: string }>>;
   parents: unknown[];
+  endpoint_types: unknown[];
   tables: unknown;
   tables_errors: string[];
   term_forms: unknown;
@@ -334,6 +363,7 @@ export function schemaWarnings(): {
   shared_synonym_term_forms: unknown;
   shared_terms: string[][];
   datetime_errors: string[];
+  iso_times: string[];
   terms_subtypes: unknown[];
   neo4j_dropped: string;
   json_constants: { flags: unknown[]; documents: unknown[] };
@@ -421,6 +451,29 @@ export function schemaWarnings(): {
         return (exc as Error).message;
       }
     }),
+    endpoint_types: [
+      {
+        entities: [
+          { name: "Person", aliases: ["Human"] },
+          { name: "Company", aliases: ["Org"] },
+        ],
+        relations: [
+          { type: "WORKS_AT", from: { types: ["person", "Human"] }, to: { types: ["Org", "company"] } },
+          { type: "KNOWS", from: { types: ["Person"] }, to: { types: ["Human"] } },
+        ],
+      },
+      { relations: [{ type: "R", from: { types: ["CustomFrom"] }, to: { types: ["CustomTo"] } }] },
+      {
+        entities: [{ name: "Person" }],
+        relations: [{ type: "R", to: { types: ["Missing"] } }],
+      },
+    ].map((spec) => {
+      try {
+        return parseOrThrow(Schema, spec, "schema").relations.map((r) => [r.from.types, r.to.types]);
+      } catch (exc) {
+        return (exc as Error).message;
+      }
+    }),
     unknown_keys: UNKNOWN_KEY_CASES.map(([kind, value]) => unknownKeyError(kind, value)),
     tables: toJsonable(fromTables(TABLES, { name: "sales" })),
     tables_errors: tablesReferenceErrors(),
@@ -446,6 +499,14 @@ export function schemaWarnings(): {
       try {
         parseTime(text, "event_time");
         return "accepted";
+      } catch (exc) {
+        if (!(exc instanceof ValidationError)) throw exc;
+        return exc.message;
+      }
+    }),
+    iso_times: ISO_TIMES.map((text) => {
+      try {
+        return jsonIso(parseTime(text, "as_of"));
       } catch (exc) {
         if (!(exc instanceof ValidationError)) throw exc;
         return exc.message;
@@ -528,6 +589,20 @@ export const FACTS = {
     },
   ],
 };
+
+const JOINED = { from_entity: "company:acme", type: "JOINED", to_entity: "person:jane-doe" };
+const LIKES = { subject_entity: "person:jane-doe", key: "employer", value_entity: "company:acme" };
+const FACTS_TYPE_CASES: unknown[] = [
+  { relations: [{ ...JOINED, event_time: "2021" }] },
+  { relations: [{ ...JOINED, event_time: 2021 }] },
+  { relations: [{ ...JOINED, event_time: true }] },
+  { relations: [{ ...JOINED, evidence: [{ source_id: "s", confidence: "0.5" }] }] },
+  { preferences: [{ ...LIKES, strength: "0.9" }] },
+  { preferences: [{ ...LIKES, strength: false }] },
+  { preferences: [{ ...LIKES, event_time: "20210304T" }] },
+  { decisions: [{ title: "t", event_time: 1700000000 }] },
+  { decisions: [{ title: "t", event_time: "soon", steps: [] }] },
+];
 
 export const TEXT =
   "Grace Hopper joined Remington Rand. Grace Hopper wrote COBOL. Zoë Ångström met Ada Lovelace in 北京.";
@@ -619,6 +694,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
   );
   const pref = ids.preferenceId("person:jane-doe", "preference", "database", "database:hydradb");
   out.pref_update = toJsonable(await graph.preferences.update(pref, { strength: 0.25 }));
+  await graph.store.updateCurrentEdge(graph.namespace, pref, { event_time: "2024-02-29T23:59:59Z" });
+  out.stored_z = toJsonable((await graph.preferences.versions(pref))[0]!.event_time);
   const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
   out.dec_update = toJsonable(await graph.decisions.update(dec, { status: "active", rationale: null }));
   const restated = { title: "Pick HydraDB", actor_entity: "person:jane-doe" };
@@ -708,6 +785,17 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.facts_none = exc.message;
   }
+  const factsTypes: string[] = [];
+  for (const facts of FACTS_TYPE_CASES) {
+    try {
+      await graph.insert.facts(facts as never);
+      factsTypes.push("accepted");
+    } catch (exc) {
+      if (!(exc instanceof ValidationError)) throw exc;
+      factsTypes.push(exc.message);
+    }
+  }
+  out.facts_types = factsTypes;
   try {
     await graph.entities.create("Unsafe", "Thing", { properties: { n: 2 ** 53 } } as never);
     out.unsafe_integer = "accepted";
@@ -825,6 +913,37 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     returned_after_bb: afterBbMerge.decisions[0]!.steps.map((s) => s.relation_id),
     returned_after_bob: afterBobMerge.decisions[0]!.steps.map((s) => s.relation_id),
   };
+  const editedGraph = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}:edited-steps`,
+    resolver: "default",
+  });
+  await editedGraph.insert.facts({
+    entities: [
+      { type: "Person", name: "Robert", aliases: ["Bob"] },
+      { type: "Person", name: "Ada" },
+      { type: "Tool", name: "Hammer" },
+    ],
+  });
+  const originalStep = ids.relationId("person:bob", "USES", "tool:hammer");
+  const editedMerge = await editedGraph.insert.facts({
+    entities: [{ type: "Person", name: "Bob" }],
+    relations: [
+      { from_entity: "person:bob", type: "USES", to_entity: "tool:hammer" },
+      { from_entity: "person:ada", type: "CHECKED", to_entity: "tool:hammer" },
+    ],
+    decisions: [{ title: "Pick", actor_entity: "person:bob", steps: [originalStep] }],
+  });
+  const editedSteps = [
+    ids.relationId("person:ada", "CHECKED", "tool:hammer"),
+    ids.relationId("person:robert", "USES", "tool:hammer"),
+  ];
+  await editedGraph.decisions.update(editedMerge.decisions[0]!.id, { steps: editedSteps });
+  const editedUndo = await editedGraph.entities.unmerge(editedMerge.merges[0]!.id);
+  const editedRead = (await editedGraph.decisions.get(ids.decisionId("person:bob", "Pick")))!;
+  out.unmerge_edited_steps = {
+    returned: editedUndo.decisions[0]!.steps.map((s) => s.relation_id),
+    stored: editedRead.steps.map((s) => s.relation_id),
+  };
   const repeatedMerges: Record<string, unknown> = {};
   const first = {
     type: "Person",
@@ -910,6 +1029,20 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     mixedFuzzy.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
     mixedOrg.merges.map((m) => [m.absorbed_id, m.survivor_id, m.reason]),
   ];
+  const batchNames = new SelfGraph(graph.store, { namespace: `${graph.namespace}_batch_names`, resolver: "default" });
+  const mergedNames = await batchNames.insert.facts({
+    entities: [
+      { type: "Thing", name: "Bob", aliases: ["Robert"] },
+      { type: "Person", name: "Robert" },
+    ],
+  });
+  const storedName = (await batchNames.entities.get("person:robert"))!;
+  const restoredNames = await batchNames.entities.unmerge(mergedNames.merges[0]!.id);
+  out.batch_survivor_name = [
+    [storedName.id, storedName.name, storedName.aliases],
+    [restoredNames.survivor!.name, restoredNames.survivor!.aliases],
+    [restoredNames.entity.id, restoredNames.entity.name, restoredNames.entity.aliases],
+  ];
   const replacedSrc = new SelfGraph(graph.store, {
     namespace: `${graph.namespace}_replace_src`,
     extraction: "regex",
@@ -941,6 +1074,22 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  try {
+    await graph.insert.facts(
+      {
+        entities: [{ type: "Thing", name: "Rejected" }],
+        relations: [{ id: worksAt, type: "WORKS_AT", from_entity: "person:jane-doe", to_entity: "thing:rejected" }],
+      },
+      { source_id: "rejected" },
+    );
+    throw new Error("relation id was accepted with a different destination");
+  } catch (exc) {
+    if (!(exc instanceof ValidationError)) throw exc;
+    out.rejected_relation = exc.message;
+  }
+  if ((await graph.entities.get("thing:rejected")) !== null) {
+    throw new Error("rejected relation left an entity in the graph");
+  }
   out.context_boundary = await contextBoundary(graph);
   const capped = new SelfGraph(graph.store, {
     namespace: graph.namespace,
@@ -1024,6 +1173,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     relations: replayed.relations.map((r) => [r.id, r.revision, r.is_current]),
     warnings: replayed.warnings.map((w) => w.code),
   };
+  await graph.insert.text("Mira knows Niko.", { source_id: "diff-source" });
+  await graph.insert.text("Mira knows Omar.", { source_id: "diff-source", replace_source: true });
   const extraNs = `${graph.namespace}:extra`;
   await graph.store.upsertNodes(
     extraNs,
@@ -1048,6 +1199,16 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     primary: primaryNode ? (primaryNode.id as string) : null,
     batch_extra: extraBatchNode ? (extraBatchNode.id as string) : null,
     single_extra: extraSingleNode ? (extraSingleNode.id as string) : null,
+  };
+  const blob = "x".repeat(40_000);
+  await graph.entities.create("Large Doc", "Note", { properties: { blob } });
+  await graph.entities.create("Small Doc", "Note");
+  const largeRel = await graph.relations.create("note:large-doc", "LINKS", "note:small-doc", { properties: { blob } });
+  const largeEntity = await graph.entities.get("note:large-doc");
+  const largeRelation = await graph.relations.get(largeRel.id);
+  out.large_document = {
+    entity: String(largeEntity?.properties.blob ?? "").length,
+    relation: String(largeRelation?.properties.blob ?? "").length,
   };
   return out;
 }
@@ -1184,6 +1345,22 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await graph.retrieve("Grace Hopper COBOL Jane acme", { strategy: walk, k: 1, depth: 4, max_nodes: 3 });
     tight[walk] = { entities: r.subgraph.entities.map((e) => e.id), relations: r.subgraph.relations.map((x) => x.id) };
   }
+  const loops = new SelfGraph(store, { namespace: `${ns}_loops` });
+  await loops.insert.facts({
+    entities: ["Ada", "Middle", "Bob"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      { from_entity: "thing:ada", type: "LINKS", to_entity: "thing:middle" },
+      { from_entity: "thing:middle", type: "LINKS", to_entity: "thing:bob" },
+      ...Array.from({ length: 24 }, (_, i) => ({
+        id: `relation:self${i}`,
+        from_entity: "thing:middle",
+        type: "SELF",
+        to_entity: "thing:middle",
+      })),
+    ],
+  });
+  const loopResult = await loops.retrieve("Ada", { k: 1, depth: 3, skip_hubs: true });
+  const loopReport = await loops.checkAnswerable("Ada Bob");
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
@@ -1199,8 +1376,61 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
   }
+  const boundary = new SelfGraph(graph.store, { namespace: `${graph.namespace}_boundary` });
+  await boundary.insert.facts({
+    entities: ["Ada", "Bob", "Cy"].map((name) => ({ type: "Thing", name })),
+    relations: [
+      ["ada", "bob"],
+      ["ada", "cy"],
+      ["bob", "cy"],
+    ].map(([a, b]) => ({
+      id: `relation:${a}${b}`,
+      from_entity: `thing:${a}`,
+      type: "LINKS",
+      to_entity: `thing:${b}`,
+    })),
+    decisions: [{ title: "Choose Cy", steps: ["relation:bobcy"] }],
+  });
+  const boundaryResults: Record<string, { relations: string[]; decisions: string[] }> = {};
+  for (const strategy of ["bfs", "dfs", "ppr"] as const) {
+    const result = await boundary.retrieve("Ada", { k: 1, depth: 1, strategy });
+    boundaryResults[strategy] = {
+      relations: result.subgraph.relations.map((r) => r.id).sort(),
+      decisions: result.subgraph.decisions.map((d) => d.title),
+    };
+  }
+  const temporal = new SelfGraph(store, { namespace: `${ns}_step_visibility` });
+  await temporal.insert.facts({
+    entities: ["Ada", "Bob", "Cy", "Dee"].map((name) => ({ type: "Person", name })),
+    relations: [
+      {
+        id: "relation:old",
+        from_entity: "person:ada",
+        type: "KNOWS",
+        to_entity: "person:bob",
+        event_time: "2020-01-01",
+      },
+      {
+        id: "relation:future",
+        from_entity: "person:cy",
+        type: "KNOWS",
+        to_entity: "person:dee",
+        event_time: "2030-01-01",
+      },
+    ],
+    decisions: [{ title: "Choose supplier", steps: ["relation:old", "relation:future"], event_time: "2020-01-01" }],
+  });
+  const hiddenSteps = await temporal.retrieve("Ada", { k: 1, as_of: "2025-01-01" });
+  deepStrictEqual(hiddenSteps.subgraph.decisions, []);
+  const visibleSteps = await temporal.retrieve("Ada", { k: 1 });
+  deepStrictEqual(
+    visibleSteps.subgraph.decisions.map((d) => d.title),
+    ["Choose supplier"],
+  );
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
   return toJsonable({
+    diff: await graph.diff("1900-01-01", "2100-01-01"),
+    diff_windows: await diffWindows(graph),
     answerable,
     shared_synonym_answerable: sharedSynonymAnswerable,
     filters:
@@ -1217,6 +1447,8 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
       counts: Object.fromEntries(historical.subgraph.entities.map((e) => [e.id, e.source_count])),
     },
     retrieval_seeded: seeded,
+    retrieval_boundary: boundaryResults,
+    decision_step_visibility: [hiddenSteps, visibleSteps].map((r) => r.subgraph.decisions.map((d) => d.title)),
     tiers: termed.tiers,
     entities,
     relations,
@@ -1224,6 +1456,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     preference_versions: preferenceVersions,
     sources,
     decisions,
+    self_loop_hubs: {
+      entities: loopResult.subgraph.entities.map((e) => e.id).sort(),
+      hubs: loopResult.hubs,
+      verdict: loopReport.verdict,
+      hub_only: loopReport.hub_only,
+    },
     raw_steps: (await store.matchNodes(ns, "DecisionStep")).sort((a, b) => comparePy(a.id as string, b.id as string)),
     raw_entities: rawEntities,
     evidence,

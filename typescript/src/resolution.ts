@@ -692,7 +692,7 @@ function absorbInto(view: Entity, ent: ParsedEntityInput, ename: string, merge =
  *
  * @param ent (ParsedEntityInput): the candidate, already folded into the target view.
  * @param target (Entity): the target view, whose values win for every key the candidate shares with it.
- * @return (ParsedEntityInput): an input with the target's id and type, the candidate's surface forms, and the target's values for the candidate's external id and property keys.
+ * @return (ParsedEntityInput): an input with the target's id, name, and type, the candidate's surface forms as aliases, and the target's values for the candidate's external id and property keys.
  */
 function redirect(ent: ParsedEntityInput, target: Entity): ParsedEntityInput {
   return parseOrThrow(
@@ -700,8 +700,8 @@ function redirect(ent: ParsedEntityInput, target: Entity): ParsedEntityInput {
     {
       id: target.id,
       type: target.type,
-      name: ent.name,
-      aliases: [...ent.aliases],
+      name: target.name,
+      aliases: [...ent.aliases, ent.name],
       external_ids: Object.fromEntries(Object.keys(ent.external_ids).map((k) => [k, target.external_ids[k]!])),
       properties: Object.fromEntries(
         Object.keys(ent.properties)
@@ -1016,7 +1016,7 @@ async function rewriteRefs(
 }
 
 /**
- * The merge record node, without its sources and rewrites, which live in EntityMergeEntry rows. A record repeats every time an insert merges the same pair again, so its sources and rewrites grow without bound; kept inline they would outgrow a store's per-document limit (32000 bytes on HydraDB).
+ * The merge record node, without its sources and rewrites, which live in EntityMergeEntry rows. A record repeats every time an insert merges the same pair again, so its sources and rewrites grow without bound; kept inline they would outgrow a store's per-document limit.
  *
  * @param ns (string): the namespace.
  * @param rec (MergeRecord): the record.
@@ -1139,7 +1139,8 @@ async function writeMerges(
     const have = new Map(rows.map((row) => [row.id as string, row.value_json]));
     for (const [id, row] of entryRows(ns, rec)) if (have.get(id) !== row.value_json) entries.push([id, row]);
   }
-  for (const [, props] of [...nodes, ...entries]) ops.precheckWrite(runner, props);
+  ops.precheckNodes(runner, ns, L_MERGE_ENTRY, entries);
+  ops.precheckNodes(runner, ns, L_MERGE, nodes);
   if (entries.length) await runner.upsertNodes(ns, L_MERGE_ENTRY, entries);
   await runner.upsertNodes(ns, L_MERGE, nodes);
 }
@@ -1478,10 +1479,13 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
     const outcome = await end(original.outcome_entity, rewritten.outcome_entity);
     if ((actor !== null && !(await exists(actor))) || (outcome !== null && !(await exists(outcome)))) continue;
     const steps = rewritten.steps.map((s) => restored.get(s) ?? s);
-    let stepsExist = true;
-    for (const s of steps) stepsExist = stepsExist && (await ops.relationExists(runner, ns, s));
-    if (!stepsExist) continue;
     const current = await ops.getTrace(runner, ns, rw.id);
+    const currentSteps =
+      current !== null && !rw.existed ? current.steps.map((s) => restored.get(s.relation_id) ?? s.relation_id) : steps;
+    const stepInputs = deepEqual(currentSteps, steps) ? original.steps : currentSteps;
+    let stepsExist = true;
+    for (const s of currentSteps) stepsExist = stepsExist && (await ops.relationExists(runner, ns, s));
+    if (!stepsExist) continue;
     const kept = current !== null && !rw.existed ? current : original;
     if (kept === current) await ops.deleteTraceQuietly(runner, ns, rw.id);
     const alternatives: string[] = [];
@@ -1490,7 +1494,7 @@ export async function unmerge(runner: Runner, ns: string, mergeId: string): Prom
       if (await exists(alternative)) alternatives.push(alternative);
     }
     const restoredSteps: string[] = [];
-    for (const s of original.steps) {
+    for (const s of stepInputs) {
       if (droppedSiblingIds.has(s) && !origRestored.has(s)) continue;
       if (origRestored.has(s)) {
         restoredSteps.push(origRestored.get(s)!);

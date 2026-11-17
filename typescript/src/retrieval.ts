@@ -515,7 +515,9 @@ async function neighbors(
     for (let i = 0; i < chunk.length; i += size) parts.push(chunk.slice(i, i + size));
     for (const [out, inc] of await Promise.all(parts.map((part) => adjacent(store, ns, part, asOf)))) {
       for (const rel of out) outgoing.get(rel.from_entity)?.push(rel);
-      for (const rel of inc) incoming.get(rel.to_entity)?.push(rel);
+      for (const rel of inc) {
+        if (rel.from_entity !== rel.to_entity) incoming.get(rel.to_entity)?.push(rel);
+      }
     }
   }
   return new Map(nodes.map((n) => [n, [...(outgoing.get(n) ?? []), ...(incoming.get(n) ?? [])]]));
@@ -627,6 +629,11 @@ async function traverse(
       const other = otherEnd(rel, node);
       if ((dist.get(other) ?? depth + 1) > d + 1) frontier.push([other, d + 1]);
     }
+  }
+  const missing = [...dist.keys()].filter((n) => !adjacency.has(n));
+  for (const [n, rels] of await neighbors(store, ns, missing, asOf)) adjacency.set(n, rels);
+  for (const node of dist.keys()) {
+    for (const rel of adjacency.get(node) ?? []) relations.set(rel.id, rel);
   }
   const hubs = new Set([...dist.keys()].filter((n) => (adjacency.get(n)?.length ?? 0) >= HUB_DEGREE));
   return [dist, within(relations.values(), dist), hubs];
@@ -1128,7 +1135,12 @@ async function run(
   let preferences = await collectPreferences(store, ns, dist.keys(), valid);
   if (asOf !== null && valid !== null && decisions.length) {
     const refsOf = (d: DecisionTrace): string[] =>
-      [d.actor_entity, d.outcome_entity, ...d.alternative_entities].filter((r): r is string => Boolean(r));
+      [
+        d.actor_entity,
+        d.outcome_entity,
+        ...d.alternative_entities,
+        ...d.steps.flatMap((step) => [step.from_entity, step.to_entity]),
+      ].filter((r): r is string => Boolean(r));
     const refs = [...new Set(decisions.flatMap(refsOf))].sort(comparePy);
     await load(store, ns, known, refs);
     const visible = await visibleAt(
@@ -1378,7 +1390,7 @@ export function answerability(
   for (const r of relations) {
     link(r.from_entity, r.to_entity);
     link(r.to_entity, r.from_entity);
-    for (const eid of [r.from_entity, r.to_entity]) degree.set(eid, (degree.get(eid) ?? 0) + 1);
+    for (const eid of new Set([r.from_entity, r.to_entity])) degree.set(eid, (degree.get(eid) ?? 0) + 1);
   }
   const hubs = new Set([...degree].filter(([, n]) => n >= HUB_DEGREE).map(([eid]) => eid));
   const named = [...linked.keys()];

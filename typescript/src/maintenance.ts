@@ -137,10 +137,10 @@ export async function writeEntityRelevance(
   for (const [eid, props] of await ops.nodesById(runner, ns, L_ENTITY, [...scores.keys()])) {
     const e = decodeEntity(props);
     const encoded = encodeEntityProps({ ns, ...e, relevance: scores.get(eid)!, relevance_at: at });
-    ops.precheckWrite(runner, encoded);
     byType.set(e.type, [...(byType.get(e.type) ?? []), [eid, encoded]]);
     written++;
   }
+  ops.precheckNodes(runner, ns, L_ENTITY, [...byType.values()].flat());
   for (const [etype, rows] of byType) await runner.upsertNodes(ns, L_ENTITY, rows, { extra_label: etype });
   return written;
 }
@@ -174,7 +174,7 @@ export async function writeRelationRelevance(
     if (!edge.props.is_current) continue;
     rows.push([edge.type, edge.from_id, edge.to_id, { ...edge.props, ...relevanceProps(scores.get(rid)!, at) }]);
   }
-  for (const [, , , props] of rows) ops.precheckWrite(runner, props);
+  ops.precheckEdges(runner, ns, L_ENTITY, L_ENTITY, rows);
   if (rows.length) await runner.createEdges(ns, L_ENTITY, L_ENTITY, rows);
   return rows.length;
 }

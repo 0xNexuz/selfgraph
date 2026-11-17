@@ -491,7 +491,11 @@ async def _traverse(
             other = rel.to_entity if rel.from_entity == node else rel.from_entity
             if dist.get(other, depth + 1) > d + 1:
                 frontier.append((other, d + 1))
-    hubs = {n for n in dist if len(adjacency.get(n, ())) >= HUB_DEGREE}
+    missing = [n for n in dist if n not in adjacency]
+    adjacency.update(await _neighbors(graph, ns, missing, as_of))
+    for node in dist:
+        relations.update((rel.id, rel) for rel in adjacency[node])
+    hubs = {n for n in dist if len(adjacency[n]) >= HUB_DEGREE}
     return dist, _within(relations.values(), dist), hubs
 
 
@@ -610,7 +614,8 @@ async def _neighbors(
             for rel in out:
                 outgoing[rel.from_entity].append(rel)
             for rel in inc:
-                incoming[rel.to_entity].append(rel)
+                if rel.from_entity != rel.to_entity:
+                    incoming[rel.to_entity].append(rel)
     return {n: outgoing[n] + incoming[n] for n in nodes}
 
 
@@ -1057,14 +1062,33 @@ async def retrieve(
     decisions = await _collect_decisions(graph, ns, {r.id for r in relations}, as_of)
     preferences = await _collect_preferences(graph, ns, dist, valid)
     if as_of is not None and decisions:
-        refs = {r for d in decisions for r in (d.actor_entity, d.outcome_entity, *d.alternative_entities) if r}
+        refs = {
+            r
+            for d in decisions
+            for r in (
+                d.actor_entity,
+                d.outcome_entity,
+                *d.alternative_entities,
+                *(eid for step in d.steps for eid in (step.from_entity, step.to_entity)),
+            )
+            if r
+        }
         await _load(graph, ns, known, sorted(refs))
         found = [known[eid] for eid in sorted(refs) if eid in known]
         visible = await _visible_at(graph, ns, found, as_of, valid)
         decisions = [
             d
             for d in decisions
-            if all(r in visible for r in (d.actor_entity, d.outcome_entity, *d.alternative_entities) if r)
+            if all(
+                r in visible
+                for r in (
+                    d.actor_entity,
+                    d.outcome_entity,
+                    *d.alternative_entities,
+                    *(eid for step in d.steps for eid in (step.from_entity, step.to_entity)),
+                )
+                if r
+            )
         ]
     passages = await _collect_passages(graph, ns, entities, dist, query_tokens, as_of)
     names = {e.id: e.name for e in entities}
@@ -1274,7 +1298,7 @@ def answerability(
     for r in relations:
         adjacency.setdefault(r.from_entity, set()).add(r.to_entity)
         adjacency.setdefault(r.to_entity, set()).add(r.from_entity)
-        for eid in (r.from_entity, r.to_entity):
+        for eid in {r.from_entity, r.to_entity}:
             degree[eid] = degree.get(eid, 0) + 1
     hubs = {eid for eid, n in degree.items() if n >= HUB_DEGREE}
     pairs = [(a, b) for i, a in enumerate(linked) for b in list(linked)[i + 1 :]]

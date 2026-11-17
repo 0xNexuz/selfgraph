@@ -1994,7 +1994,15 @@
   "\u00c9coleDe": "\u00c9COLE_DE",
   "\u092a\u093f\u0924\u093e": "\u092a\u093f\u0924\u093e",
   "\u092a\u094b\u0924\u093e": "\u092a\u094b\u0924\u093e",
-  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948"
+  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948",
+  "uses k8s": "USES_K8_S",
+  "USES_K8S": "USES_K8_S",
+  "has 2fa": "HAS_2_FA",
+  "has 3d model": "HAS_3_D_MODEL",
+  "Has2FA": "HAS2_FA",
+  "x2\u00df": "X2_SS",
+  "\u00df\u0307": "S\u1e60",
+  "56\u0130": "56_\u0130"
  },
  "canonical_entity_id": [
   [
@@ -2168,6 +2176,54 @@
    "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!",
    "company:acme",
    "relation:27dc83f95a7ff69a7abdbc7c"
+  ],
+  [
+   "person:jane",
+   "uses k8s",
+   "company:acme",
+   "relation:e74ea626678cdb395282edda"
+  ],
+  [
+   "person:jane",
+   "USES_K8S",
+   "company:acme",
+   "relation:e74ea626678cdb395282edda"
+  ],
+  [
+   "person:jane",
+   "has 2fa",
+   "company:acme",
+   "relation:4ea91a12f98e4b3f0fb92111"
+  ],
+  [
+   "person:jane",
+   "has 3d model",
+   "company:acme",
+   "relation:50041df10dfb205c212c3eba"
+  ],
+  [
+   "person:jane",
+   "Has2FA",
+   "company:acme",
+   "relation:f8f2f4a551612c389e2ba2a4"
+  ],
+  [
+   "person:jane",
+   "x2\u00df",
+   "company:acme",
+   "relation:fcfc5169b3c2843a14d7097a"
+  ],
+  [
+   "person:jane",
+   "\u00df\u0307",
+   "company:acme",
+   "relation:0e32312d93af0252a96b9118"
+  ],
+  [
+   "person:jane",
+   "56\u0130",
+   "company:acme",
+   "relation:b316ecd4adfe5e8ee7eb10c9"
   ]
  ],
  "preference_id": [
@@ -2286,7 +2342,15 @@
   "\u00c9coleDe": "\u00c9COLE_DE",
   "\u092a\u093f\u0924\u093e": "\u092a\u093f\u0924\u093e",
   "\u092a\u094b\u0924\u093e": "\u092a\u094b\u0924\u093e",
-  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948"
+  "\u0915\u093e\u092e \u0915\u0930\u0924\u093e \u0939\u0948!": "\u0915\u093e\u092e_\u0915\u0930\u0924\u093e_\u0939\u0948",
+  "uses k8s": "USES_K8_S",
+  "USES_K8S": "USES_K8_S",
+  "has 2fa": "HAS_2_FA",
+  "has 3d model": "HAS_3_D_MODEL",
+  "Has2FA": "HAS2_FA",
+  "x2\u00df": "X2_SS",
+  "\u00df\u0307": "S\u1e60",
+  "56\u0130": "56_\u0130"
  },
  "nfc_ids": [
   "preference:41c480c00563cb0d2772dc72",
@@ -5012,27 +5076,27 @@
    },
    {
     "index": 4,
-    "text": "\ufffd\ufffd rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait.",
-    "start_offset": 1035,
-    "end_offset": 1233
+    "text": "\ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait.",
+    "start_offset": 1034,
+    "end_offset": 1231
    },
    {
     "index": 5,
-    "text": "\ufffd rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji",
-    "start_offset": 1205,
-    "end_offset": 1408
+    "text": "\ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji",
+    "start_offset": 1204,
+    "end_offset": 1407
    },
    {
     "index": 6,
-    "text": " rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ufffd",
+    "text": " rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji ",
     "start_offset": 1375,
-    "end_offset": 1579
+    "end_offset": 1578
    },
    {
     "index": 7,
-    "text": " and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ufffd",
+    "text": " and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji \ud83d\ude80 rockets and caf\u00e9 au lait. Emoji ",
     "start_offset": 1553,
-    "end_offset": 1749
+    "end_offset": 1748
    },
    {
     "index": 8,
@@ -5099,6 +5163,381 @@
     "text": " whitespace. \n\nNew paragraph with \u00dcn\u00efc\u00f6d\u00e9 text and more words to split on whitespace. ",
     "start_offset": 3719,
     "end_offset": 3805
+   }
+  ],
+  "split_text": "\u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9. \u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9. \u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9. \u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9. \u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9. \u092d\u093e\u0930\u0924 \u090f\u0915 \u0935\u093f\u0936\u093e\u0932 \u0926\u0947\u0936 \u0939\u0948\u0964 \u6771\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69\u200d\ud83d\udcbb <|endoftext|> \ufffd\ufffd caf\u00e9.  \ufffd \ufffd \ufffd \ufffd \ufffd \ufffd \ufffd \ufffd",
+  "split_by_tokens": [
+   {
+    "index": 0,
+    "text": "\u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 0,
+    "end_offset": 6
+   },
+   {
+    "index": 1,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 4,
+    "end_offset": 11
+   },
+   {
+    "index": 2,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 9,
+    "end_offset": 16
+   },
+   {
+    "index": 3,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 14,
+    "end_offset": 20
+   },
+   {
+    "index": 4,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 19,
+    "end_offset": 25
+   },
+   {
+    "index": 5,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 23,
+    "end_offset": 30
+   },
+   {
+    "index": 6,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 28,
+    "end_offset": 35
+   },
+   {
+    "index": 7,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 34,
+    "end_offset": 44
+   },
+   {
+    "index": 8,
+    "text": " <|endoftext|> ",
+    "start_offset": 37,
+    "end_offset": 52
+   },
+   {
+    "index": 9,
+    "text": "> \ufffd\ufffd caf\u00e9. \u092d",
+    "start_offset": 50,
+    "end_offset": 62
+   },
+   {
+    "index": 10,
+    "text": " \u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 60,
+    "end_offset": 67
+   },
+   {
+    "index": 11,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 65,
+    "end_offset": 72
+   },
+   {
+    "index": 12,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 70,
+    "end_offset": 77
+   },
+   {
+    "index": 13,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 75,
+    "end_offset": 81
+   },
+   {
+    "index": 14,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 80,
+    "end_offset": 86
+   },
+   {
+    "index": 15,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 84,
+    "end_offset": 91
+   },
+   {
+    "index": 16,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 89,
+    "end_offset": 96
+   },
+   {
+    "index": 17,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 95,
+    "end_offset": 105
+   },
+   {
+    "index": 18,
+    "text": " <|endoftext|> ",
+    "start_offset": 98,
+    "end_offset": 113
+   },
+   {
+    "index": 19,
+    "text": "> \ufffd\ufffd caf\u00e9. \u092d",
+    "start_offset": 111,
+    "end_offset": 123
+   },
+   {
+    "index": 20,
+    "text": " \u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 121,
+    "end_offset": 128
+   },
+   {
+    "index": 21,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 126,
+    "end_offset": 133
+   },
+   {
+    "index": 22,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 131,
+    "end_offset": 138
+   },
+   {
+    "index": 23,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 136,
+    "end_offset": 142
+   },
+   {
+    "index": 24,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 141,
+    "end_offset": 147
+   },
+   {
+    "index": 25,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 145,
+    "end_offset": 152
+   },
+   {
+    "index": 26,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 150,
+    "end_offset": 157
+   },
+   {
+    "index": 27,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 156,
+    "end_offset": 166
+   },
+   {
+    "index": 28,
+    "text": " <|endoftext|> ",
+    "start_offset": 159,
+    "end_offset": 174
+   },
+   {
+    "index": 29,
+    "text": "> \ufffd\ufffd caf\u00e9. \u092d",
+    "start_offset": 172,
+    "end_offset": 184
+   },
+   {
+    "index": 30,
+    "text": " \u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 182,
+    "end_offset": 189
+   },
+   {
+    "index": 31,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 187,
+    "end_offset": 194
+   },
+   {
+    "index": 32,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 192,
+    "end_offset": 199
+   },
+   {
+    "index": 33,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 197,
+    "end_offset": 203
+   },
+   {
+    "index": 34,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 202,
+    "end_offset": 208
+   },
+   {
+    "index": 35,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 206,
+    "end_offset": 213
+   },
+   {
+    "index": 36,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 211,
+    "end_offset": 218
+   },
+   {
+    "index": 37,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 217,
+    "end_offset": 227
+   },
+   {
+    "index": 38,
+    "text": " <|endoftext|> ",
+    "start_offset": 220,
+    "end_offset": 235
+   },
+   {
+    "index": 39,
+    "text": "> \ufffd\ufffd caf\u00e9. \u092d",
+    "start_offset": 233,
+    "end_offset": 245
+   },
+   {
+    "index": 40,
+    "text": " \u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 243,
+    "end_offset": 250
+   },
+   {
+    "index": 41,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 248,
+    "end_offset": 255
+   },
+   {
+    "index": 42,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 253,
+    "end_offset": 260
+   },
+   {
+    "index": 43,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 258,
+    "end_offset": 264
+   },
+   {
+    "index": 44,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 263,
+    "end_offset": 269
+   },
+   {
+    "index": 45,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 267,
+    "end_offset": 274
+   },
+   {
+    "index": 46,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 272,
+    "end_offset": 279
+   },
+   {
+    "index": 47,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 278,
+    "end_offset": 288
+   },
+   {
+    "index": 48,
+    "text": " <|endoftext|> ",
+    "start_offset": 281,
+    "end_offset": 296
+   },
+   {
+    "index": 49,
+    "text": "> \ufffd\ufffd caf\u00e9. \u092d",
+    "start_offset": 294,
+    "end_offset": 306
+   },
+   {
+    "index": 50,
+    "text": " \u092d\u093e\u0930\u0924 \u090f",
+    "start_offset": 304,
+    "end_offset": 311
+   },
+   {
+    "index": 51,
+    "text": " \u090f\u0915 \u0935\u093f\u0936",
+    "start_offset": 309,
+    "end_offset": 316
+   },
+   {
+    "index": 52,
+    "text": "\u093f\u0936\u093e\u0932 \u0926\u0947",
+    "start_offset": 314,
+    "end_offset": 321
+   },
+   {
+    "index": 53,
+    "text": "\u0926\u0947\u0936 \u0939\u0948",
+    "start_offset": 319,
+    "end_offset": 325
+   },
+   {
+    "index": 54,
+    "text": "\u0948\u0964 \u6771\u4eac\u306f",
+    "start_offset": 324,
+    "end_offset": 330
+   },
+   {
+    "index": 55,
+    "text": "\u4eac\u306f\u65e5\u672c\u306e\u9996\u90fd",
+    "start_offset": 328,
+    "end_offset": 335
+   },
+   {
+    "index": 56,
+    "text": "\u9996\u90fd\u3067\u3059\u3002 \ud83d\udc69",
+    "start_offset": 333,
+    "end_offset": 340
+   },
+   {
+    "index": 57,
+    "text": "\ud83d\udc69\u200d\ud83d\udcbb <|endo",
+    "start_offset": 339,
+    "end_offset": 349
+   },
+   {
+    "index": 58,
+    "text": " <|endoftext|> ",
+    "start_offset": 342,
+    "end_offset": 357
+   },
+   {
+    "index": 59,
+    "text": "> \ufffd\ufffd caf\u00e9.  \ufffd",
+    "start_offset": 355,
+    "end_offset": 368
+   },
+   {
+    "index": 60,
+    "text": "  \ufffd \ufffd \ufffd \ufffd \ufffd \ufffd",
+    "start_offset": 365,
+    "end_offset": 378
+   },
+   {
+    "index": 61,
+    "text": " \ufffd \ufffd \ufffd \ufffd",
+    "start_offset": 374,
+    "end_offset": 382
    }
   ],
   "count_tokens": [
