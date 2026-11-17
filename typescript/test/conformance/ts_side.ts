@@ -1730,6 +1730,23 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     v.invalidated_by,
     v.event_time ? v.event_time.getTime() === firstCreated : false,
   ]);
+  await graph.insert.facts({
+    entities: [{ type: "Person", name: "Judy" }, ...["Stark", "Wonka"].map((name) => ({ type: "Company", name }))],
+    relations: [link("judy", "stark", 2020)],
+  });
+  const stark = ids.relationId("person:judy", "WORKS_AT", "company:stark");
+  await graph.relations.certify(stark, { by: "hr" });
+  await graph.insert.facts({ relations: [link("judy", "wonka", 2022)] });
+  await graph.relations.update(stark, { set_properties: { role: "cto" } });
+  const certified_update: Record<string, unknown> = {};
+  for (const rid of [stark, ids.relationId("person:judy", "WORKS_AT", "company:wonka")]) {
+    certified_update[rid] = (await graph.relations.versions(rid)).map((v) => [
+      v.revision,
+      v.is_current,
+      v.invalidated_by,
+      v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+    ]);
+  }
   return {
     warnings,
     versions,
@@ -1739,5 +1756,6 @@ export async function supersede(graph: SelfGraph): Promise<Record<string, unknow
     delete_versions,
     subms,
     undated_correction,
+    certified_update,
   };
 }
