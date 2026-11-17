@@ -1726,11 +1726,23 @@ async def dump(graph, ns):
         alias: [r.id for r in (await schemed.relations.list(type=alias)).items]
         for alias in ("employed by", "EMPLOYED_BY", "WORKS_AT", "is friends with")
     }
+
+    class MismatchedEmbedder:
+        async def embed(self, texts):
+            return [[1.0, 0.0] if text == "Grace Hopper" else [1.0] for text in texts]
+
+    embedded = SelfGraph(store=store, namespace=ns, embedder=MismatchedEmbedder(), seeds="embeddings")
+    try:
+        await embedded.retrieve("Grace Hopper", depth=0)
+        mismatched_dimensions = "no error"
+    except ValidationError as exc:
+        mismatched_dimensions = str(exc)
     return to_jsonable(
         {
             "diff": await graph.diff("1900-01-01", "2100-01-01"),
             "diff_windows": await diff_windows(graph),
             "answerable": answerable,
+            "mismatched_dimensions": mismatched_dimensions,
             "prune_types": pruned,
             "known_at_sources": {
                 "seeds": [s.id for s in historical.seeds],

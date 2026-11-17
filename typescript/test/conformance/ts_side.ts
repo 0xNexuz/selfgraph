@@ -1554,6 +1554,18 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   for (const alias of ["employed by", "EMPLOYED_BY", "WORKS_AT", "is friends with"]) {
     relationsAlias[alias] = (await schemed.relations.list({ type: alias })).items.map((r) => r.id);
   }
+  const embedded = new SelfGraph(store, {
+    namespace: ns,
+    embedder: { embed: async (texts: string[]) => texts.map((text) => (text === "Grace Hopper" ? [1, 0] : [1])) },
+    seeds: "embeddings",
+  });
+  let mismatchedDimensions = "no error";
+  try {
+    await embedded.retrieve("Grace Hopper", { depth: 0 });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    mismatchedDimensions = error.message;
+  }
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
     diff_windows: await diffWindows(graph),
@@ -1566,6 +1578,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
             empty_any_of: await store.matchNodes(ns, "Entity", { any_of: { aliases: [] } }),
           }
         : {},
+    mismatched_dimensions: mismatchedDimensions,
     prune_types: pruned,
     known_at_sources: {
       seeds: historical.seeds.map((s) => s.id),
