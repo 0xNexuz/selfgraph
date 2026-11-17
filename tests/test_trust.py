@@ -381,6 +381,29 @@ def test_ossie_export_maps_types_properties_and_relations():
         Schema.model_validate({"relations": [{"type": "KNOWS"}]}).to_ossie()
 
 
+def test_obsidian_vault_cuts_long_names_without_splitting_a_character():
+    names = ["B" * 300, "\u00e9" * 150, "B" * 199 + "\u00e9" + "B" * 50, "x" * 150 + " " + "y" * 150]
+    g = fresh_graph("vault_long")
+    run(g.insert.facts({"entities": [{"type": "Thing", "name": name} for name in names]}))
+    vault = run(g.export_obsidian())
+    notes = sorted(path for path in vault if "/" not in path)
+    assert len(notes) == 4
+    for path in notes:
+        assert len(path.encode("utf-8")) <= 255
+        assert "\ufffd" not in path
+    assert "B" * 199 + ".md" in notes
+    assert "\u00e9" * 100 + ".md" in notes
+
+
+def test_obsidian_vault_numbers_names_that_collide_after_the_cut():
+    g = fresh_graph("vault_clash")
+    prefix = "z" * 300
+    run(g.insert.facts({"entities": [{"type": "Thing", "name": prefix + suffix} for suffix in ("a", "b", "c")]}))
+    notes = [path for path in run(g.export_obsidian()) if "/" not in path]
+    assert len(set(notes)) == 3
+    assert all(len(path.encode("utf-8")) <= 255 for path in notes)
+
+
 def test_obsidian_vault_writes_a_note_per_entity_and_decision():
     g = fresh_graph("vault")
     run(

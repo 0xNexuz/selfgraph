@@ -24,6 +24,7 @@ _OSSIE_TYPES = {
     "json": "String",
 }
 _UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]\x00-\x1f]')
+_STEM_MAX_BYTES = 200
 
 
 def _left_out(kind: str, name: str, fields: dict[str, Any]) -> None:
@@ -137,7 +138,11 @@ def _stem(text: str) -> str:
     @param text (str): the name.
     @return (str): the file name without extension, or "" when nothing usable is left.
     """
-    return _UNSAFE.sub("-", text).strip().strip(".").strip()
+    stem = _UNSAFE.sub("-", text).strip().strip(".").strip()
+    raw = stem.encode("utf-8")
+    if len(raw) <= _STEM_MAX_BYTES:
+        return stem
+    return raw[:_STEM_MAX_BYTES].decode("utf-8", "ignore").strip().strip(".").strip()
 
 
 def _claim(options: list[str], taken: set[str]) -> str:

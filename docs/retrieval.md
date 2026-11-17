@@ -226,7 +226,8 @@ the notes into a folder you can open as a vault.
 
 - An entity note is named after the entity. When two names collide, ignoring
   case, the later one in id order is named `Name (Type)`. Characters a file name
-  or wiki link cannot hold become `-`.
+  or wiki link cannot hold become `-`, and a name longer than 200 UTF-8 bytes is
+  cut to that length.
 - It holds the id, type, and aliases as front matter, then the properties, the
   current outgoing relations and preferences as `[[wiki links]]`, and links to the
   decisions the entity made. Obsidian derives backlinks, so incoming links are

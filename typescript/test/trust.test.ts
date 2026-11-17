@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { toOssie } from "../src/export.js";
+import { obsidianVault, toOssie } from "../src/export.js";
 import {
   type Embedder,
   type Entity,
@@ -467,6 +467,42 @@ function suite(spec: StoreSpec): void {
 }
 
 await forEachStore("agent trust", suite);
+
+describe("obsidian vault file names", () => {
+  const notes = (names: string[]): string[] =>
+    Object.keys(
+      obsidianVault(
+        names.map((name, i) => entity(`thing:${i}`, name)),
+        [],
+        [],
+        [],
+      ),
+    ).filter((path) => !path.includes("/"));
+
+  it("cuts long names without splitting a character", () => {
+    const out = notes([
+      "B".repeat(300),
+      "\u00e9".repeat(150),
+      `${"B".repeat(199)}\u00e9${"B".repeat(50)}`,
+      "\u{1F600}".repeat(80),
+    ]);
+    expect(out).toHaveLength(4);
+    for (const path of out) {
+      expect(new TextEncoder().encode(path).length).toBeLessThanOrEqual(255);
+      expect(path).not.toContain("\ufffd");
+    }
+    expect(out).toContain(`${"B".repeat(199)}.md`);
+    expect(out).toContain(`${"\u00e9".repeat(100)}.md`);
+    expect(out).toContain(`${"\u{1F600}".repeat(50)}.md`);
+  });
+
+  it("numbers names that collide after the cut", () => {
+    const prefix = "z".repeat(300);
+    const out = notes([`${prefix}a`, `${prefix}b`, `${prefix}c`]);
+    expect(new Set(out).size).toBe(3);
+    for (const path of out) expect(new TextEncoder().encode(path).length).toBeLessThanOrEqual(255);
+  });
+});
 
 describe("trust rules without a store", () => {
   it("needs stored instances of a schema term", () => {
