@@ -107,6 +107,18 @@ function suite(spec: StoreSpec) {
     }
   });
 
+  it("counts a self-relation once toward an entity's degree", async () => {
+    const g = open();
+    await g.entities.create("A", "T", { id: "t:a" });
+    await g.entities.create("B", "T", { id: "t:b" });
+    await g.relations.create("t:a", "KNOWS", "t:a");
+    await g.relations.create("t:a", "KNOWS", "t:b");
+    const at = later(0);
+    const a = (await g.entities.get("t:a"))!;
+    const result = await g.maintenance.decay({ now: at });
+    expect(result.entities["t:a"]).toBe(relevanceScore([a.created_at, a.updated_at], at, 30, 2));
+  });
+
   it("breaks seed ties on relevance only after decay", async () => {
     const g = open();
     await g.entities.create("Acme Red", "Org", { id: "org:a" });

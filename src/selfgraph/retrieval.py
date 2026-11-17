@@ -648,28 +648,31 @@ def _ppr_rank(
 ) -> dict[str, int]:
     """Rank entities by personalized PageRank over source-weighted undirected edges, restarting at the seeds.
 
-    A blocked entity takes mass but passes none on: its mass restarts at the seeds, as from a dead end.
+    A blocked entity takes mass but passes none on: its mass restarts at the seeds, as from a dead end. Mass is
+    summed in the order the ids arrive, so the float result, and with it the rank of near-tied entities, does not
+    depend on the process's string hashing.
 
     @param seeds (list[tuple[Entity, float]]): seed entities with their scores.
-    @param nodes (Iterable[str]): the entity ids collected by traversal.
+    @param nodes (Iterable[str]): the entity ids collected by traversal, in traversal order.
     @param relations (list[Relation]): the relations collected by traversal.
     @param blocked (Collection[str]): entities the walk may reach but not pass through, such as skipped hubs.
     @return (dict[str, int]): each entity's rank by PageRank mass, 0 for the highest.
     """
-    nodes = set(nodes)
+    order = list(dict.fromkeys(nodes))
+    nodes = set(order)
     total = sum(score for e, score in seeds if e.id in nodes)
     if not nodes or total <= 0:
         return {n: i for i, n in enumerate(sorted(nodes))}
     teleport = {e.id: score / total for e, score in seeds if e.id in nodes}
-    edges: dict[str, dict[str, float]] = {n: {} for n in nodes}
+    edges: dict[str, dict[str, float]] = {n: {} for n in order}
     for r in relations:
         if r.from_entity in nodes and r.to_entity in nodes and r.from_entity != r.to_entity:
             weight = float(max(1, r.source_count))
             edges[r.from_entity][r.to_entity] = edges[r.from_entity].get(r.to_entity, 0.0) + weight
             edges[r.to_entity][r.from_entity] = edges[r.to_entity].get(r.from_entity, 0.0) + weight
-    mass = dict.fromkeys(nodes, 0.0) | teleport
+    mass = dict.fromkeys(order, 0.0) | teleport
     for _ in range(_PPR_MAX_ITERATIONS):
-        nxt = {n: (1 - _PPR_DAMPING) * teleport.get(n, 0.0) for n in nodes}
+        nxt = {n: (1 - _PPR_DAMPING) * teleport.get(n, 0.0) for n in order}
         for n, m in mass.items():
             out = {} if n in blocked else edges[n]
             if out:
@@ -679,7 +682,7 @@ def _ppr_rank(
             else:
                 for s, w in teleport.items():
                     nxt[s] += _PPR_DAMPING * m * w
-        delta = sum(abs(nxt[n] - mass[n]) for n in nodes)
+        delta = sum(abs(nxt[n] - mass[n]) for n in order)
         mass = nxt
         if delta < _PPR_TOLERANCE:
             break
@@ -1225,7 +1228,8 @@ def answerability(
     """Judge whether a graph holds what a question asks about, by lexical matching only.
 
     Each term is matched in turn against entity names and aliases, entity types, definitions, relation types, and
-    property and preference keys; the first kind with a match the graph holds covers it. Schema terms match by name,
+    property and preference keys; the first kind with a match the graph holds covers it. Explicit terms that are
+    stopwords or single characters match only entity names and aliases, exactly once folded. Schema terms match by name,
     alias, and synonym, and a match through a certified one is marked certified; a schema term with nothing stored
     for it (see grounded_terms) covers nothing, and a term only such terms match is schema_only, which counts as
     missing. Entities matched by different terms must be
@@ -1243,6 +1247,7 @@ def answerability(
     @return (AnswerabilityReport): the coverage of each term, the connectivity, and the verdict.
     """
     forms = schema_forms(schema)
+    explicit = terms is not None
     if terms is None:
         names = [n for e in entities for n in (e.name, *e.aliases)]
         terms = _question_terms(question, [*names, *(f for named in forms.values() for f in named)])
@@ -1256,11 +1261,19 @@ def answerability(
     coverage: list[TermCoverage] = []
     linked: dict[str, set[str]] = {}
     for term in terms:
-        words = _token_list(term)
-        found = {e.id for e in entities if words and any(_covers(words, n) for n in (e.name, *e.aliases))}
+        folded = _fold(term).strip()
+        runs = _word_runs(folded)
+        words = [t for t in runs if t not in _STOPWORDS]
+        exact = explicit and (len(folded) == 1 or (bool(runs) and not words))
+        if exact:
+            found = {e.id for e in entities if folded and any(_fold(n).strip() == folded for n in (e.name, *e.aliases))}
+        else:
+            found = {e.id for e in entities if words and any(_covers(words, n) for n in (e.name, *e.aliases))}
         status, certified = "entity", False
         if found:
             linked[term] = found
+        elif exact:
+            status = "missing"
         else:
             status, declared = "missing", []
             for kind, named in kinds:

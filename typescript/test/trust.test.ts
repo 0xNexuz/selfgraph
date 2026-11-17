@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { z } from "zod";
 
-import { toOssie } from "../src/export.js";
+import { obsidianVault, toOssie } from "../src/export.js";
 import {
   type Embedder,
   type Entity,
@@ -114,6 +114,42 @@ function suite(spec: StoreSpec): void {
     await expect(g.checkAnswerable("  ")).rejects.toThrow("question must be a non-empty string");
   });
 
+  it("matches explicit stopword and single-character entity names and aliases only", async () => {
+    const schema = {
+      entities: [
+        { name: "Vitamin", definitions: [{ name: "who", expression: "count(Vitamin)" }] },
+        { name: "Department" },
+        { name: "Language" },
+        { name: "On" },
+      ],
+      relations: [{ type: "R" }, { type: "USES" }],
+    };
+    const g = open({ schema });
+    await g.insert.facts({
+      entities: [
+        { type: "Vitamin", name: "A" },
+        { type: "Vitamin", name: "Vitamin B" },
+        { type: "Department", name: "Information Technology", aliases: ["IT"] },
+        { type: "Language", name: "C" },
+        { type: "On", name: "Switch" },
+      ],
+      relations: [
+        { from_entity: "vitamin:a", type: "R", to_entity: "language:c" },
+        { from_entity: "language:c", type: "USES", to_entity: "department:information-technology" },
+      ],
+    });
+    const matched = await g.checkAnswerable("question", { terms: ["a", "it", "c"] });
+    expect([matched.verdict, matched.connected]).toEqual(["answerable", true]);
+    expect(matched.terms.map((t) => [t.term, t.status, t.matches])).toEqual([
+      ["a", "entity", ["vitamin:a"]],
+      ["it", "entity", ["department:information-technology"]],
+      ["c", "entity", ["language:c"]],
+    ]);
+    const missed = await g.checkAnswerable("question", { terms: ["B", "On", "who", "R"] });
+    expect([missed.verdict, missed.missing]).toEqual(["not_answerable", ["B", "On", "who", "R"]]);
+    expect((await g.checkAnswerable("A and it")).verdict).toBe("not_answerable");
+  });
+
   it("lists hubs, marks lines through them, and can skip them", async () => {
     const g = open();
     const names = ["Ada", "Bo", ...Array.from({ length: HUB_DEGREE }, (_, i) => `Leaf${i}`)];
@@ -213,6 +249,28 @@ function suite(spec: StoreSpec): void {
     });
     expect(withManual.source_diff).toEqual({ kept: [knows, manual.id, works].sort(), added: [], retired: [] });
   });
+
+  it.each([undefined, utc(2024)])(
+    "takes effect when an already stored version of a replaced source did (replay at %s)",
+    async (replayTime) => {
+      const g = open({ extractor: lineExtractor });
+      await g.insert.text("ann WORKS_AT acme", { source_id: "hr", event_time: utc(2020) });
+      const stored = await g.insert.text("ann WORKS_AT globex", { source_id: "hr", event_time: utc(2022) });
+      const again = await g.insert.text("ann WORKS_AT globex", {
+        source_id: "hr",
+        replace_source: true,
+        ...(replayTime ? { event_time: replayTime } : {}),
+      });
+      expect(again.source_version).toBe(stored.source_version);
+      const [works] = again.source_diff!.retired;
+      expect((await g.relations.versions(works!))[0]!.invalidated_at).toEqual(utc(2022));
+      const old = ["SOURCE | ann WORKS_AT acme", "GRAPH | ann -[WORKS_AT]-> acme"];
+      const before = (await g.retrieve("ann acme globex", { as_of: utc(2021) })).context.split("\n");
+      const after = (await g.retrieve("ann acme globex", { as_of: utc(2023) })).context.split("\n");
+      expect(old.map((line) => before.includes(line))).toEqual([true, true]);
+      expect(old.map((line) => after.includes(line))).toEqual([false, false]);
+    },
+  );
 
   it("keeps certified facts on a replaced source and needs a source id", async () => {
     const g = open({ extractor: lineExtractor });
@@ -418,6 +476,42 @@ function suite(spec: StoreSpec): void {
 
 await forEachStore("agent trust", suite);
 
+describe("obsidian vault file names", () => {
+  const notes = (names: string[]): string[] =>
+    Object.keys(
+      obsidianVault(
+        names.map((name, i) => entity(`thing:${i}`, name)),
+        [],
+        [],
+        [],
+      ),
+    ).filter((path) => !path.includes("/"));
+
+  it("cuts long names without splitting a character", () => {
+    const out = notes([
+      "B".repeat(300),
+      "\u00e9".repeat(150),
+      `${"B".repeat(199)}\u00e9${"B".repeat(50)}`,
+      "\u{1F600}".repeat(80),
+    ]);
+    expect(out).toHaveLength(4);
+    for (const path of out) {
+      expect(new TextEncoder().encode(path).length).toBeLessThanOrEqual(255);
+      expect(path).not.toContain("\ufffd");
+    }
+    expect(out).toContain(`${"B".repeat(199)}.md`);
+    expect(out).toContain(`${"\u00e9".repeat(100)}.md`);
+    expect(out).toContain(`${"\u{1F600}".repeat(50)}.md`);
+  });
+
+  it("numbers names that collide after the cut", () => {
+    const prefix = "z".repeat(300);
+    const out = notes([`${prefix}a`, `${prefix}b`, `${prefix}c`]);
+    expect(new Set(out).size).toBe(3);
+    for (const path of out) expect(new TextEncoder().encode(path).length).toBeLessThanOrEqual(255);
+  });
+});
+
 describe("trust rules without a store", () => {
   it("needs stored instances of a schema term", () => {
     const schema = {
@@ -451,6 +545,15 @@ describe("trust rules without a store", () => {
     const blocked = pprRank(seeds, nodes, rels, new Set(["thing:h"]));
     expect(blocked.get("thing:0")!).toBeLessThan(blocked.get("thing:b")!);
     expect(blocked.get("thing:h")).toBe(1);
+  });
+
+  it("ranks equal PageRank mass by id in a graph with mirrored halves", () => {
+    const half = ["s {}b", "{}b {}x1", "{}b {}x2", "{}x1 {}x2", "{}x2 {}x3", "{}x1 {}x3", "s {}x3"];
+    const pairs = ["l", "r"].flatMap((p) => half.map((edge) => edge.replaceAll("{}", p).split(" ")));
+    const walk = ["s", "lb", "lx3", "rb", "rx3", "lx1", "lx2", "rx1", "rx2"].map((n) => `thing:${n}`);
+    const rels = pairs.map(([a, b]) => relation(`relation:${a}${b}`, `thing:${a}`, `thing:${b}`));
+    const ranks = pprRank([[entity("thing:s", "S"), 1]], walk, rels);
+    expect([...ranks.keys()].sort((a, b) => ranks.get(a)! - ranks.get(b)!)).toEqual(walk);
   });
 
   it("logs every schema field the Ossie export leaves out", async () => {

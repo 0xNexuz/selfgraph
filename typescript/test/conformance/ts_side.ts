@@ -17,6 +17,7 @@ import {
 import { setLogger } from "../../src/internal/log.js";
 import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
+import { callTool } from "../../src/mcp.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
@@ -589,6 +590,31 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const MCP_ARGUMENT_CASES: Array<[string, Record<string, unknown>]> = [
+  ["list_entities", { limit: "5" }],
+  ["list_entities", { limit: true }],
+  ["retrieve", { query: "x", depth: "2", k: "3" }],
+  ["check_answerable", { question: "x", depth: false }],
+  ["maintenance_decay", { half_life_days: "30" }],
+  ["maintenance_prune", { min_relevance: true }],
+  ["create_preference", { subject_entity: "t:a", key: "k", value_entity: "t:b", strength: "0.5" }],
+  ["create_decision", { title: "t", steps: null }],
+];
+
+/**
+ * Call MCP tools with text, boolean, and null arguments the servers must reject before running the tool.
+ *
+ * @return (Promise<string[]>): the error text each call reports.
+ */
+async function mcpArgumentErrors(): Promise<string[]> {
+  const errors: string[] = [];
+  for (const [name, args] of MCP_ARGUMENT_CASES) {
+    const { result, isError } = await callTool(name, args);
+    errors.push(isError ? (result as { error: string }).error : "accepted");
+  }
+  return errors;
+}
+
 const USES_SPEC = {
   entities: [{ name: "Person" }, { name: "Tool" }],
   relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
@@ -751,6 +777,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.facts_none = exc.message;
   }
+  out.mcp_arguments = await mcpArgumentErrors();
   const factsTypes: string[] = [];
   for (const facts of FACTS_TYPE_CASES) {
     try {
@@ -813,6 +840,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     alias: byAlias.relation_ids,
     canonical: byCanonical.relation_ids,
   };
+  const decayGraph = new SelfGraph(graph.store, { namespace: `${graph.namespace}:decay` });
+  await decayGraph.initialize();
+  for (const name of ["loop", "pair"]) await decayGraph.entities.create(name, "T", { id: `t:${name}` });
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:loop");
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:pair");
+  const decayed = await decayGraph.maintenance.decay({ now: new Date(), half_life_days: 1e9 });
+  out.decay_self_relation = decayed.entities;
   await graph.insert.facts(
     { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
     { source_id: "merge-seed" },
@@ -1030,6 +1064,24 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     v3_diff: rv3.source_diff,
     v3_warnings: rv3.warnings.map((w) => w.code),
   });
+  const storedSrc = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_replace_stored`,
+    extraction: "regex",
+  });
+  const storedFirst = await storedSrc.insert.text("Alice works at Acme.", {
+    source_id: "hr",
+    event_time: "2020-01-01T00:00:00Z",
+  });
+  await storedSrc.insert.text("Alice works at Globex.", { source_id: "hr", event_time: "2022-01-01T00:00:00Z" });
+  await storedSrc.insert.text("Alice works at Globex.", {
+    source_id: "hr",
+    replace_source: true,
+    event_time: "2024-01-01T00:00:00Z",
+  });
+  out.replace_source_stored_time = (await storedSrc.relations.versions(storedFirst.relations[0]!.id)).map((v) => [
+    v.revision,
+    v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+  ]);
   await graph.insert.facts(
     {
       entities: [
@@ -1040,6 +1092,8 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  out.retrieval_ppr_ties = await pprTies(graph);
+  out.vault_names = await vaultNames(graph);
   try {
     await graph.insert.facts(
       {
@@ -1242,6 +1296,39 @@ async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string
   return { tight: tight.context, full: full.context };
 }
 
+/**
+ * Rank a seed with two mirrored halves by PageRank, where four entities share each level of mass.
+ *
+ * @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+ * @return (Promise<{ entities: string[]; context: string }>): the kept entity ids and the context, cut to four entities.
+ */
+async function pprTies(graph: SelfGraph): Promise<{ entities: string[]; context: string }> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_ties` });
+  const half = ["s {}b", "{}b {}x1", "{}b {}x2", "{}x1 {}x2", "{}x2 {}x3", "{}x1 {}x3", "s {}x3"];
+  const pairs = ["l", "r"].flatMap((p) => half.map((edge) => edge.replaceAll("{}", p).split(" ")));
+  await g.entities.create("Sol", "Thing", { id: "thing:s" });
+  for (const name of [...new Set(pairs.flat())].filter((n) => n !== "s").sort())
+    await g.entities.create(`${name.toUpperCase()}node`, "Thing", { id: `thing:${name}` });
+  for (const [a, b] of pairs) await g.relations.create(`thing:${a}`, "LINKS", `thing:${b}`);
+  const ranked = await g.retrieve("Sol", { strategy: "ppr", max_nodes: 4 });
+  return { entities: ranked.subgraph.entities.map((e) => e.id), context: ranked.context };
+}
+
+async function vaultNames(graph: SelfGraph): Promise<string[]> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_vault` });
+  const names = [
+    "B".repeat(300),
+    `\uFEFF${"C".repeat(300)}`,
+    "\u00e9".repeat(150),
+    `${"B".repeat(199)}\u00e9${"B".repeat(50)}`,
+    "\u5317".repeat(150),
+    `${"z".repeat(210)}a`,
+    `${"z".repeat(210)}b`,
+  ];
+  for (const name of names) await g.entities.create(name, "Thing");
+  return Object.keys(await g.exportObsidian()).sort(comparePy);
+}
+
 async function allEvidence(list: (cursor: string | null) => Promise<Page<Evidence>>): Promise<Evidence[]> {
   const out: Evidence[] = [];
   let cursor: string | null = null;
@@ -1330,6 +1417,36 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
+  const explicitTerms = new SelfGraph(store, {
+    namespace: `${ns}_explicit_terms`,
+    schema: {
+      entities: [
+        { name: "Vitamin", definitions: [{ name: "who", expression: "count(Vitamin)" }] },
+        { name: "Department" },
+        { name: "Language" },
+        { name: "On" },
+      ],
+      relations: [{ type: "R" }, { type: "USES" }],
+    },
+  });
+  await explicitTerms.insert.facts({
+    entities: [
+      { type: "Vitamin", name: "A" },
+      { type: "Vitamin", name: "Vitamin B" },
+      { type: "Department", name: "Information Technology", aliases: ["IT"] },
+      { type: "Language", name: "C" },
+      { type: "On", name: "Switch" },
+    ],
+    relations: [
+      { from_entity: "vitamin:a", type: "R", to_entity: "language:c" },
+      { from_entity: "language:c", type: "USES", to_entity: "department:information-technology" },
+    ],
+  });
+  answerable.push(
+    await explicitTerms.checkAnswerable("question", { terms: ["a", "it", "c"] }),
+    await explicitTerms.checkAnswerable("question", { terms: ["B", "On", "who", "R"] }),
+    await explicitTerms.checkAnswerable("A and it"),
+  );
   const seeded: Record<string, unknown> = {};
   for (const tier of ["bm25", "synonyms"] as const) {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });

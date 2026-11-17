@@ -5,12 +5,17 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from pydantic import ValidationError as PydanticValidationError
+from pydantic import validate_call
+
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
 from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
 from selfgraph.extraction.extractor import _lenient_event_time
+from selfgraph.mcp import server as mcp_server
+from selfgraph.models import validation_message
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -544,6 +549,35 @@ FACTS_TYPE_CASES = [
     {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
 ]
 
+MCP_ARGUMENT_CASES = [
+    ["list_entities", {"limit": "5"}],
+    ["list_entities", {"limit": True}],
+    ["retrieve", {"query": "x", "depth": "2", "k": "3"}],
+    ["check_answerable", {"question": "x", "depth": False}],
+    ["maintenance_decay", {"half_life_days": "30"}],
+    ["maintenance_prune", {"min_relevance": True}],
+    ["create_preference", {"subject_entity": "t:a", "key": "k", "value_entity": "t:b", "strength": "0.5"}],
+    ["create_decision", {"title": "t", "steps": None}],
+]
+
+
+async def mcp_argument_errors():
+    """Check MCP tool arguments that both servers must reject, with the pydantic rules the Python server applies.
+
+    The tools are validated directly, so the check runs without the mcp package.
+
+    @return (list[str]): the error text each call reports.
+    """
+    errors = []
+    for name, args in MCP_ARGUMENT_CASES:
+        try:
+            await validate_call(getattr(mcp_server, name))(**args)
+            errors.append("accepted")
+        except PydanticValidationError as exc:
+            errors.append(validation_message("invalid arguments", exc))
+    return errors
+
+
 USES_SPEC = {
     "entities": [{"name": "Person"}, {"name": "Tool"}],
     "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
@@ -748,6 +782,7 @@ async def write(graph):
         out["facts_none"] = "accepted"
     except ValidationError as exc:
         out["facts_none"] = str(exc)
+    out["mcp_arguments"] = await mcp_argument_errors()
     out["facts_types"] = []
     for facts in FACTS_TYPE_CASES:
         try:
@@ -810,6 +845,14 @@ async def write(graph):
         "alias": by_alias.relation_ids,
         "canonical": by_canonical.relation_ids,
     }
+    decay_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:decay")
+    await decay_graph.initialize()
+    for name in ("loop", "pair"):
+        await decay_graph.entities.create(name, "T", id=f"t:{name}")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:loop")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:pair")
+    decayed = await decay_graph.maintenance.decay(now=datetime.now(timezone.utc), half_life_days=1e9)
+    out["decay_self_relation"] = decayed.entities
     await graph.insert.facts(
         {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
     )
@@ -1014,11 +1057,25 @@ async def write(graph):
             "v3_warnings": [w.code for w in rv3.warnings],
         }
     )
+    stored_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_stored", extraction="regex")
+    stored_first = await stored_src.insert.text(
+        "Alice works at Acme.", source_id="hr", event_time="2020-01-01T00:00:00Z"
+    )
+    await stored_src.insert.text("Alice works at Globex.", source_id="hr", event_time="2022-01-01T00:00:00Z")
+    await stored_src.insert.text(
+        "Alice works at Globex.", source_id="hr", replace_source=True, event_time="2024-01-01T00:00:00Z"
+    )
+    out["replace_source_stored_time"] = [
+        [v.revision, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await stored_src.relations.versions(stored_first.relations[0].id)
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    out["retrieval_ppr_ties"] = await ppr_ties(graph)
+    out["vault_names"] = await vault_names(graph)
     try:
         await graph.insert.facts(
             {
@@ -1396,6 +1453,45 @@ async def overflow(graph):
     return {"tight": tight.context, "full": full.context}
 
 
+async def ppr_ties(graph):
+    """Rank a seed with two mirrored halves by PageRank, where four entities share each level of mass.
+
+    @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+    @return (dict): the kept entity ids and the context, cut to four entities.
+    """
+    g = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_ties")
+    half = [("s", "{}b"), ("{}b", "{}x1"), ("{}b", "{}x2"), ("{}x1", "{}x2"), ("{}x2", "{}x3"), ("{}x1", "{}x3")]
+    pairs = [(a.format(p), b.format(p)) for p in "lr" for a, b in [*half, ("s", "{}x3")]]
+    await g.entities.create("Sol", "Thing", id="thing:s")
+    for name in sorted({n for pair in pairs for n in pair} - {"s"}):
+        await g.entities.create(f"{name.upper()}node", "Thing", id=f"thing:{name}")
+    for a, b in pairs:
+        await g.relations.create(f"thing:{a}", "LINKS", f"thing:{b}")
+    ranked = await g.retrieve("Sol", strategy="ppr", max_nodes=4)
+    return {"entities": [e.id for e in ranked.subgraph.entities], "context": ranked.context}
+
+
+async def vault_names(graph):
+    """Export a vault whose names outrun a file name, so each is cut on a character boundary and numbered.
+
+    @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+    @return (list): the sorted note paths.
+    """
+    g = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_vault")
+    names = [
+        "B" * 300,
+        "\ufeff" + "C" * 300,
+        "\u00e9" * 150,
+        "B" * 199 + "\u00e9" + "B" * 50,
+        "\u5317" * 150,
+        "z" * 210 + "a",
+        "z" * 210 + "b",
+    ]
+    for name in names:
+        await g.entities.create(name, "Thing")
+    return sorted(await g.export_obsidian())
+
+
 async def all_evidence(list_fn, oid):
     """Read every page of an entity's or relation's evidence, two items at a time.
 
@@ -1507,6 +1603,41 @@ async def dump(graph, ns):
     loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
+    explicit_terms = SelfGraph(
+        store=store,
+        namespace=f"{ns}_explicit_terms",
+        schema={
+            "entities": [
+                {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+                {"name": "Department"},
+                {"name": "Language"},
+                {"name": "On"},
+            ],
+            "relations": [{"type": "R"}, {"type": "USES"}],
+        },
+    )
+    await explicit_terms.insert.facts(
+        {
+            "entities": [
+                {"type": "Vitamin", "name": "A"},
+                {"type": "Vitamin", "name": "Vitamin B"},
+                {"type": "Department", "name": "Information Technology", "aliases": ["IT"]},
+                {"type": "Language", "name": "C"},
+                {"type": "On", "name": "Switch"},
+            ],
+            "relations": [
+                {"from_entity": "vitamin:a", "type": "R", "to_entity": "language:c"},
+                {"from_entity": "language:c", "type": "USES", "to_entity": "department:information-technology"},
+            ],
+        }
+    )
+    answerable.extend(
+        [
+            await explicit_terms.check_answerable("question", terms=["a", "it", "c"]),
+            await explicit_terms.check_answerable("question", terms=["B", "On", "who", "R"]),
+            await explicit_terms.check_answerable("A and it"),
+        ]
+    )
     seeded = {
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")

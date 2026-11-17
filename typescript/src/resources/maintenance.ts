@@ -82,7 +82,7 @@ export class Maintenance extends Resource {
     ]);
     const degree = new Map<string, number>();
     for (const rel of relations) {
-      for (const eid of [rel.from_entity, rel.to_entity]) degree.set(eid, (degree.get(eid) ?? 0) + 1);
+      for (const eid of new Set([rel.from_entity, rel.to_entity])) degree.set(eid, (degree.get(eid) ?? 0) + 1);
     }
     const relScores = new Map(
       relations.map((r) => [r.id, m.relevanceScore([r.created_at, r.event_time], at, halfLife, r.source_count)]),

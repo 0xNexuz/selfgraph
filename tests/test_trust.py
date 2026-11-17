@@ -117,6 +117,48 @@ def test_answerability_matches_terms_by_kind_and_judges_connectivity():
     assert (apart.verdict, apart.connected, apart.hub_only) == ("uncertain", False, [])
 
 
+def test_check_answerable_matches_explicit_stopword_and_single_char_entity_names_and_aliases():
+    schema = Schema.model_validate(
+        {
+            "entities": [
+                {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+                {"name": "Department"},
+                {"name": "Language"},
+                {"name": "On"},
+            ],
+            "relations": [{"type": "R"}, {"type": "USES"}],
+        }
+    )
+    g = fresh_graph("explicit-terms", schema=schema)
+    run(
+        g.insert.facts(
+            {
+                "entities": [
+                    {"type": "Vitamin", "name": "A"},
+                    {"type": "Vitamin", "name": "Vitamin B"},
+                    {"type": "Department", "name": "Information Technology", "aliases": ["IT"]},
+                    {"type": "Language", "name": "C"},
+                    {"type": "On", "name": "Switch"},
+                ],
+                "relations": [
+                    {"from_entity": "vitamin:a", "type": "R", "to_entity": "language:c"},
+                    {"from_entity": "language:c", "type": "USES", "to_entity": "department:information-technology"},
+                ],
+            }
+        )
+    )
+    matched = run(g.check_answerable("question", terms=["a", "it", "c"]))
+    assert matched.verdict == "answerable" and matched.connected
+    assert [(t.term, t.status, t.matches) for t in matched.terms] == [
+        ("a", "entity", ["vitamin:a"]),
+        ("it", "entity", ["department:information-technology"]),
+        ("c", "entity", ["language:c"]),
+    ]
+    missed = run(g.check_answerable("question", terms=["B", "On", "who", "R"]))
+    assert (missed.verdict, missed.missing) == ("not_answerable", ["B", "On", "who", "R"])
+    assert run(g.check_answerable("A and it")).verdict == "not_answerable"
+
+
 def test_answerability_flags_pairs_joined_only_through_a_hub():
     hub = _entity("thing:hub", "Hub")
     leaves = [_relation(f"r{i}", "thing:hub", "HAS", f"thing:leaf{i}") for i in range(HUB_DEGREE)]
@@ -247,6 +289,22 @@ def test_replace_source_retires_what_only_older_versions_stated():
     }
 
 
+@pytest.mark.parametrize("replay_time", [None, utc(2024)])
+def test_replace_source_takes_effect_when_the_stored_version_did(replay_time):
+    g = fresh_graph("replace-stored", extractor=LineExtractor())
+    run(g.insert.text("ann WORKS_AT acme", source_id="hr", event_time=utc(2020)))
+    stored = run(g.insert.text("ann WORKS_AT globex", source_id="hr", event_time=utc(2022)))
+    again = run(g.insert.text("ann WORKS_AT globex", source_id="hr", replace_source=True, event_time=replay_time))
+    assert again.source_version == stored.source_version
+    [works] = again.source_diff.retired
+    assert run(g.relations.versions(works))[0].invalidated_at == utc(2022)
+    old = ["SOURCE | ann WORKS_AT acme", "GRAPH | ann -[WORKS_AT]-> acme"]
+    before = run(g.retrieve("ann acme globex", as_of=utc(2021))).context.splitlines()
+    after = run(g.retrieve("ann acme globex", as_of=utc(2023))).context.splitlines()
+    assert [line in before for line in old] == [True, True]
+    assert [line in after for line in old] == [False, False]
+
+
 def test_replace_source_keeps_certified_facts_and_needs_a_source_id():
     g = fresh_graph("replace-cert", extractor=LineExtractor())
     rel = run(g.insert.text("ann WORKS_AT acme", source_id="hr")).relations[0]
@@ -324,6 +382,29 @@ def test_ossie_export_maps_types_properties_and_relations():
     assert knows_person["verbalizes"] == ["{Person} knows {Person:other}"]
     with pytest.raises(ValidationError, match="needs at least one concept"):
         Schema.model_validate({"relations": [{"type": "KNOWS"}]}).to_ossie()
+
+
+def test_obsidian_vault_cuts_long_names_without_splitting_a_character():
+    names = ["B" * 300, "\u00e9" * 150, "B" * 199 + "\u00e9" + "B" * 50, "x" * 150 + " " + "y" * 150]
+    g = fresh_graph("vault_long")
+    run(g.insert.facts({"entities": [{"type": "Thing", "name": name} for name in names]}))
+    vault = run(g.export_obsidian())
+    notes = sorted(path for path in vault if "/" not in path)
+    assert len(notes) == 4
+    for path in notes:
+        assert len(path.encode("utf-8")) <= 255
+        assert "\ufffd" not in path
+    assert "B" * 199 + ".md" in notes
+    assert "\u00e9" * 100 + ".md" in notes
+
+
+def test_obsidian_vault_numbers_names_that_collide_after_the_cut():
+    g = fresh_graph("vault_clash")
+    prefix = "z" * 300
+    run(g.insert.facts({"entities": [{"type": "Thing", "name": prefix + suffix} for suffix in ("a", "b", "c")]}))
+    notes = [path for path in run(g.export_obsidian()) if "/" not in path]
+    assert len(set(notes)) == 3
+    assert all(len(path.encode("utf-8")) <= 255 for path in notes)
 
 
 def test_obsidian_vault_writes_a_note_per_entity_and_decision():
@@ -530,6 +611,15 @@ def test_ppr_passes_no_mass_through_a_blocked_hub():
     assert open_walk["thing:b"] < open_walk["thing:0"]
     blocked = _ppr_rank([(seed, 1.0)], nodes, rels, {"thing:h"})
     assert blocked["thing:0"] < blocked["thing:b"] and blocked["thing:h"] == 1
+
+
+def test_ppr_ranks_equal_mass_by_id_whatever_the_string_hashing():
+    half = [("s", "{}b"), ("{}b", "{}x1"), ("{}b", "{}x2"), ("{}x1", "{}x2"), ("{}x2", "{}x3"), ("{}x1", "{}x3")]
+    pairs = [(a.format(p), b.format(p)) for p in "lr" for a, b in [*half, ("s", "{}x3")]]
+    walk = ["s", "lb", "lx3", "rb", "rx3", "lx1", "lx2", "rx1", "rx2"]
+    rels = [_relation(f"relation:{a}{b}", f"thing:{a}", "R", f"thing:{b}") for a, b in pairs]
+    ranks = _ppr_rank([(_entity("thing:s", "S"), 1.0)], [f"thing:{n}" for n in walk], rels)
+    assert sorted(ranks, key=ranks.get) == [f"thing:{n}" for n in walk]
 
 
 def test_ossie_export_logs_every_field_it_leaves_out(caplog):
