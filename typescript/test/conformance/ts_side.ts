@@ -16,7 +16,7 @@ import { jsonIso } from "../../src/internal/time.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
-import { Schema, type Schema as SchemaType, validateAgainstSchema } from "../../src/schema.js";
+import { Schema, validateAgainstSchema } from "../../src/schema.js";
 import { requireIdentifier } from "../../src/stores/cypherPrimitives.js";
 import { expandTokens, schemaForms } from "../../src/terms.js";
 import { parseTime } from "../../src/validate.js";
@@ -92,7 +92,7 @@ const NEO4J_LOSS_SPEC = {
   ],
 };
 
-const SCHEMA_SPEC: SchemaType = {
+const SCHEMA_SPEC: Schema = {
   name: "conformance",
   entities: [
     {
