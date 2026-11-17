@@ -145,6 +145,11 @@ const OSSIE_SPEC = {
       from: { types: ["Person"] },
       to: { types: ["Person"] },
     },
+    {
+      type: "LEADS",
+      from: { types: ["Person"] },
+      to: { types: ["Company"], max_count: 1 },
+    },
   ],
 };
 
