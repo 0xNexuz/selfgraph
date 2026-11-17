@@ -17,6 +17,7 @@ import {
 import { setLogger } from "../../src/internal/log.js";
 import { comparePy } from "../../src/internal/py.js";
 import { jsonIso } from "../../src/internal/time.js";
+import { callTool } from "../../src/mcp.js";
 import { Extraction, parseOrThrow } from "../../src/models.js";
 import { tokens } from "../../src/retrieval.js";
 import { parseJson } from "../../src/runtime.js";
@@ -589,6 +590,31 @@ export function conformanceStore(name: string, kuzuPath: string): GraphStore {
   return STORE_SPECS.find((s) => s.name === name)!.make();
 }
 
+const MCP_ARGUMENT_CASES: Array<[string, Record<string, unknown>]> = [
+  ["list_entities", { limit: "5" }],
+  ["list_entities", { limit: true }],
+  ["retrieve", { query: "x", depth: "2", k: "3" }],
+  ["check_answerable", { question: "x", depth: false }],
+  ["maintenance_decay", { half_life_days: "30" }],
+  ["maintenance_prune", { min_relevance: true }],
+  ["create_preference", { subject_entity: "t:a", key: "k", value_entity: "t:b", strength: "0.5" }],
+  ["create_decision", { title: "t", steps: null }],
+];
+
+/**
+ * Call MCP tools with text, boolean, and null arguments the servers must reject before running the tool.
+ *
+ * @return (Promise<string[]>): the error text each call reports.
+ */
+async function mcpArgumentErrors(): Promise<string[]> {
+  const errors: string[] = [];
+  for (const [name, args] of MCP_ARGUMENT_CASES) {
+    const { result, isError } = await callTool(name, args);
+    errors.push(isError ? (result as { error: string }).error : "accepted");
+  }
+  return errors;
+}
+
 const USES_SPEC = {
   entities: [{ name: "Person" }, { name: "Tool" }],
   relations: [{ type: "USES", from: { types: ["Person"], max_count: 2 } }],
@@ -751,6 +777,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     if (!(exc instanceof ValidationError)) throw exc;
     out.facts_none = exc.message;
   }
+  out.mcp_arguments = await mcpArgumentErrors();
   const factsTypes: string[] = [];
   for (const facts of FACTS_TYPE_CASES) {
     try {

@@ -11,6 +11,7 @@ from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
 from selfgraph.extraction.extractor import _lenient_event_time
+from selfgraph.mcp.server import build_server
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -544,6 +545,34 @@ FACTS_TYPE_CASES = [
     {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
 ]
 
+MCP_ARGUMENT_CASES = [
+    ["list_entities", {"limit": "5"}],
+    ["list_entities", {"limit": True}],
+    ["retrieve", {"query": "x", "depth": "2", "k": "3"}],
+    ["check_answerable", {"question": "x", "depth": False}],
+    ["maintenance_decay", {"half_life_days": "30"}],
+    ["maintenance_prune", {"min_relevance": True}],
+    ["create_preference", {"subject_entity": "t:a", "key": "k", "value_entity": "t:b", "strength": "0.5"}],
+    ["create_decision", {"title": "t", "steps": None}],
+]
+
+
+async def mcp_argument_errors():
+    """Call MCP tools with text, boolean, and null arguments the servers must reject before running the tool.
+
+    @return (list[str]): the error text each call reports.
+    """
+    server = build_server()
+    errors = []
+    for name, args in MCP_ARGUMENT_CASES:
+        try:
+            await server.call_tool(name, args)
+            errors.append("accepted")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc).partition("ValidationError: ")[2] or str(exc))
+    return errors
+
+
 USES_SPEC = {
     "entities": [{"name": "Person"}, {"name": "Tool"}],
     "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
@@ -748,6 +777,7 @@ async def write(graph):
         out["facts_none"] = "accepted"
     except ValidationError as exc:
         out["facts_none"] = str(exc)
+    out["mcp_arguments"] = await mcp_argument_errors()
     out["facts_types"] = []
     for facts in FACTS_TYPE_CASES:
         try:
