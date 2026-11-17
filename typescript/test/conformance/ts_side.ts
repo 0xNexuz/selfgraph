@@ -71,6 +71,24 @@ const TERMS_SPEC = {
   ],
   relations: [{ type: "WORKS_AT", synonyms: ["employed by"], certified: true }],
 };
+const SHARED_DEFINITION_SPEC = {
+  entities: [
+    {
+      name: "Employee",
+      definitions: [{ name: "status", expression: "active", synonyms: ["employment state"], certified: false }],
+    },
+    {
+      name: "Project",
+      definitions: [{ name: "status", expression: "phase", synonyms: ["project state"], certified: true }],
+    },
+  ],
+};
+const SHARED_SYNONYM_SPEC = {
+  entities: [
+    { name: "Employee", definitions: [{ name: "status", expression: "active", synonyms: ["state"], certified: true }] },
+    { name: "Project", definitions: [{ name: "phase", expression: "phase", synonyms: ["state"], certified: false }] },
+  ],
+};
 const TERM_QUESTIONS = [
   "What is the staff size of the firm Acme by ad spend?",
   "users employed by employers",
@@ -329,7 +347,7 @@ function tablesReferenceErrors(): string[] {
 /**
  * Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
  *
- * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; tables_errors: string[]; term_forms: unknown; terms: unknown[]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+ * @return ({ warnings: Array<Array<{ code: string; message: string }>>; unknown_keys: string[]; tables: unknown; tables_errors: string[]; term_forms: unknown; terms: unknown[]; shared_term_forms: unknown; shared_terms: string[][]; neo4j_dropped: string }): one list per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the forms and expansion of a definition shared by two entities, the fields the Neo4j export drops, and how NaN and Infinity parse.
  */
 export function schemaWarnings(): {
   warnings: Array<Array<{ code: string; message: string }>>;
@@ -342,6 +360,9 @@ export function schemaWarnings(): {
   tables_errors: string[];
   term_forms: unknown;
   terms: unknown[];
+  shared_term_forms: unknown;
+  shared_synonym_term_forms: unknown;
+  shared_terms: string[][];
   datetime_errors: string[];
   iso_times: string[];
   terms_subtypes: unknown[];
@@ -350,6 +371,7 @@ export function schemaWarnings(): {
   lenient_event_times: Array<string | null>;
 } {
   const terms = Schema.parse(TERMS_SPEC);
+  const sharedSchema = Schema.parse(SHARED_DEFINITION_SPEC);
   const subSchema = Schema.parse({
     entities: [
       {
@@ -460,6 +482,18 @@ export function schemaWarnings(): {
     json_constants: jsonConstants(),
     term_forms: Object.fromEntries(
       Object.entries(schemaForms(terms)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
+    ),
+    shared_term_forms: Object.fromEntries(
+      Object.entries(schemaForms(sharedSchema)).map(([kind, named]) => [kind, Object.fromEntries(named)]),
+    ),
+    shared_synonym_term_forms: Object.fromEntries(
+      Object.entries(schemaForms(Schema.parse(SHARED_SYNONYM_SPEC))).map(([kind, named]) => [
+        kind,
+        Object.fromEntries(named),
+      ]),
+    ),
+    shared_terms: ["employment state", "project state", "status"].map((q) =>
+      [...expandTokens(tokens(q), sharedSchema, tokens)].sort(comparePy),
     ),
     terms: TERM_QUESTIONS.map((q) => [...expandTokens(tokens(q), terms, tokens)].sort(comparePy)),
     datetime_errors: ["0001-01-01T00:00:00+01:00", "9999-12-31T23:00:00-02:00"].map((text) => {
@@ -1462,6 +1496,13 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
+  const sharedTermsGraph = new SelfGraph(store, {
+    namespace: `${ns}:shared-synonym`,
+    schema: SHARED_SYNONYM_SPEC,
+    extraction: "regex",
+  });
+  await sharedTermsGraph.insert.facts({ entities: [{ type: "Employee", name: "Alice" }] });
+  const sharedSynonymAnswerable = await sharedTermsGraph.checkAnswerable("state");
   const explicitTerms = new SelfGraph(store, {
     namespace: `${ns}_explicit_terms`,
     schema: {
@@ -1558,6 +1599,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     diff: await graph.diff("1900-01-01", "2100-01-01"),
     diff_windows: await diffWindows(graph),
     answerable,
+    shared_synonym_answerable: sharedSynonymAnswerable,
     filters:
       store instanceof KuzuStore
         ? {

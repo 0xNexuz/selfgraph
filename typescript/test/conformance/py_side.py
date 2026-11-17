@@ -64,6 +64,34 @@ TERMS_SPEC = {
     ],
     "relations": [{"type": "WORKS_AT", "synonyms": ["employed by"], "certified": True}],
 }
+SHARED_DEFINITION_SPEC = {
+    "entities": [
+        {
+            "name": "Employee",
+            "definitions": [
+                {"name": "status", "expression": "active", "synonyms": ["employment state"], "certified": False}
+            ],
+        },
+        {
+            "name": "Project",
+            "definitions": [
+                {"name": "status", "expression": "phase", "synonyms": ["project state"], "certified": True}
+            ],
+        },
+    ]
+}
+SHARED_SYNONYM_SPEC = {
+    "entities": [
+        {
+            "name": "Employee",
+            "definitions": [{"name": "status", "expression": "active", "synonyms": ["state"], "certified": True}],
+        },
+        {
+            "name": "Project",
+            "definitions": [{"name": "phase", "expression": "phase", "synonyms": ["state"], "certified": False}],
+        },
+    ]
+}
 TERM_QUESTIONS = [
     "What is the staff size of the firm Acme by ad spend?",
     "users employed by employers",
@@ -298,7 +326,7 @@ def tables_reference_errors():
 def schema_warnings():
     """Validate each schema case and return its warnings as code and message pairs, plus unknown-key errors.
 
-    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the fields the Neo4j export drops, and how NaN and Infinity parse.
+    @return (dict): one list of {code, message} per case, one message per unknown-key case, the schema drafted from tables, the errors for invalid table references, the schema term forms, the expanded tokens per question, the forms and expansion of a definition shared by two entities, the fields the Neo4j export drops, and how NaN and Infinity parse.
     """
     schema = Schema.model_validate(SCHEMA_SPEC)
     cases = [Extraction.model_validate(case) for case in SCHEMA_CASES]
@@ -376,6 +404,13 @@ def schema_warnings():
         "tables": to_jsonable(Schema.from_tables(TABLES, name="sales")),
         "tables_errors": tables_reference_errors(),
         "term_forms": to_jsonable(schema_forms(Schema.model_validate(TERMS_SPEC))),
+        "shared_term_forms": to_jsonable(schema_forms(Schema.model_validate(SHARED_DEFINITION_SPEC))),
+        "shared_synonym_term_forms": to_jsonable(schema_forms(Schema.model_validate(SHARED_SYNONYM_SPEC))),
+        "shared_terms": [
+            sorted(expand_tokens(_tokens(q), shared_schema, _tokens))
+            for shared_schema in [Schema.model_validate(SHARED_DEFINITION_SPEC)]
+            for q in ("employment state", "project state", "status")
+        ],
         "neo4j_dropped": neo4j_export_warnings(),
         "json_constants": json_constants(),
         "terms": [
@@ -1640,6 +1675,11 @@ async def dump(graph, ns):
     loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
+    shared_terms_graph = SelfGraph(
+        store=store, namespace=f"{ns}:shared-synonym", schema=SHARED_SYNONYM_SPEC, extraction="regex"
+    )
+    await shared_terms_graph.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]})
+    shared_synonym_answerable = await shared_terms_graph.check_answerable("state")
     explicit_terms = SelfGraph(
         store=store,
         namespace=f"{ns}_explicit_terms",
@@ -1731,6 +1771,7 @@ async def dump(graph, ns):
             "diff": await graph.diff("1900-01-01", "2100-01-01"),
             "diff_windows": await diff_windows(graph),
             "answerable": answerable,
+            "shared_synonym_answerable": shared_synonym_answerable,
             "prune_types": pruned,
             "known_at_sources": {
                 "seeds": [s.id for s in historical.seeds],
