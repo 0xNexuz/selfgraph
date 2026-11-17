@@ -592,8 +592,21 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     seeded[tier] = { seeds: r.seeds, tiers: r.tiers };
   }
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
+  const embedded = new SelfGraph(store, {
+    namespace: ns,
+    embedder: { embed: async (texts: string[]) => texts.map((text) => (text === "Grace Hopper" ? [1, 0] : [1])) },
+    seeds: "embeddings",
+  });
+  let mismatchedDimensions = "no error";
+  try {
+    await embedded.retrieve("Grace Hopper", { depth: 0 });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    mismatchedDimensions = error.message;
+  }
   return toJsonable({
     answerable,
+    mismatched_dimensions: mismatchedDimensions,
     prune_types: pruned,
     retrieval_seeded: seeded,
     tiers: termed.tiers,

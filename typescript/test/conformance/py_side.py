@@ -630,9 +630,21 @@ async def dump(graph, ns):
         for tier in ("bm25", "synonyms")
     }
     pruned = await termed.maintenance.prune(older_than=datetime.now(timezone.utc), types=["User", "DATABASE"])
+
+    class MismatchedEmbedder:
+        async def embed(self, texts):
+            return [[1.0, 0.0] if text == "Grace Hopper" else [1.0] for text in texts]
+
+    embedded = SelfGraph(store=store, namespace=ns, embedder=MismatchedEmbedder(), seeds="embeddings")
+    try:
+        await embedded.retrieve("Grace Hopper", depth=0)
+        mismatched_dimensions = "no error"
+    except ValidationError as exc:
+        mismatched_dimensions = str(exc)
     return to_jsonable(
         {
             "answerable": answerable,
+            "mismatched_dimensions": mismatched_dimensions,
             "prune_types": pruned,
             "retrieval_seeded": {tier: {"seeds": r.seeds, "tiers": r.tiers} for tier, r in seeded.items()},
             "tiers": termed.tiers,
