@@ -2757,13 +2757,7 @@ async def _settle_uncertified(
         return
     tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, _rank(rel))
     ended, _ = tracker.settle()
-    rows = []
-    for old, (by, when) in ended.items():
-        gone = _retired(found[old], by, when, at)
-        rows.append((gone["type"], gone["from_id"], gone["to_id"], gone["props"]))
-    if rows:
-        await _precheck_edges(runner, ns, L_ENTITY, L_ENTITY, rows)
-        await runner.create_edges(ns, L_ENTITY, L_ENTITY, rows)
+    await retire_relations(runner, ns, [(found[old], by, when) for old, (by, when) in ended.items()], at)
 
 
 async def list_relations(

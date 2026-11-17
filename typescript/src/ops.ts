@@ -2859,6 +2859,7 @@ export async function updateRelation(
  * @param rel (Relation): the new, uncertified revision, already written.
  * @param caps (ReadonlyMap<string, RelationCap> | null | undefined): the schema's max_count limits, or null without a schema.
  * @param at (Date): the write's timestamp, stamped on each retirement.
+ * @return (Promise<void>): nothing.
  */
 async function settleUncertified(
   runner: Runner,
@@ -2873,13 +2874,12 @@ async function settleUncertified(
   if (tracker === null) return;
   tracker.admit(rel.id, rel.type, rel.from_entity, rel.to_entity, rankOf(rel), effectiveTime(rel));
   const [ended] = tracker.settle();
-  const rows: EdgeWrite[] = [...ended].map(([old, [by, when]]) => {
-    const gone = retiredEdge(found.get(old)!, by, when, at);
-    return [gone.type, gone.from_id, gone.to_id, gone.props];
-  });
-  if (!rows.length) return;
-  precheckEdges(runner, ns, L_ENTITY, L_ENTITY, rows);
-  await runner.createEdges(ns, L_ENTITY, L_ENTITY, rows);
+  await retireRelations(
+    runner,
+    ns,
+    [...ended].map(([old, [by, when]]) => [found.get(old)!, by, when] as const),
+    at,
+  );
 }
 
 /**
