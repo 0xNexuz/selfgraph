@@ -314,14 +314,14 @@ def test_bm25_seed_ranking_counts_repeated_document_words():
         g.insert.facts(
             {
                 "entities": [
-                    {"type": "Thing", "name": "A", "properties": {"text": "alpha alpha beta"}},
-                    {"type": "Thing", "name": "B", "properties": {"text": "alpha beta beta"}},
+                    {"type": "Thing", "name": "Zebra", "properties": {"text": "alpha alpha beta"}},
+                    {"type": "Thing", "name": "Mango", "properties": {"text": "alpha beta beta"}},
                 ]
             }
         )
     )
     found = run(g.retrieve("alpha", seeds="bm25"))
-    assert [seed.id for seed in found.seeds[:2]] == ["thing:a", "thing:b"]
+    assert [seed.id for seed in found.seeds[:2]] == ["thing:zebra", "thing:mango"]
     assert found.seeds[0].score > found.seeds[1].score
 
 

@@ -340,12 +340,12 @@ function suite(spec: StoreSpec): void {
     const g = open();
     await g.insert.facts({
       entities: [
-        { type: "Thing", name: "A", properties: { text: "alpha alpha beta" } },
-        { type: "Thing", name: "B", properties: { text: "alpha beta beta" } },
+        { type: "Thing", name: "Zebra", properties: { text: "alpha alpha beta" } },
+        { type: "Thing", name: "Mango", properties: { text: "alpha beta beta" } },
       ],
     });
     const found = await g.retrieve("alpha", { seeds: "bm25" });
-    expect(found.seeds.slice(0, 2).map((seed) => seed.id)).toEqual(["thing:a", "thing:b"]);
+    expect(found.seeds.slice(0, 2).map((seed) => seed.id)).toEqual(["thing:zebra", "thing:mango"]);
     expect(found.seeds[0]!.score).toBeGreaterThan(found.seeds[1]!.score);
   });
 
