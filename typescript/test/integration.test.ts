@@ -20,6 +20,7 @@ import {
   ValidationError,
 } from "../src/index.js";
 import { childEdgeId, LABELS } from "../src/labels.js";
+import { Extraction, parseOrThrow } from "../src/models.js";
 import { HUB_DEGREE } from "../src/retrieval.js";
 import { boltError, parseAuth, queryError } from "../src/stores/bolt.js";
 import { uniqueLabels } from "../src/stores/cypher.js";
@@ -1987,4 +1988,22 @@ describe("property values", () => {
     for (const given of ["person", "HUMAN"])
       expect(await listed(s, given)).toEqual(["human:cy", "person:ann", "person:bob"]);
   });
+});
+
+it.each([JSON.parse('{"__proto__":1}'), JSON.parse('{"nested":[{"__proto__":1}]}')])(
+  "rejects proto keys before value type validation: %j",
+  (external_ids) => {
+    expect(() =>
+      parseOrThrow(Extraction, { entities: [{ type: "Person", name: "Ann", external_ids }] }, "facts"),
+    ).toThrowError(new ValidationError("property and external id keys cannot be '__proto__'"));
+  },
+);
+
+it.each([
+  [JSON.parse('{"a":9007199254740993}'), "a"],
+  [{ "\x01": 1 }, "\x01"],
+] as const)("keeps other external id value type errors: %j", (external_ids, key) => {
+  expect(() =>
+    parseOrThrow(Extraction, { entities: [{ type: "Person", name: "Ann", external_ids }] }, "facts"),
+  ).toThrowError(new ValidationError(`invalid facts: entities[0].external_ids.${key}: expected string`));
 });

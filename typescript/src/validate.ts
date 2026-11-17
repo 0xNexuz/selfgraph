@@ -52,15 +52,34 @@ export function hasControl(text: string): boolean {
 }
 
 /**
+ * Reject __proto__ keys before property or external-id values are parsed.
+ *
+ * @param value (unknown): the raw input, traversed through plain objects and arrays.
+ */
+export function rejectProtoKeys(value: unknown): void {
+  const pending = [value];
+  const seen = new Set<object>();
+  while (pending.length) {
+    const item = pending.pop();
+    if (!Array.isArray(item) && !isPlainObject(item)) continue;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    if (!Array.isArray(item) && Object.hasOwn(item, "__proto__")) {
+      throw new ValidationError("property and external id keys cannot be '__proto__'");
+    }
+    for (const child of Object.values(item)) pending.push(child);
+  }
+}
+
+/**
  * Validate a stored JSON value: bounded nesting, clean string keys, UTF-8-emittable strings, safe integers, no Dates.
  *
  * @param name (string): the field name for error messages.
  * @param value (unknown): the JSON-shaped value.
  * @param depth (number): the current nesting depth.
  * @param safeInts (boolean): reject a bigint, or an integer-valued number, outside +/-(2^53 - 1), which JSON.parse would round.
- * @param rejectProto (boolean): reject __proto__ keys in properties and external ids.
  */
-export function requireCleanJson(name: string, value: unknown, depth = 0, safeInts = true, rejectProto = false): void {
+export function requireCleanJson(name: string, value: unknown, depth = 0, safeInts = true): void {
   if (depth > MAX_JSON_DEPTH) {
     throw new ValidationError(`${name} is nested too deeply; keep it under ${MAX_JSON_DEPTH} levels`);
   }
@@ -79,14 +98,11 @@ export function requireCleanJson(name: string, value: unknown, depth = 0, safeIn
   } else if (value instanceof Date) {
     throw new ValidationError(`${name} cannot hold Date values; use an ISO 8601 string`);
   } else if (Array.isArray(value)) {
-    for (const item of value) requireCleanJson(name, item, depth + 1, safeInts, rejectProto);
+    for (const item of value) requireCleanJson(name, item, depth + 1, safeInts);
   } else if (isPlainObject(value)) {
     for (const [key, item] of Object.entries(value)) {
-      if (rejectProto && key === "__proto__") {
-        throw new ValidationError("property and external id keys cannot be '__proto__'");
-      }
       if (hasControl(key)) throw new ValidationError(`${name} keys cannot contain control or surrogate characters`);
-      requireCleanJson(name, item, depth + 1, safeInts, rejectProto);
+      requireCleanJson(name, item, depth + 1, safeInts);
     }
   }
 }
@@ -352,7 +368,8 @@ export function requireList(name: string, value: unknown): asserts value is stri
  */
 function requireMapping(name: string, value: unknown, safeInts = true): asserts value is Record<string, unknown> {
   if (!isPlainObject(value)) throw new ValidationError(`${name} must be a mapping, got ${typeName(value)}`);
-  requireCleanJson(name, value, 0, safeInts, ["properties", "set_properties", "external_ids"].includes(name));
+  if (["properties", "set_properties", "external_ids"].includes(name)) rejectProtoKeys(value);
+  requireCleanJson(name, value, 0, safeInts);
 }
 
 /**

@@ -61,9 +61,29 @@ _MAX_JSON_DEPTH = 64
 MAX_SAFE_INTEGER = 2**53 - 1
 
 
-def _require_clean_json(
-    name: str, value: object, depth: int = 0, *, safe_ints: bool = True, reject_proto: bool = False
-) -> None:
+def _reject_proto_keys(value: Any) -> Any:
+    """Reject __proto__ keys before property or external-id values are parsed.
+
+    @param value (Any): the raw input, traversed through mappings and sequences.
+    @return (Any): the unchanged input; raises ValidationError for a __proto__ key.
+    """
+    pending = [value]
+    seen = set()
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, Mapping | list | tuple) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, Mapping):
+            if "__proto__" in item:
+                raise ValidationError("property and external id keys cannot be '__proto__'")
+            pending.extend(item.values())
+        else:
+            pending.extend(item)
+    return value
+
+
+def _require_clean_json(name: str, value: object, depth: int = 0, *, safe_ints: bool = True) -> None:
     """Validate a stored JSON value: bounded nesting, clean string keys, and UTF-8-emittable string values.
 
     The depth guard keeps a pathological nested value from exhausting the Python stack (a raw RecursionError
@@ -74,7 +94,6 @@ def _require_clean_json(
     @param value (object): the JSON-shaped value to validate.
     @param depth (int): the current nesting depth, for the recursion guard.
     @param safe_ints (bool): reject integers outside +/-(2**53 - 1), which JSON readers in other languages round.
-    @param reject_proto (bool): reject __proto__ keys in properties and external ids.
     @return (None): nothing; raises ValidationError on excess depth, a control/surrogate key, a surrogate value, an
         unsafe integer, or a date or datetime.
     """
@@ -90,14 +109,12 @@ def _require_clean_json(
         raise ValidationError(f"{name} cannot hold {type(value).__name__} values; use an ISO 8601 string")
     elif isinstance(value, Mapping):
         for key, item in value.items():
-            if reject_proto and key == "__proto__":
-                raise ValidationError("property and external id keys cannot be '__proto__'")
             if isinstance(key, str) and _has_control(key):
                 raise ValidationError(f"{name} keys cannot contain control or surrogate characters")
-            _require_clean_json(name, item, depth + 1, safe_ints=safe_ints, reject_proto=reject_proto)
+            _require_clean_json(name, item, depth + 1, safe_ints=safe_ints)
     elif isinstance(value, list | tuple):
         for item in value:
-            _require_clean_json(name, item, depth + 1, safe_ints=safe_ints, reject_proto=reject_proto)
+            _require_clean_json(name, item, depth + 1, safe_ints=safe_ints)
 
 
 def _require_str(label: str, value: object) -> None:

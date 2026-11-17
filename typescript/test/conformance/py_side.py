@@ -606,6 +606,22 @@ async def choice_errors(graph):
     works_at = ids.relation_id("person:jane-doe", "WORKS_AT", "company:acme")
     dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
     return {
+        "proto_value_type": await error_of(
+            graph.insert.facts({"entities": [{"type": "Person", "name": "Proto", "external_ids": {"__proto__": 1}}]})
+        ),
+        "proto_nested_value_type": await error_of(
+            graph.insert.facts(
+                {"entities": [{"type": "Person", "name": "Proto", "external_ids": {"nested": [{"__proto__": 1}]}}]}
+            )
+        ),
+        "external_id_unsafe_number": await error_of(
+            graph.insert.facts(
+                {"entities": [{"type": "Person", "name": "Proto", "external_ids": {"a": 9007199254740993}}]}
+            )
+        ),
+        "external_id_control_key": await error_of(
+            graph.insert.facts({"entities": [{"type": "Person", "name": "Proto", "external_ids": {"\x01": 1}}]})
+        ),
         "proto_entity": await error_of(
             graph.entities.create("Proto", "Person", properties={"nested": [{"__proto__": "x"}]})
         ),

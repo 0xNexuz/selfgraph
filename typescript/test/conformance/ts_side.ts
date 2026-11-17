@@ -625,6 +625,24 @@ async function choiceErrors(graph: SelfGraph): Promise<Record<string, string[]>>
   const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
   const bad = new Opaque() as never;
   return {
+    proto_value_type: await errorOf(() =>
+      graph.insert.facts({
+        entities: [{ type: "Person", name: "Proto", external_ids: JSON.parse('{"__proto__":1}') }],
+      }),
+    ),
+    proto_nested_value_type: await errorOf(() =>
+      graph.insert.facts({
+        entities: [{ type: "Person", name: "Proto", external_ids: JSON.parse('{"nested":[{"__proto__":1}]}') }],
+      }),
+    ),
+    external_id_unsafe_number: await errorOf(() =>
+      graph.insert.facts({
+        entities: [{ type: "Person", name: "Proto", external_ids: JSON.parse('{"a":9007199254740993}') as never }],
+      }),
+    ),
+    external_id_control_key: await errorOf(() =>
+      graph.insert.facts({ entities: [{ type: "Person", name: "Proto", external_ids: { "\x01": 1 } as never }] }),
+    ),
     proto_entity: await errorOf(() =>
       graph.entities.create("Proto", "Person", { properties: JSON.parse('{"nested":[{"__proto__":"x"}]}') }),
     ),

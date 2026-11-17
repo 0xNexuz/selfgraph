@@ -1,7 +1,6 @@
 import json
 from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
-from functools import partial
 from types import UnionType
 from typing import Annotated, Any, ClassVar, Generic, Literal, TypeVar, Union, get_args, get_origin
 
@@ -20,7 +19,14 @@ from pydantic import (
 from pydantic import ValidationError as PydanticValidationError
 
 from .errors import ValidationError
-from .ids import _has_surrogate, _require_clean_json, _require_no_control, _require_unit, normalize_rel_type
+from .ids import (
+    _has_surrogate,
+    _reject_proto_keys,
+    _require_clean_json,
+    _require_no_control,
+    _require_unit,
+    normalize_rel_type,
+)
 
 __all__ = [
     "JsonValue",
@@ -609,9 +615,8 @@ class EntityInput(InputModel):
             _require_no_control("entity alias", alias)
         return value
 
-    _clean_json = _check(
-        partial(_require_clean_json, reject_proto=True), "entity property and external id", "external_ids", "properties"
-    )
+    _proto_keys = field_validator("external_ids", "properties", mode="before")(_reject_proto_keys)
+    _clean_json = _check(_require_clean_json, "entity property and external id", "external_ids", "properties")
 
 
 def _facts_time(value: Any) -> Any:
@@ -685,7 +690,8 @@ class RelationInput(InputModel):
     def _normalize_type(cls, value: str) -> str:
         return normalize_rel_type(value)
 
-    _clean_json = _check(partial(_require_clean_json, reject_proto=True), "relation property", "properties")
+    _proto_keys = field_validator("properties", mode="before")(_reject_proto_keys)
+    _clean_json = _check(_require_clean_json, "relation property", "properties")
 
 
 class PreferenceInput(InputModel):
@@ -702,7 +708,8 @@ class PreferenceInput(InputModel):
     event_time: FactsTime = None
 
     _clean_key = _check(_require_no_control, "preference key", "key")
-    _clean_json = _check(partial(_require_clean_json, reject_proto=True), "preference property", "properties")
+    _proto_keys = field_validator("properties", mode="before")(_reject_proto_keys)
+    _clean_json = _check(_require_clean_json, "preference property", "properties")
 
 
 class DecisionTraceInput(InputModel):

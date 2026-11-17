@@ -393,9 +393,9 @@ def _require_mapping(name: str, value: Any, *, safe_ints: bool = True) -> None:
     for key in value:
         if not isinstance(key, str):
             raise ValidationError(f"{name} keys must be strings, got a {type(key).__name__} key")
-    _ids._require_clean_json(
-        name, value, safe_ints=safe_ints, reject_proto=name in {"properties", "set_properties", "external_ids"}
-    )
+    if name in {"properties", "set_properties", "external_ids"}:
+        _ids._reject_proto_keys(value)
+    _ids._require_clean_json(name, value, safe_ints=safe_ints)
 
 
 def _whole_floats_as_ints(value: Any) -> Any:
