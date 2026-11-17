@@ -114,6 +114,42 @@ function suite(spec: StoreSpec): void {
     await expect(g.checkAnswerable("  ")).rejects.toThrow("question must be a non-empty string");
   });
 
+  it("matches explicit stopword and single-character entity names and aliases only", async () => {
+    const schema = {
+      entities: [
+        { name: "Vitamin", definitions: [{ name: "who", expression: "count(Vitamin)" }] },
+        { name: "Department" },
+        { name: "Language" },
+        { name: "On" },
+      ],
+      relations: [{ type: "R" }, { type: "USES" }],
+    };
+    const g = open({ schema });
+    await g.insert.facts({
+      entities: [
+        { type: "Vitamin", name: "A" },
+        { type: "Vitamin", name: "Vitamin B" },
+        { type: "Department", name: "Information Technology", aliases: ["IT"] },
+        { type: "Language", name: "C" },
+        { type: "On", name: "Switch" },
+      ],
+      relations: [
+        { from_entity: "vitamin:a", type: "R", to_entity: "language:c" },
+        { from_entity: "language:c", type: "USES", to_entity: "department:information-technology" },
+      ],
+    });
+    const matched = await g.checkAnswerable("question", { terms: ["a", "it", "c"] });
+    expect([matched.verdict, matched.connected]).toEqual(["answerable", true]);
+    expect(matched.terms.map((t) => [t.term, t.status, t.matches])).toEqual([
+      ["a", "entity", ["vitamin:a"]],
+      ["it", "entity", ["department:information-technology"]],
+      ["c", "entity", ["language:c"]],
+    ]);
+    const missed = await g.checkAnswerable("question", { terms: ["B", "On", "who", "R"] });
+    expect([missed.verdict, missed.missing]).toEqual(["not_answerable", ["B", "On", "who", "R"]]);
+    expect((await g.checkAnswerable("A and it")).verdict).toBe("not_answerable");
+  });
+
   it("lists hubs, marks lines through them, and can skip them", async () => {
     const g = open();
     const names = ["Ada", "Bo", ...Array.from({ length: HUB_DEGREE }, (_, i) => `Leaf${i}`)];

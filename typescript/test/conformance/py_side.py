@@ -1482,6 +1482,41 @@ async def dump(graph, ns):
     loop_report = await loops.check_answerable("Ada Bob")
     termed = SelfGraph(store=store, namespace=ns, schema=TERMS_SPEC, extraction="regex")
     answerable = [await termed.check_answerable(q) for q in TERM_QUESTIONS]
+    explicit_terms = SelfGraph(
+        store=store,
+        namespace=f"{ns}_explicit_terms",
+        schema={
+            "entities": [
+                {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+                {"name": "Department"},
+                {"name": "Language"},
+                {"name": "On"},
+            ],
+            "relations": [{"type": "R"}, {"type": "USES"}],
+        },
+    )
+    await explicit_terms.insert.facts(
+        {
+            "entities": [
+                {"type": "Vitamin", "name": "A"},
+                {"type": "Vitamin", "name": "Vitamin B"},
+                {"type": "Department", "name": "Information Technology", "aliases": ["IT"]},
+                {"type": "Language", "name": "C"},
+                {"type": "On", "name": "Switch"},
+            ],
+            "relations": [
+                {"from_entity": "vitamin:a", "type": "R", "to_entity": "language:c"},
+                {"from_entity": "language:c", "type": "USES", "to_entity": "department:information-technology"},
+            ],
+        }
+    )
+    answerable.extend(
+        [
+            await explicit_terms.check_answerable("question", terms=["a", "it", "c"]),
+            await explicit_terms.check_answerable("question", terms=["B", "On", "who", "R"]),
+            await explicit_terms.check_answerable("A and it"),
+        ]
+    )
     seeded = {
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")

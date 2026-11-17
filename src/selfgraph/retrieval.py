@@ -1225,7 +1225,8 @@ def answerability(
     """Judge whether a graph holds what a question asks about, by lexical matching only.
 
     Each term is matched in turn against entity names and aliases, entity types, definitions, relation types, and
-    property and preference keys; the first kind with a match the graph holds covers it. Schema terms match by name,
+    property and preference keys; the first kind with a match the graph holds covers it. Explicit terms that are
+    stopwords or single characters match only entity names and aliases, exactly once folded. Schema terms match by name,
     alias, and synonym, and a match through a certified one is marked certified; a schema term with nothing stored
     for it (see grounded_terms) covers nothing, and a term only such terms match is schema_only, which counts as
     missing. Entities matched by different terms must be
@@ -1243,6 +1244,7 @@ def answerability(
     @return (AnswerabilityReport): the coverage of each term, the connectivity, and the verdict.
     """
     forms = schema_forms(schema)
+    explicit = terms is not None
     if terms is None:
         names = [n for e in entities for n in (e.name, *e.aliases)]
         terms = _question_terms(question, [*names, *(f for named in forms.values() for f in named)])
@@ -1256,11 +1258,19 @@ def answerability(
     coverage: list[TermCoverage] = []
     linked: dict[str, set[str]] = {}
     for term in terms:
-        words = _token_list(term)
-        found = {e.id for e in entities if words and any(_covers(words, n) for n in (e.name, *e.aliases))}
+        folded = _fold(term).strip()
+        runs = _word_runs(folded)
+        words = [t for t in runs if t not in _STOPWORDS]
+        exact = explicit and (len(folded) == 1 or (bool(runs) and not words))
+        if exact:
+            found = {e.id for e in entities if folded and any(_fold(n).strip() == folded for n in (e.name, *e.aliases))}
+        else:
+            found = {e.id for e in entities if words and any(_covers(words, n) for n in (e.name, *e.aliases))}
         status, certified = "entity", False
         if found:
             linked[term] = found
+        elif exact:
+            status = "missing"
         else:
             status, declared = "missing", []
             for kind, named in kinds:
