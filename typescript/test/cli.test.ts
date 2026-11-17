@@ -34,6 +34,22 @@ describe("built CLI against Kuzu", () => {
     for (const name of names) cli([...kuzu, ...ns, "entity", "create", "--name", name, "--type", "T"]);
   };
 
+  it("prints diff summaries and JSON", () => {
+    const ns = ["--namespace", "cli_diff"];
+    seed(ns, "Ann");
+    const args = [...kuzu, ...ns, "diff", "--since", "1900-01-01", "--until", "2100-01-01"];
+    const summary = cli(args);
+    expect(summary.code).toBe(0);
+    expect(summary.out).toContain("+ entity t:ann");
+    expect(summary.out).toContain("Deletes and merges are not visible.");
+    const json = cli([...args, "--json"]);
+    expect(json.code).toBe(0);
+    expect(json.out).toMatchObject({
+      entities_created: [{ id: "t:ann" }],
+      limitations: ["Deletes and merges are not visible."],
+    });
+  });
+
   it("prints init, the version, and help, warning only about flags kuzu ignores", () => {
     const ok = cli(["init"], { env: { HOME: join(dir, "home") } });
     expect(ok.code).toBe(0);
@@ -549,5 +565,9 @@ describe("CLI settings", () => {
     expect(llm("openai", "meta-llama/x")?.model).toBe("meta-llama/x");
     expect(parseTime("2024-01-02", "now").toISOString()).toBe("2024-01-02T00:00:00.000Z");
     expect(() => parseTime("soon", "now")).toThrow("invalid now: 'soon' is not an ISO 8601 date or time");
+    expect(parseTime("2021-03-04T10:15:00+0530", "as_of").toISOString()).toBe("2021-03-04T04:45:00.000Z");
+    for (const text of ["2021-03-04T10:15:00+24:00", "2021-03-04T10:15:00+05:60", "2021-03-04T10:15:00\u00a0+05:30"]) {
+      expect(() => parseTime(text, "as_of"), text).toThrow("is not an ISO 8601 date or time");
+    }
   });
 });

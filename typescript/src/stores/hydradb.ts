@@ -4,7 +4,7 @@ import { blake2b } from "@noble/hashes/blake2.js";
 import type { Driver, Session } from "neo4j-driver";
 
 import { errorMessage, OTHER_ENGINE_HINT, StoreError, TOKEN_HINT } from "../errors.js";
-import { comparePy, pyJsonDumps, pyRepr, pyStr, utf8 } from "../internal/py.js";
+import { comparePy, pyJsonDumps, pyStr, utf8 } from "../internal/py.js";
 import { L_ENTITY, L_EVIDENCE, L_MERGE } from "../labels.js";
 import type { CypherResult } from "../models.js";
 import { batches } from "../ops.js";
@@ -50,7 +50,8 @@ const HANDSHAKE_RETRIES = 50;
 const HANDSHAKE_JITTER_MS = 25;
 
 const jitter = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, Math.random() * HANDSHAKE_JITTER_MS));
-const MAX_STRING_BYTES = 32000;
+const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
+const MAX_WRITE_BYTES = MAX_MESSAGE_BYTES - 64 * 1024;
 const WRITE_BATCH = 1000;
 const DELETE_BATCH = 1024;
 const TRANSIENT_MARKERS = ["snapshot", "epoch", "transient", "serializ", "conflict", "lock"];
@@ -62,24 +63,31 @@ const OTHER_ENGINE_MARKERS = [
 ];
 
 /**
- * Reject a write whose stored strings exceed the engine's per-string size limit.
+ * The bytes a row adds to a HydraDB write: its column names, its strings, and 9 for each other value.
+ *
+ * @param row (Props): the column names and values about to be written.
+ * @return (number): the size in bytes.
+ */
+function writeSize(row: Props): number {
+  let size = 0;
+  for (const [key, value] of Object.entries(row)) {
+    size += utf8(key).length + (typeof value === "string" ? utf8(value).length : 9);
+  }
+  return size;
+}
+
+/**
+ * Reject a write that would not fit in one HydraDB Bolt message.
  *
  * @param row (Props): the column names and values about to be written.
  */
 function guardSizes(row: Props): void {
-  for (const [key, value] of Object.entries(row)) {
-    if (typeof value !== "string") continue;
-    const size = utf8(value).length;
-    if (size <= MAX_STRING_BYTES) continue;
-    const field =
-      key === "doc"
-        ? "the serialized node or edge document (HydraDB stores each node or edge as one JSON document, " +
-          "so its properties share this budget)"
-        : `the string column ${pyRepr(key)}`;
-    throw new StoreError(
-      `HydraDB rejects ${field} at ${size} bytes; the engine limit is ${MAX_STRING_BYTES} bytes per stored string`,
-    );
-  }
+  const size = writeSize(row);
+  if (size <= MAX_WRITE_BYTES) return;
+  throw new StoreError(
+    `HydraDB rejects this write at ${size} bytes; a node or edge row goes in one Bolt message, which HydraDB ` +
+      `caps at ${MAX_MESSAGE_BYTES} bytes, so a row may take at most ${MAX_WRITE_BYTES}`,
+  );
 }
 
 function isSplitHandshake(exc: unknown): boolean {
@@ -115,6 +123,18 @@ export function surrogateKey(ns: string, sid: string): bigint {
   let n = 0n;
   for (const byte of digest) n = (n << 8n) | BigInt(byte);
   return n >> 1n;
+}
+
+const LABEL_KEY = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * The label as HydraDB can store it, or null when the engine rejects it as a label key.
+ *
+ * @param label (string | null | undefined): the label to add or remove, such as an entity type.
+ * @return (string | null): the label, or null when it is missing or not a valid HydraDB label key.
+ */
+function engineLabel(label: string | null | undefined): string | null {
+  return label != null && LABEL_KEY.test(label) ? label : null;
 }
 
 /**
@@ -189,10 +209,70 @@ function keyed(alias: string, label: string, equals: Props | null | undefined, p
 }
 
 /**
+ * The row a node upsert writes.
+ *
+ * @param ns (string): the namespace.
+ * @param label (string): the node label.
+ * @param id (string): the node id.
+ * @param props (Props): the encoded node properties.
+ * @return (Props): the row, with its surrogate id, sort key, document, and scalar columns.
+ */
+function nodeWriteRow(ns: string, label: string, id: string, props: Props): Props {
+  return {
+    id: surrogateKey(ns, id),
+    sid: id,
+    ns,
+    label,
+    [sortKey(ns, label)]: id,
+    doc: docOf(props),
+    ...scalars(props),
+  };
+}
+
+/**
+ * The row an edge write creates.
+ *
+ * @param ns (string): the namespace.
+ * @param type (string): the edge type.
+ * @param fromLabel (string): the source node label.
+ * @param fromId (string): the source node id.
+ * @param toLabel (string): the destination node label.
+ * @param toId (string): the destination node id.
+ * @param props (Props): the encoded edge properties.
+ * @return (Props): the row, with its endpoints, surrogate id, document, and scalar columns.
+ */
+function edgeWriteRow(
+  ns: string,
+  type: string,
+  fromLabel: string,
+  fromId: string,
+  toLabel: string,
+  toId: string,
+  props: Props,
+): Props {
+  const sid = props.id;
+  const row: Props = {
+    f: surrogateKey(ns, fromId),
+    t: surrogateKey(ns, toId),
+    fa: fromId,
+    tb: toId,
+    fl: fromLabel,
+    tl: toLabel,
+    id: surrogateKey(ns, `${fromId}|${type}|${toId}|${pyStr(sid ?? null)}|${pyStr(props.revision ?? null)}`),
+    ns,
+    etype: type,
+    doc: docOf(props),
+  };
+  if (sid != null) row.sid = sid;
+  Object.assign(row, scalars(props));
+  return row;
+}
+
+/**
  * Group write rows by column set into batches, since an UNWIND write needs every row to carry the same fields.
  *
  * @param rows (Props[]): the rows to group.
- * @return (Props[][]): batches of at most WRITE_BATCH rows sharing one column set, in first-seen order.
+ * @return (Props[][]): batches sharing one column set, each at most WRITE_BATCH rows and MAX_WRITE_BYTES bytes, in first-seen order.
  */
 function byColumns(rows: Props[]): Props[][] {
   const groups = new Map<string, Props[]>();
@@ -204,7 +284,19 @@ function byColumns(rows: Props[]): Props[][] {
   }
   const out: Props[][] = [];
   for (const group of groups.values()) {
-    for (let i = 0; i < group.length; i += WRITE_BATCH) out.push(group.slice(i, i + WRITE_BATCH));
+    let batch: Props[] = [];
+    let size = 0;
+    for (const row of group) {
+      const rowSize = writeSize(row);
+      if (batch.length && (batch.length === WRITE_BATCH || size + rowSize > MAX_WRITE_BYTES)) {
+        out.push(batch);
+        batch = [];
+        size = 0;
+      }
+      batch.push(row);
+      size += rowSize;
+    }
+    out.push(batch);
   }
   return out;
 }
@@ -528,12 +620,28 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
   }
 
   /**
-   * Reject an encoded write whose serialized document exceeds the engine's per-string limit, before any write.
+   * Reject node upserts that would not fit in one HydraDB Bolt message, before any write.
    *
-   * @param props (Props): the encoded node or edge properties about to be written.
+   * @param ns (string): the namespace.
+   * @param label (string): the node label.
+   * @param rows (readonly NodeRow[]): (id, encoded properties) pairs, as upsertNodes takes them.
    */
-  checkDocSize(props: Props): void {
-    guardSizes({ doc: docOf(props), ...scalars(props) });
+  checkNodeWrites(ns: string, label: string, rows: readonly NodeRow[]): void {
+    for (const [id, props] of rows) guardSizes(nodeWriteRow(ns, label, id, props));
+  }
+
+  /**
+   * Reject edge writes that would not fit in one HydraDB Bolt message, before any write.
+   *
+   * @param ns (string): the namespace.
+   * @param fromLabel (string): the source node label.
+   * @param toLabel (string): the destination node label.
+   * @param rows (readonly EdgeWrite[]): (type, from id, to id, encoded properties), as createEdges takes them.
+   */
+  checkEdgeWrites(ns: string, fromLabel: string, toLabel: string, rows: readonly EdgeWrite[]): void {
+    for (const [type, fromId, toId, props] of rows) {
+      guardSizes(edgeWriteRow(ns, type, fromLabel, fromId, toLabel, toId, props));
+    }
   }
 
   async upsertNode(
@@ -555,17 +663,8 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     if (options.extra_label != null) quoteLabel(options.extra_label);
     for (const [, props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const cleared = new Map<string, [string[], bigint[]]>();
-    const key = sortKey(ns, label);
     const out = rows.map(([id, props]) => {
-      const row: Props = {
-        id: surrogateKey(ns, id),
-        sid: id,
-        ns,
-        label,
-        [key]: id,
-        doc: docOf(props),
-        ...scalars(props),
-      };
+      const row = nodeWriteRow(ns, label, id, props);
       guardSizes(row);
       const keys = unset(props);
       if (keys.length) {
@@ -596,6 +695,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
       label,
       out,
       indexRows.map((r) => r.id as bigint),
+      options.extra_label,
     );
     for (const [keys, params] of held) {
       await this._run(`MATCH (n:${label}) WHERE n.id IN $iids REMOVE ${removes("n", keys)}`, params);
@@ -608,19 +708,43 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
    * @param label (string): the node label.
    * @param rows (Props[]): the rows, each with its surrogate id and the columns to set.
    * @param needs (readonly bigint[]): ids that must be written first, such as the entities' key rows, so a failed write never leaves an entity stored without them.
+   * @param extraLabel (string | null | undefined): an optional secondary label.
    * @return (void): nothing.
    */
-  private async mergeRows(label: string, rows: Props[], needs: readonly bigint[] = []): Promise<void> {
+  private async mergeRows(
+    label: string,
+    rows: Props[],
+    needs: readonly bigint[] = [],
+    extraLabel?: string | null,
+  ): Promise<void> {
+    extraLabel = engineLabel(extraLabel);
+    const marks = extraLabel != null ? [labelKey(label), labelKey(extraLabel)] : [labelKey(label)];
     for (const batch of byColumns(rows)) {
+      const ids = batch.map((r) => r.id as bigint);
       await this.write(
         `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:${label}, ${sets("n", batch[0]!, ["id"])}`,
         { rows: batch },
-        batch.map((r) => r.id as bigint),
+        ids,
         needs,
-        [labelKey(label)],
+        marks,
         label === L_EVIDENCE || label === L_MERGE,
       );
-      if (queuing.getStore() === this) for (const r of batch) this.pendingNodes.add(`${label}\x00${r.id}`);
+      if (extraLabel != null) {
+        await this.write(
+          `MATCH (n:${label}) WHERE n.id IN $iids SET n:${quoteLabel(extraLabel)}`,
+          { iids: ids },
+          ids,
+          ids,
+          marks,
+          label === L_EVIDENCE || label === L_MERGE,
+        );
+      }
+      if (queuing.getStore() === this) {
+        for (const id of ids) {
+          this.pendingNodes.add(`${label}\x00${id}`);
+          if (extraLabel != null) this.pendingNodes.add(`${extraLabel}\x00${id}`);
+        }
+      }
     }
   }
 
@@ -683,7 +807,9 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
   }
 
   async removeNodeLabel(ns: string, label: string, id: string, dropLabel: string): Promise<void> {
-    await this._run(`MATCH (n:${label} {id: $iid}) REMOVE n:${quoteLabel(dropLabel)}`, { iid: surrogateKey(ns, id) });
+    const quoted = quoteLabel(dropLabel);
+    if (engineLabel(dropLabel) === null) return;
+    await this._run(`MATCH (n:${label} {id: $iid}) REMOVE n:${quoted}`, { iid: surrogateKey(ns, id) });
   }
 
   async matchNodes(ns: string, label: string, options: MatchNodesOptions = {}): Promise<Props[]> {
@@ -803,21 +929,7 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
   ): Promise<void> {
     for (const [, , , props] of rows) for (const k of Object.keys(props)) requireIdentifier(k);
     const out = rows.map(([type, fromId, toId, props]) => {
-      const sid = props.id;
-      const row: Props = {
-        f: surrogateKey(ns, fromId),
-        t: surrogateKey(ns, toId),
-        fa: fromId,
-        tb: toId,
-        fl: fromLabel,
-        tl: toLabel,
-        id: surrogateKey(ns, `${fromId}|${type}|${toId}|${pyStr(sid ?? null)}|${pyStr(props.revision ?? null)}`),
-        ns,
-        etype: type,
-        doc: docOf(props),
-      };
-      if (sid != null) row.sid = sid;
-      Object.assign(row, scalars(props));
+      const row = edgeWriteRow(ns, type, fromLabel, fromId, toLabel, toId, props);
       guardSizes(row);
       return row;
     });
@@ -974,8 +1086,8 @@ export class HydraDBStore extends AutoCommitStore implements GraphStore {
     whereAfter("r.sid", id_gt, where, params);
     const res = await this._run(
       `MATCH (${apat})-[r:${EDGE}]->(${bpat}) WHERE ${where.join(" AND ")} ` +
-        "RETURN r.doc AS doc, r.fa AS fa, r.tb AS tb, r.etype AS et, r.`sid` AS __ob " +
-        "ORDER BY __ob SKIP $skip LIMIT $limit",
+        "RETURN r.doc AS doc, r.fa AS fa, r.tb AS tb, r.etype AS et, r.`sid` AS __ob, r.revision AS __rev " +
+        "ORDER BY __ob, __rev SKIP $skip LIMIT $limit",
       params,
     );
     return res.rows.map(edgeRow);

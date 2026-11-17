@@ -1,7 +1,7 @@
 import pytest
-from helpers import create_entities, fresh_graph, new_graph, run, utc
+from helpers import HYDRADB, create_entities, fresh_graph, new_graph, run, utc
 
-from selfgraph import ConflictError, NotFoundError
+from selfgraph import ConflictError, NotFoundError, StoreError
 
 
 def seed(g):
@@ -87,6 +87,16 @@ def test_list_filters():
     assert len(by_from.items) == 2
 
 
+def test_a_type_with_a_digit_before_a_letter_reads_back_and_reinserts():
+    g = new_graph()
+    create_entities(g, "Thing:App", "Thing:Cluster")
+    rel = run(g.relations.create("thing:app", "uses k8s", "thing:cluster"))
+    assert rel.type == "USES_K8_S"
+    assert [r.id for r in run(g.relations.list(type=rel.type)).items] == [rel.id]
+    facts = {"relations": [{"from_entity": "thing:app", "type": "uses k8s", "to_entity": "thing:cluster"}]}
+    assert [r.id for r in run(g.insert.facts(facts)).relations] == [rel.id]
+
+
 def test_multiple_relations_same_endpoints():
     g = new_graph()
     seed(g)
@@ -147,3 +157,25 @@ def test_whole_number_floats_are_stored_and_read_as_ints_like_typescript():
     run(g.insert.facts(facts))
     assert type(run(g.entities.get("person:bo")).properties["age"]) is int
     assert type(run(g.preferences.list("person:ann")).items[0].properties["n"]) is int
+
+
+@pytest.mark.skipif(not HYDRADB, reason="the Bolt message limit is HydraDB's")
+def test_an_update_over_the_hydradb_message_limit_keeps_the_current_version():
+    g = new_graph()
+    seed(g)
+    rel = run(g.relations.create("person:soham", "WORKS_AT", "company:hydradb"))
+    with pytest.raises(StoreError, match="Bolt message"):
+        run(g.relations.update(rel.id, set_properties={"blob": "x" * 1_100_000}))
+    current = run(g.relations.get(rel.id))
+    assert (current.revision, current.properties) == (1, {})
+
+
+@pytest.mark.skipif(not HYDRADB, reason="the Bolt message limit is HydraDB's")
+def test_an_update_whose_edge_row_is_over_the_hydradb_limit_keeps_the_current_version():
+    g = new_graph()
+    seed(g)
+    rel = run(g.relations.create("person:soham", "LINKS_" + "X" * 20_000, "company:hydradb"))
+    with pytest.raises(StoreError, match="Bolt message"):
+        run(g.relations.update(rel.id, set_properties={"blob": "x" * 1_010_000}))
+    current = run(g.relations.get(rel.id))
+    assert (current.revision, current.properties) == (1, {})

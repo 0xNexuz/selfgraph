@@ -608,6 +608,32 @@ class CypherPrimitives(CypherRunner):
         )
         return [_edge_row(r) for r in res.rows]
 
+    async def edge_versions(
+        self, ns: str, from_label: str | None, to_label: str | None, ids: list[str]
+    ) -> list[dict] | None:
+        """Read edge versions for a bounded list of ids in one query.
+
+        @param ns (str): namespace.
+        @param from_label (str | None): source label, or None for any.
+        @param to_label (str | None): target label, or None for any.
+        @param ids (list[str]): edge ids.
+        @return (list[dict] | None): rows grouped by requested id, or None for more than 256 ids.
+        """
+        if len(ids) > 256:
+            return None
+        if not ids:
+            return []
+        from_pattern = "" if from_label is None else f":{quote_label(from_label)}"
+        to_pattern = "" if to_label is None else f":{quote_label(to_label)}"
+        result = await self._run(
+            f"MATCH (a{from_pattern})-[r]->(b{to_pattern}) WHERE r.ns = $ns AND r.id IN $ids "
+            "RETURN r, a.id AS from_e, b.id AS to_e, type(r) AS t",
+            {"ns": ns, "ids": ids},
+        )
+        rows = [_edge_row(row) for row in result.rows]
+        order = {rid: i for i, rid in enumerate(ids)}
+        return sorted(rows, key=lambda row: order[row["props"]["id"]])
+
     async def update_current_edge(self, ns: str, id: str, props: dict) -> None:
         """Set properties on the current version of an edge.
 
@@ -702,10 +728,12 @@ class CypherPrimitives(CypherRunner):
             params["etype"] = type
         where_equals("r", equals, where, params)
         where_after("r.id", id_gt, where, params)
+        order_by = require_identifier(order_by, "order_by")
+        order = "r.id, r.revision" if order_by == "id" else f"r.{order_by}"
         query = (
             f"MATCH (a:{from_label})-[r]->(b{blabel}) WHERE {' AND '.join(where)} "
             f"RETURN r, a.id AS from_e, b.id AS to_e, type(r) AS t "
-            f"ORDER BY r.{require_identifier(order_by, 'order_by')} SKIP $skip LIMIT $limit"
+            f"ORDER BY {order} SKIP $skip LIMIT $limit"
         )
         res = await self._run(query, params)
         return [_edge_row(r) for r in res.rows]
