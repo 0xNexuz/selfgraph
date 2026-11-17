@@ -65,7 +65,7 @@ class Maintenance(Resource):
         relations = await _m.scan_relations(reader, ns)
         degree: dict[str, int] = {}
         for rel in relations:
-            for eid in (rel.from_entity, rel.to_entity):
+            for eid in {rel.from_entity, rel.to_entity}:
                 degree[eid] = degree.get(eid, 0) + 1
         rel_scores = {
             r.id: _m.relevance_score((r.created_at, r.event_time), at, half_life_days, r.source_count)

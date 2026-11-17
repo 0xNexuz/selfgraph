@@ -740,6 +740,9 @@ ANSWER_ENTITIES = [
     _ent("city:new-york", "New York", "City"),
     _ent("city:york", "York", "City"),
     _ent("thing:ann-s-bakery", "Ann's Bakery"),
+    _ent("vitamin:a", "A", "Vitamin"),
+    _ent("department:it", "Information Technology", "Department", aliases=["IT"]),
+    _ent("language:c", "C", "Language"),
 ]
 ANSWER_RELATIONS = [
     _rel("relation:w", "person:ann-lee", "WORKS_AT", "company:acme", since=2020),
@@ -747,11 +750,19 @@ ANSWER_RELATIONS = [
     _rel("relation:ha", "thing:hub", "HAS", "thing:ada"),
     _rel("relation:hb", "thing:hub", "HAS", "thing:bo"),
     _rel("relation:ny", "company:acme", "LOCATED_IN", "city:new-york"),
+    _rel("relation:ac", "vitamin:a", "USES", "language:c"),
+    _rel("relation:cit", "language:c", "USES", "department:it"),
 ]
 ANSWER_SCHEMA = Schema.model_validate(
     {
-        "entities": [{"name": "Person", "aliases": ["employee"]}, {"name": "Company"}],
-        "relations": [{"type": "FOUNDED", "aliases": ["started"], "synonyms": ["Lee's backer"]}],
+        "entities": [
+            {"name": "Person", "aliases": ["employee"]},
+            {"name": "Company"},
+            {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+            {"name": "Department"},
+            {"name": "Language"},
+        ],
+        "relations": [{"type": "FOUNDED", "aliases": ["started"], "synonyms": ["Lee's backer"]}, {"type": "USES"}],
     }
 )
 ANSWER_CASES = [
@@ -777,6 +788,8 @@ ANSWER_CASES = [
     ["what is Ann’s Bakery", None, 3],
     ["who is Lee's backer", None, 3],
     ["who is Lee’s backer", None, 3],
+    ["explicit stopwords and single chars", ["a", "it", "c"], 3],
+    ["explicit non-entity forms", ["B", "who", "w"], 3],
 ]
 
 
@@ -899,6 +912,10 @@ def obsidian_case():
         _ent("thing:acme", "ACME", "Thing"),
         _ent("thing:slash", "A/B: c?", "Thing"),
         _ent("thing:dots", " ..", "Thing"),
+        _ent("thing:long-a", "B" * 300, "Thing"),
+        _ent("thing:long-b", "\u00e9" * 150, "Thing"),
+        _ent("thing:long-c", "B" * 199 + "\u00e9" + "B" * 50, "Thing"),
+        _ent("thing:long-d", "\U0001f600" * 80, "Thing"),
     ]
     relations = [
         _rel("relation:w", "person:ann", "WORKS_AT", "company:acme", role="cto", since=2020),

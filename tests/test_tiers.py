@@ -268,6 +268,10 @@ def test_certification_uses_the_matched_definitions_owner():
     report = run(g.check_answerable("grade"))
     assert [(t.status, t.matches, t.certified) for t in report.terms] == [("definition", ["phase"], True)]
 
+    run(g.insert.facts({"entities": [{"type": "Beta", "name": "Bob"}]}))
+    report = run(g.check_answerable("grade"))
+    assert [(t.status, t.matches, t.certified) for t in report.terms] == [("definition", ["phase"], False)]
+
 
 def test_check_answerable_ignores_possessive_and_contraction_endings():
     spec = {

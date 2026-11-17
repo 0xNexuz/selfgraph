@@ -3162,12 +3162,15 @@ export async function sourceTargets(runner: Runner, ns: string, sourceId: string
  * stays current, and so does a certified one, with a "certified_kept" warning. Evidence recorded by hand has no stored
  * version and always counts.
  *
+ * The replacement takes effect at the version's stored effective time, so a version recorded before this insert keeps
+ * its first event_time. A restored version uses the insert's effective time instead.
+ *
  * @param runner (Runner): the graph runner.
  * @param ns (string): the namespace.
  * @param sourceId (string): the source id.
  * @param version (string): the source version just recorded; it is stored as invalidated_by.
  * @param stale (Iterable<string>): the ids the source supported before and the new version did not produce again.
- * @param at (Date): the new version's effective time.
+ * @param at (Date): the insert's effective time, for a version it stores or restores.
  * @param known (Date): the timestamp of the insert that recorded the new version.
  * @return ([string[], InsertWarning[]]): the retired relation ids, and one warning per decision.
  */
@@ -3180,6 +3183,10 @@ export async function replaceSource(
   at: Date,
   known: Date,
 ): Promise<[string[], InsertWarning[]]> {
+  const stored = await runner.getNode(ns, L_SOURCE_VERSION, version);
+  if (stored !== null && (stored.replaced_by ?? null) === null) {
+    at = fromIso((stored.event_time ?? stored.created_at) as string)!;
+  }
   const candidates = [...new Set(stale)].sort(comparePy);
   const support = new Map<string, Props[]>();
   for (const row of await nodesWhere(runner, ns, L_EVIDENCE, "target_id", candidates)) {

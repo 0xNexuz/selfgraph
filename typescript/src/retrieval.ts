@@ -1288,7 +1288,7 @@ function reaches(
 /**
  * Judge whether a graph holds what a question asks about, by lexical matching only.
  *
- * Each term is matched in turn against entity names and aliases, entity types, definitions, relation types, and property and preference keys; the first kind with a match covers it. Schema terms match by name, alias, and synonym, and a match through a certified one is marked certified. Entities matched by different terms must be joined by a path of at most depth hops; a pair joined only through a hub (HUB_DEGREE or more relations) is listed in hub_only. The verdict is not_answerable when no term is covered, partial when some are missing, uncertain when all are covered but not connected or only through a hub, and answerable otherwise.
+ * Each term is matched in turn against entity names and aliases, entity types, definitions, relation types, and property and preference keys; the first kind with a match covers it. Explicit terms that are stopwords or single characters match only entity names and aliases, exactly once folded. Schema terms match by name, alias, and synonym, and a match through a certified one is marked certified. Entities matched by different terms must be joined by a path of at most depth hops; a pair joined only through a hub (HUB_DEGREE or more relations) is listed in hub_only. The verdict is not_answerable when no term is covered, partial when some are missing, uncertain when all are covered but not connected or only through a hub, and answerable otherwise.
  *
  * @param question (string): the question.
  * @param terms (string[] | null): the terms to check, or null to take them from the question.
@@ -1319,6 +1319,7 @@ export function answerability(
       definitionEntries.set(form, entries);
     }
   }
+  const explicit = terms !== null;
   const asked =
     terms ??
     questionTerms(question, [
@@ -1342,14 +1343,26 @@ export function answerability(
   const coverage: TermCoverage[] = [];
   const linked = new Map<string, Set<string>>();
   for (const term of asked) {
-    const words = tokenList(term);
-    let matched = words.length
-      ? entities.filter((e) => [e.name, ...e.aliases].some((n) => covers(words, n))).map((e) => e.id)
-      : [];
+    const folded = pyStrip(fold(term));
+    const runs = wordRuns(folded);
+    const words = runs.filter((t) => !STOPWORDS.has(t));
+    const exact = explicit && (cpLen(folded) === 1 || (runs.length > 0 && !words.length));
+    let matched: string[];
+    if (exact) {
+      matched = folded
+        ? entities.filter((e) => [e.name, ...e.aliases].some((n) => pyStrip(fold(n)) === folded)).map((e) => e.id)
+        : [];
+    } else {
+      matched = words.length
+        ? entities.filter((e) => [e.name, ...e.aliases].some((n) => covers(words, n))).map((e) => e.id)
+        : [];
+    }
     let status: TermCoverage["status"] = "entity";
     let certified = false;
     if (matched.length) {
       linked.set(term, new Set(matched));
+    } else if (exact) {
+      status = "missing";
     } else {
       status = "missing";
       let declared: Array<readonly [string, boolean]> = [];
@@ -1371,7 +1384,7 @@ export function answerability(
         if (live.length) {
           status = kind;
           matched = live.map(([t]) => t);
-          certified = live.some(([, c]) => c);
+          certified = live.every(([, c]) => c);
           break;
         }
         if (!declared.length) declared = hits;
@@ -1379,7 +1392,7 @@ export function answerability(
       if (status === "missing" && declared.length) {
         status = "schema_only";
         matched = declared.map(([t]) => t);
-        certified = declared.some(([, c]) => c);
+        certified = declared.every(([, c]) => c);
       }
     }
     coverage.push({ term, status, matches: [...new Set(matched)].sort(comparePy).slice(0, MAX_MATCHES), certified });

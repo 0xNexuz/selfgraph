@@ -845,6 +845,14 @@ async def write(graph):
         "alias": by_alias.relation_ids,
         "canonical": by_canonical.relation_ids,
     }
+    decay_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:decay")
+    await decay_graph.initialize()
+    for name in ("loop", "pair"):
+        await decay_graph.entities.create(name, "T", id=f"t:{name}")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:loop")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:pair")
+    decayed = await decay_graph.maintenance.decay(now=datetime.now(timezone.utc), half_life_days=1e9)
+    out["decay_self_relation"] = decayed.entities
     await graph.insert.facts(
         {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
     )
@@ -1049,11 +1057,24 @@ async def write(graph):
             "v3_warnings": [w.code for w in rv3.warnings],
         }
     )
+    stored_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_stored", extraction="regex")
+    stored_first = await stored_src.insert.text(
+        "Alice works at Acme.", source_id="hr", event_time="2020-01-01T00:00:00Z"
+    )
+    await stored_src.insert.text("Alice works at Globex.", source_id="hr", event_time="2022-01-01T00:00:00Z")
+    await stored_src.insert.text(
+        "Alice works at Globex.", source_id="hr", replace_source=True, event_time="2024-01-01T00:00:00Z"
+    )
+    out["replace_source_stored_time"] = [
+        [v.revision, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await stored_src.relations.versions(stored_first.relations[0].id)
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",
     )
     out["retrieval_overflow"] = await overflow(graph)
+    out["vault_names"] = await vault_names(graph)
     try:
         await graph.insert.facts(
             {
@@ -1406,6 +1427,27 @@ async def overflow(graph):
     return {"tight": tight.context, "full": full.context}
 
 
+async def vault_names(graph):
+    """Export a vault whose names outrun a file name, so each is cut on a character boundary and numbered.
+
+    @param graph (SelfGraph): the conformance graph, whose store holds a separate namespace for this case.
+    @return (list): the sorted note paths.
+    """
+    g = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_vault")
+    names = [
+        "B" * 300,
+        "\ufeff" + "C" * 300,
+        "\u00e9" * 150,
+        "B" * 199 + "\u00e9" + "B" * 50,
+        "\u5317" * 150,
+        "z" * 210 + "a",
+        "z" * 210 + "b",
+    ]
+    for name in names:
+        await g.entities.create(name, "Thing")
+    return sorted(await g.export_obsidian())
+
+
 async def all_evidence(list_fn, oid):
     """Read every page of an entity's or relation's evidence, two items at a time.
 
@@ -1522,6 +1564,41 @@ async def dump(graph, ns):
     )
     await shared_terms_graph.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]})
     shared_synonym_answerable = await shared_terms_graph.check_answerable("state")
+    explicit_terms = SelfGraph(
+        store=store,
+        namespace=f"{ns}_explicit_terms",
+        schema={
+            "entities": [
+                {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+                {"name": "Department"},
+                {"name": "Language"},
+                {"name": "On"},
+            ],
+            "relations": [{"type": "R"}, {"type": "USES"}],
+        },
+    )
+    await explicit_terms.insert.facts(
+        {
+            "entities": [
+                {"type": "Vitamin", "name": "A"},
+                {"type": "Vitamin", "name": "Vitamin B"},
+                {"type": "Department", "name": "Information Technology", "aliases": ["IT"]},
+                {"type": "Language", "name": "C"},
+                {"type": "On", "name": "Switch"},
+            ],
+            "relations": [
+                {"from_entity": "vitamin:a", "type": "R", "to_entity": "language:c"},
+                {"from_entity": "language:c", "type": "USES", "to_entity": "department:information-technology"},
+            ],
+        }
+    )
+    answerable.extend(
+        [
+            await explicit_terms.check_answerable("question", terms=["a", "it", "c"]),
+            await explicit_terms.check_answerable("question", terms=["B", "On", "who", "R"]),
+            await explicit_terms.check_answerable("A and it"),
+        ]
+    )
     seeded = {
         tier: await termed.retrieve("which employers hired staff members named Hopper", seeds=tier, depth=0)
         for tier in ("bm25", "synonyms")

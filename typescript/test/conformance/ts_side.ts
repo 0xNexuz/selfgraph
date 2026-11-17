@@ -847,6 +847,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     alias: byAlias.relation_ids,
     canonical: byCanonical.relation_ids,
   };
+  const decayGraph = new SelfGraph(graph.store, { namespace: `${graph.namespace}:decay` });
+  await decayGraph.initialize();
+  for (const name of ["loop", "pair"]) await decayGraph.entities.create(name, "T", { id: `t:${name}` });
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:loop");
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:pair");
+  const decayed = await decayGraph.maintenance.decay({ now: new Date(), half_life_days: 1e9 });
+  out.decay_self_relation = decayed.entities;
   await graph.insert.facts(
     { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
     { source_id: "merge-seed" },
@@ -1064,6 +1071,24 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     v3_diff: rv3.source_diff,
     v3_warnings: rv3.warnings.map((w) => w.code),
   });
+  const storedSrc = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_replace_stored`,
+    extraction: "regex",
+  });
+  const storedFirst = await storedSrc.insert.text("Alice works at Acme.", {
+    source_id: "hr",
+    event_time: "2020-01-01T00:00:00Z",
+  });
+  await storedSrc.insert.text("Alice works at Globex.", { source_id: "hr", event_time: "2022-01-01T00:00:00Z" });
+  await storedSrc.insert.text("Alice works at Globex.", {
+    source_id: "hr",
+    replace_source: true,
+    event_time: "2024-01-01T00:00:00Z",
+  });
+  out.replace_source_stored_time = (await storedSrc.relations.versions(storedFirst.relations[0]!.id)).map((v) => [
+    v.revision,
+    v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+  ]);
   await graph.insert.facts(
     {
       entities: [
@@ -1074,6 +1099,7 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     { source_id: "follow-up" },
   );
   out.retrieval_overflow = await overflow(graph);
+  out.vault_names = await vaultNames(graph);
   try {
     await graph.insert.facts(
       {
@@ -1276,6 +1302,21 @@ async function overflow(graph: SelfGraph): Promise<{ tight: string; full: string
   return { tight: tight.context, full: full.context };
 }
 
+async function vaultNames(graph: SelfGraph): Promise<string[]> {
+  const g = new SelfGraph(graph.store, { namespace: `${graph.namespace}_vault` });
+  const names = [
+    "B".repeat(300),
+    `\uFEFF${"C".repeat(300)}`,
+    "\u00e9".repeat(150),
+    `${"B".repeat(199)}\u00e9${"B".repeat(50)}`,
+    "\u5317".repeat(150),
+    `${"z".repeat(210)}a`,
+    `${"z".repeat(210)}b`,
+  ];
+  for (const name of names) await g.entities.create(name, "Thing");
+  return Object.keys(await g.exportObsidian()).sort(comparePy);
+}
+
 async function allEvidence(list: (cursor: string | null) => Promise<Page<Evidence>>): Promise<Evidence[]> {
   const out: Evidence[] = [];
   let cursor: string | null = null;
@@ -1371,6 +1412,36 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   });
   await sharedTermsGraph.insert.facts({ entities: [{ type: "Employee", name: "Alice" }] });
   const sharedSynonymAnswerable = await sharedTermsGraph.checkAnswerable("state");
+  const explicitTerms = new SelfGraph(store, {
+    namespace: `${ns}_explicit_terms`,
+    schema: {
+      entities: [
+        { name: "Vitamin", definitions: [{ name: "who", expression: "count(Vitamin)" }] },
+        { name: "Department" },
+        { name: "Language" },
+        { name: "On" },
+      ],
+      relations: [{ type: "R" }, { type: "USES" }],
+    },
+  });
+  await explicitTerms.insert.facts({
+    entities: [
+      { type: "Vitamin", name: "A" },
+      { type: "Vitamin", name: "Vitamin B" },
+      { type: "Department", name: "Information Technology", aliases: ["IT"] },
+      { type: "Language", name: "C" },
+      { type: "On", name: "Switch" },
+    ],
+    relations: [
+      { from_entity: "vitamin:a", type: "R", to_entity: "language:c" },
+      { from_entity: "language:c", type: "USES", to_entity: "department:information-technology" },
+    ],
+  });
+  answerable.push(
+    await explicitTerms.checkAnswerable("question", { terms: ["a", "it", "c"] }),
+    await explicitTerms.checkAnswerable("question", { terms: ["B", "On", "who", "R"] }),
+    await explicitTerms.checkAnswerable("A and it"),
+  );
   const seeded: Record<string, unknown> = {};
   for (const tier of ["bm25", "synonyms"] as const) {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });

@@ -10479,6 +10479,47 @@
     "updated_at": "2024-01-01T00:00:00Z",
     "relevance": null,
     "relevance_at": null
+   },
+   {
+    "id": "vitamin:a",
+    "type": "Vitamin",
+    "name": "A",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "department:it",
+    "type": "Department",
+    "name": "Information Technology",
+    "aliases": [
+     "IT"
+    ],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "language:c",
+    "type": "Language",
+    "name": "C",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
    }
   ],
   "relations": [
@@ -11523,6 +11564,46 @@
     "certified_at": null,
     "certified_by": null,
     "certifications": []
+   },
+   {
+    "id": "relation:ac",
+    "revision": 1,
+    "from_entity": "vitamin:a",
+    "type": "USES",
+    "to_entity": "language:c",
+    "properties": {},
+    "event_time": null,
+    "created_at": "2024-01-01T00:00:00Z",
+    "is_current": true,
+    "source_count": 0,
+    "invalidated_at": null,
+    "invalidated_by": null,
+    "invalidated_known_at": null,
+    "relevance": null,
+    "relevance_at": null,
+    "certified_at": null,
+    "certified_by": null,
+    "certifications": []
+   },
+   {
+    "id": "relation:cit",
+    "revision": 1,
+    "from_entity": "language:c",
+    "type": "USES",
+    "to_entity": "department:it",
+    "properties": {},
+    "event_time": null,
+    "created_at": "2024-01-01T00:00:00Z",
+    "is_current": true,
+    "source_count": 0,
+    "invalidated_at": null,
+    "invalidated_by": null,
+    "invalidated_known_at": null,
+    "relevance": null,
+    "relevance_at": null,
+    "certified_at": null,
+    "certified_by": null,
+    "certifications": []
    }
   ],
   "keys": [
@@ -11551,6 +11632,40 @@
      "mappings": [],
      "definitions": [],
      "certified": false
+    },
+    {
+     "name": "Vitamin",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [
+      {
+       "name": "who",
+       "expression": "count(Vitamin)",
+       "synonyms": [],
+       "certified": false
+      }
+     ],
+     "certified": false
+    },
+    {
+     "name": "Department",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [],
+     "certified": false
+    },
+    {
+     "name": "Language",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [],
+     "certified": false
     }
    ],
    "relations": [
@@ -11562,6 +11677,19 @@
      "synonyms": [
       "Lee's backer"
      ],
+     "certified": false,
+     "from": {
+      "types": []
+     },
+     "to": {
+      "types": []
+     },
+     "properties": []
+    },
+    {
+     "type": "USES",
+     "aliases": [],
+     "synonyms": [],
      "certified": false,
      "from": {
       "types": []
@@ -12295,6 +12423,90 @@
      "hub_only": [],
      "note": null
     }
+   ],
+   [
+    "explicit stopwords and single chars",
+    [
+     "a",
+     "it",
+     "c"
+    ],
+    3,
+    {
+     "question": "explicit stopwords and single chars",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "a",
+       "status": "entity",
+       "matches": [
+        "vitamin:a"
+       ],
+       "certified": false
+      },
+      {
+       "term": "it",
+       "status": "entity",
+       "matches": [
+        "department:it"
+       ],
+       "certified": false
+      },
+      {
+       "term": "c",
+       "status": "entity",
+       "matches": [
+        "language:c"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "explicit non-entity forms",
+    [
+     "B",
+     "who",
+     "w"
+    ],
+    3,
+    {
+     "question": "explicit non-entity forms",
+     "verdict": "not_answerable",
+     "terms": [
+      {
+       "term": "B",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "who",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "w",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "B",
+      "who",
+      "w"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
    ]
   ]
  },
@@ -13001,6 +13213,58 @@
     "updated_at": "2024-01-01T00:00:00Z",
     "relevance": null,
     "relevance_at": null
+   },
+   {
+    "id": "thing:long-a",
+    "type": "Thing",
+    "name": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "thing:long-b",
+    "type": "Thing",
+    "name": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "thing:long-c",
+    "type": "Thing",
+    "name": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\u00e9BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "thing:long-d",
+    "type": "Thing",
+    "name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
    }
   ],
   "relations": [
@@ -13137,6 +13401,10 @@
    "Acme (Product).md": "---\nid: \"product:acme\"\ntype: \"Product\"\n---\n# Acme\n",
    "ACME (Thing).md": "---\nid: \"thing:acme\"\ntype: \"Thing\"\n---\n# ACME\n",
    "(Thing).md": "---\nid: \"thing:dots\"\ntype: \"Thing\"\n---\n#  ..\n",
+   "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.md": "---\nid: \"thing:long-a\"\ntype: \"Thing\"\n---\n# BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n",
+   "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.md": "---\nid: \"thing:long-b\"\ntype: \"Thing\"\n---\n# \u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\n",
+   "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.md": "---\nid: \"thing:long-c\"\ntype: \"Thing\"\n---\n# BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\u00e9BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n",
+   "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00.md": "---\nid: \"thing:long-d\"\ntype: \"Thing\"\n---\n# \ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\n",
    "A-B- c-.md": "---\nid: \"thing:slash\"\ntype: \"Thing\"\n---\n# A/B: c?\n",
    "decisions/Join.md": "---\nid: \"decision:a\"\nstatus: \"active\"\n---\n# Join\n",
    "decisions/decision-b.md": "---\nid: \"decision:b\"\nstatus: \"completed\"\n---\n# Join\n\n- Actor: [[Ann]]\n- Outcome: [[Acme]]\n- Alternatives: [[Acme (Product)]], [[ACME (Thing)]]\n- Summary: s\n- Rationale: r\n\n## Steps\n1. [[Ann]] to [[Acme]] (relation:w)\n2. [[Ann]] to [[ACME (Thing)]] (relation:a)\n"
