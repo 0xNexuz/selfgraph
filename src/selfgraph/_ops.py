@@ -3052,15 +3052,21 @@ async def replace_source(
     replaced, stays current, and so does a certified one, with a "certified_kept" warning. Evidence recorded by hand
     has no stored version and always counts.
 
+    The replacement takes effect at the version's stored effective time, so a version recorded before this insert
+    keeps its first event_time. A restored version uses the insert's effective time instead.
+
     @param runner (Any): graph runner.
     @param ns (str): namespace.
     @param source_id (str): the source id.
     @param version (str): the source version just recorded; it is stored as invalidated_by.
     @param stale (Iterable[str]): the ids the source supported before and the new version did not produce again.
-    @param at (datetime): the new version's effective time.
+    @param at (datetime): the insert's effective time, for a version it stores or restores.
     @param known (datetime): the timestamp of the insert that recorded the new version.
     @return (tuple[list[str], list[InsertWarning]]): the retired relation ids, and one warning per decision.
     """
+    stored = await runner.get_node(ns, L_SOURCE_VERSION, version)
+    if stored is not None and stored.get("replaced_by") is None:
+        at = aware(from_iso(stored.get("event_time") or stored["created_at"]))
     candidates = sorted(set(stale))
     support: dict[str, list[dict]] = {}
     for row in await _nodes_where(runner, ns, L_EVIDENCE, "target_id", candidates):

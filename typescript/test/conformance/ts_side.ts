@@ -1030,6 +1030,24 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     v3_diff: rv3.source_diff,
     v3_warnings: rv3.warnings.map((w) => w.code),
   });
+  const storedSrc = new SelfGraph(graph.store, {
+    namespace: `${graph.namespace}_replace_stored`,
+    extraction: "regex",
+  });
+  const storedFirst = await storedSrc.insert.text("Alice works at Acme.", {
+    source_id: "hr",
+    event_time: "2020-01-01T00:00:00Z",
+  });
+  await storedSrc.insert.text("Alice works at Globex.", { source_id: "hr", event_time: "2022-01-01T00:00:00Z" });
+  await storedSrc.insert.text("Alice works at Globex.", {
+    source_id: "hr",
+    replace_source: true,
+    event_time: "2024-01-01T00:00:00Z",
+  });
+  out.replace_source_stored_time = (await storedSrc.relations.versions(storedFirst.relations[0]!.id)).map((v) => [
+    v.revision,
+    v.invalidated_at ? jsonIso(v.invalidated_at) : null,
+  ]);
   await graph.insert.facts(
     {
       entities: [

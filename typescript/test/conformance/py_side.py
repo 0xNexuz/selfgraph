@@ -1014,6 +1014,18 @@ async def write(graph):
             "v3_warnings": [w.code for w in rv3.warnings],
         }
     )
+    stored_src = SelfGraph(store=graph.store, namespace=f"{graph.namespace}_replace_stored", extraction="regex")
+    stored_first = await stored_src.insert.text(
+        "Alice works at Acme.", source_id="hr", event_time="2020-01-01T00:00:00Z"
+    )
+    await stored_src.insert.text("Alice works at Globex.", source_id="hr", event_time="2022-01-01T00:00:00Z")
+    await stored_src.insert.text(
+        "Alice works at Globex.", source_id="hr", replace_source=True, event_time="2024-01-01T00:00:00Z"
+    )
+    out["replace_source_stored_time"] = [
+        [v.revision, _serde.json_iso(v.invalidated_at) if v.invalidated_at else None]
+        for v in await stored_src.relations.versions(stored_first.relations[0].id)
+    ]
     await graph.insert.facts(
         {"entities": [{"type": "Database", "name": "HydraDB"}, {"type": "Company", "name": "Acme, Inc."}]},
         source_id="follow-up",

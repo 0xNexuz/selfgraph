@@ -286,6 +286,22 @@ def test_replace_source_retires_what_only_older_versions_stated():
     }
 
 
+@pytest.mark.parametrize("replay_time", [None, utc(2024)])
+def test_replace_source_takes_effect_when_the_stored_version_did(replay_time):
+    g = fresh_graph("replace-stored", extractor=LineExtractor())
+    run(g.insert.text("ann WORKS_AT acme", source_id="hr", event_time=utc(2020)))
+    stored = run(g.insert.text("ann WORKS_AT globex", source_id="hr", event_time=utc(2022)))
+    again = run(g.insert.text("ann WORKS_AT globex", source_id="hr", replace_source=True, event_time=replay_time))
+    assert again.source_version == stored.source_version
+    [works] = again.source_diff.retired
+    assert run(g.relations.versions(works))[0].invalidated_at == utc(2022)
+    old = ["SOURCE | ann WORKS_AT acme", "GRAPH | ann -[WORKS_AT]-> acme"]
+    before = run(g.retrieve("ann acme globex", as_of=utc(2021))).context.splitlines()
+    after = run(g.retrieve("ann acme globex", as_of=utc(2023))).context.splitlines()
+    assert [line in before for line in old] == [True, True]
+    assert [line in after for line in old] == [False, False]
+
+
 def test_replace_source_keeps_certified_facts_and_needs_a_source_id():
     g = fresh_graph("replace-cert", extractor=LineExtractor())
     rel = run(g.insert.text("ann WORKS_AT acme", source_id="hr")).relations[0]
