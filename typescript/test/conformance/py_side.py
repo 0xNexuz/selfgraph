@@ -1564,6 +1564,10 @@ async def dump(graph, ns):
     )
     await shared_terms_graph.insert.facts({"entities": [{"type": "Employee", "name": "Alice"}]})
     shared_synonym_answerable = await shared_terms_graph.check_answerable("state")
+    unheld_terms_graph = SelfGraph(
+        store=store, namespace=f"{ns}:unheld-synonym", schema=SHARED_SYNONYM_SPEC, extraction="regex"
+    )
+    shared_synonym_schema_only = await unheld_terms_graph.check_answerable("state")
     explicit_terms = SelfGraph(
         store=store,
         namespace=f"{ns}_explicit_terms",
@@ -1656,6 +1660,7 @@ async def dump(graph, ns):
             "diff_windows": await diff_windows(graph),
             "answerable": answerable,
             "shared_synonym_answerable": shared_synonym_answerable,
+            "shared_synonym_schema_only": shared_synonym_schema_only,
             "prune_types": pruned,
             "known_at_sources": {
                 "seeds": [s.id for s in historical.seeds],

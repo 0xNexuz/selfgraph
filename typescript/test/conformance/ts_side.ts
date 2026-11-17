@@ -1412,6 +1412,12 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   });
   await sharedTermsGraph.insert.facts({ entities: [{ type: "Employee", name: "Alice" }] });
   const sharedSynonymAnswerable = await sharedTermsGraph.checkAnswerable("state");
+  const unheldTermsGraph = new SelfGraph(store, {
+    namespace: `${ns}:unheld-synonym`,
+    schema: SHARED_SYNONYM_SPEC,
+    extraction: "regex",
+  });
+  const sharedSynonymSchemaOnly = await unheldTermsGraph.checkAnswerable("state");
   const explicitTerms = new SelfGraph(store, {
     namespace: `${ns}_explicit_terms`,
     schema: {
@@ -1509,6 +1515,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     diff_windows: await diffWindows(graph),
     answerable,
     shared_synonym_answerable: sharedSynonymAnswerable,
+    shared_synonym_schema_only: sharedSynonymSchemaOnly,
     filters:
       store instanceof KuzuStore
         ? {
