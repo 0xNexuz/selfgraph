@@ -785,7 +785,8 @@ describe("store setup errors", () => {
       await store.close();
       expect(existsSync(join(home, "sub", "x.kuzu"))).toBe(true);
     } finally {
-      process.env.HOME = saved;
+      if (saved !== undefined) process.env.HOME = saved;
+      else delete process.env.HOME;
       if (savedProfile !== undefined) process.env.USERPROFILE = savedProfile;
       else delete process.env.USERPROFILE;
       rmSync(home, { recursive: true, force: true });

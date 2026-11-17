@@ -107,7 +107,7 @@ function databasePath(path: string): string {
   return resolve(
     path === "~" || path.startsWith("~/") || (process.platform === "win32" && path.startsWith("~\\"))
       ? join(homedir(), path.slice(1))
-      : path
+      : path,
   );
 }
 
