@@ -5,13 +5,17 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from pydantic import ValidationError as PydanticValidationError
+from pydantic import validate_call
+
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
 from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
 from selfgraph.extraction.extractor import _lenient_event_time
-from selfgraph.mcp.server import build_server
+from selfgraph.mcp import server as mcp_server
+from selfgraph.models import validation_message
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -558,18 +562,19 @@ MCP_ARGUMENT_CASES = [
 
 
 async def mcp_argument_errors():
-    """Call MCP tools with text, boolean, and null arguments the servers must reject before running the tool.
+    """Check MCP tool arguments that both servers must reject, with the pydantic rules the Python server applies.
+
+    The tools are validated directly, so the check runs without the mcp package.
 
     @return (list[str]): the error text each call reports.
     """
-    server = build_server()
     errors = []
     for name, args in MCP_ARGUMENT_CASES:
         try:
-            await server.call_tool(name, args)
+            await validate_call(getattr(mcp_server, name))(**args)
             errors.append("accepted")
-        except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc).partition("ValidationError: ")[2] or str(exc))
+        except PydanticValidationError as exc:
+            errors.append(validation_message("invalid arguments", exc))
     return errors
 
 
