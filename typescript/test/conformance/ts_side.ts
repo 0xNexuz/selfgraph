@@ -813,6 +813,13 @@ export async function write(graph: SelfGraph): Promise<Record<string, unknown>> 
     alias: byAlias.relation_ids,
     canonical: byCanonical.relation_ids,
   };
+  const decayGraph = new SelfGraph(graph.store, { namespace: `${graph.namespace}:decay` });
+  await decayGraph.initialize();
+  for (const name of ["loop", "pair"]) await decayGraph.entities.create(name, "T", { id: `t:${name}` });
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:loop");
+  await decayGraph.relations.create("t:loop", "KNOWS", "t:pair");
+  const decayed = await decayGraph.maintenance.decay({ now: new Date(), half_life_days: 1e9 });
+  out.decay_self_relation = decayed.entities;
   await graph.insert.facts(
     { entities: [{ type: "Person", name: "Mergia Robert", aliases: ["Mergia Bob"] }] },
     { source_id: "merge-seed" },

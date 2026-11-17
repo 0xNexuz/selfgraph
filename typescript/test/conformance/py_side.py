@@ -810,6 +810,14 @@ async def write(graph):
         "alias": by_alias.relation_ids,
         "canonical": by_canonical.relation_ids,
     }
+    decay_graph = SelfGraph(store=graph.store, namespace=f"{graph.namespace}:decay")
+    await decay_graph.initialize()
+    for name in ("loop", "pair"):
+        await decay_graph.entities.create(name, "T", id=f"t:{name}")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:loop")
+    await decay_graph.relations.create("t:loop", "KNOWS", "t:pair")
+    decayed = await decay_graph.maintenance.decay(now=datetime.now(timezone.utc), half_life_days=1e9)
+    out["decay_self_relation"] = decayed.entities
     await graph.insert.facts(
         {"entities": [{"type": "Person", "name": "Mergia Robert", "aliases": ["Mergia Bob"]}]}, source_id="merge-seed"
     )
