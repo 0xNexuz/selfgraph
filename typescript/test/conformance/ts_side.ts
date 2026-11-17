@@ -1330,6 +1330,36 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
   const termed = new SelfGraph(store, { namespace: ns, schema: TERMS_SPEC, extraction: "regex" });
   const answerable = [];
   for (const q of TERM_QUESTIONS) answerable.push(await termed.checkAnswerable(q));
+  const explicitTerms = new SelfGraph(store, {
+    namespace: `${ns}_explicit_terms`,
+    schema: {
+      entities: [
+        { name: "Vitamin", definitions: [{ name: "who", expression: "count(Vitamin)" }] },
+        { name: "Department" },
+        { name: "Language" },
+        { name: "On" },
+      ],
+      relations: [{ type: "R" }, { type: "USES" }],
+    },
+  });
+  await explicitTerms.insert.facts({
+    entities: [
+      { type: "Vitamin", name: "A" },
+      { type: "Vitamin", name: "Vitamin B" },
+      { type: "Department", name: "Information Technology", aliases: ["IT"] },
+      { type: "Language", name: "C" },
+      { type: "On", name: "Switch" },
+    ],
+    relations: [
+      { from_entity: "vitamin:a", type: "R", to_entity: "language:c" },
+      { from_entity: "language:c", type: "USES", to_entity: "department:information-technology" },
+    ],
+  });
+  answerable.push(
+    await explicitTerms.checkAnswerable("question", { terms: ["a", "it", "c"] }),
+    await explicitTerms.checkAnswerable("question", { terms: ["B", "On", "who", "R"] }),
+    await explicitTerms.checkAnswerable("A and it"),
+  );
   const seeded: Record<string, unknown> = {};
   for (const tier of ["bm25", "synonyms"] as const) {
     const r = await termed.retrieve("which employers hired staff members named Hopper", { seeds: tier, depth: 0 });

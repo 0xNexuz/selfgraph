@@ -117,6 +117,48 @@ def test_answerability_matches_terms_by_kind_and_judges_connectivity():
     assert (apart.verdict, apart.connected, apart.hub_only) == ("uncertain", False, [])
 
 
+def test_check_answerable_matches_explicit_stopword_and_single_char_entity_names_and_aliases():
+    schema = Schema.model_validate(
+        {
+            "entities": [
+                {"name": "Vitamin", "definitions": [{"name": "who", "expression": "count(Vitamin)"}]},
+                {"name": "Department"},
+                {"name": "Language"},
+                {"name": "On"},
+            ],
+            "relations": [{"type": "R"}, {"type": "USES"}],
+        }
+    )
+    g = fresh_graph("explicit-terms", schema=schema)
+    run(
+        g.insert.facts(
+            {
+                "entities": [
+                    {"type": "Vitamin", "name": "A"},
+                    {"type": "Vitamin", "name": "Vitamin B"},
+                    {"type": "Department", "name": "Information Technology", "aliases": ["IT"]},
+                    {"type": "Language", "name": "C"},
+                    {"type": "On", "name": "Switch"},
+                ],
+                "relations": [
+                    {"from_entity": "vitamin:a", "type": "R", "to_entity": "language:c"},
+                    {"from_entity": "language:c", "type": "USES", "to_entity": "department:information-technology"},
+                ],
+            }
+        )
+    )
+    matched = run(g.check_answerable("question", terms=["a", "it", "c"]))
+    assert matched.verdict == "answerable" and matched.connected
+    assert [(t.term, t.status, t.matches) for t in matched.terms] == [
+        ("a", "entity", ["vitamin:a"]),
+        ("it", "entity", ["department:information-technology"]),
+        ("c", "entity", ["language:c"]),
+    ]
+    missed = run(g.check_answerable("question", terms=["B", "On", "who", "R"]))
+    assert (missed.verdict, missed.missing) == ("not_answerable", ["B", "On", "who", "R"])
+    assert run(g.check_answerable("A and it")).verdict == "not_answerable"
+
+
 def test_answerability_flags_pairs_joined_only_through_a_hub():
     hub = _entity("thing:hub", "Hub")
     leaves = [_relation(f"r{i}", "thing:hub", "HAS", f"thing:leaf{i}") for i in range(HUB_DEGREE)]

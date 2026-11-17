@@ -10479,6 +10479,47 @@
     "updated_at": "2024-01-01T00:00:00Z",
     "relevance": null,
     "relevance_at": null
+   },
+   {
+    "id": "vitamin:a",
+    "type": "Vitamin",
+    "name": "A",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "department:it",
+    "type": "Department",
+    "name": "Information Technology",
+    "aliases": [
+     "IT"
+    ],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
+   },
+   {
+    "id": "language:c",
+    "type": "Language",
+    "name": "C",
+    "aliases": [],
+    "external_ids": {},
+    "properties": {},
+    "source_count": 0,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "relevance": null,
+    "relevance_at": null
    }
   ],
   "relations": [
@@ -11523,6 +11564,46 @@
     "certified_at": null,
     "certified_by": null,
     "certifications": []
+   },
+   {
+    "id": "relation:ac",
+    "revision": 1,
+    "from_entity": "vitamin:a",
+    "type": "USES",
+    "to_entity": "language:c",
+    "properties": {},
+    "event_time": null,
+    "created_at": "2024-01-01T00:00:00Z",
+    "is_current": true,
+    "source_count": 0,
+    "invalidated_at": null,
+    "invalidated_by": null,
+    "invalidated_known_at": null,
+    "relevance": null,
+    "relevance_at": null,
+    "certified_at": null,
+    "certified_by": null,
+    "certifications": []
+   },
+   {
+    "id": "relation:cit",
+    "revision": 1,
+    "from_entity": "language:c",
+    "type": "USES",
+    "to_entity": "department:it",
+    "properties": {},
+    "event_time": null,
+    "created_at": "2024-01-01T00:00:00Z",
+    "is_current": true,
+    "source_count": 0,
+    "invalidated_at": null,
+    "invalidated_by": null,
+    "invalidated_known_at": null,
+    "relevance": null,
+    "relevance_at": null,
+    "certified_at": null,
+    "certified_by": null,
+    "certifications": []
    }
   ],
   "keys": [
@@ -11551,6 +11632,40 @@
      "mappings": [],
      "definitions": [],
      "certified": false
+    },
+    {
+     "name": "Vitamin",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [
+      {
+       "name": "who",
+       "expression": "count(Vitamin)",
+       "synonyms": [],
+       "certified": false
+      }
+     ],
+     "certified": false
+    },
+    {
+     "name": "Department",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [],
+     "certified": false
+    },
+    {
+     "name": "Language",
+     "aliases": [],
+     "synonyms": [],
+     "properties": [],
+     "mappings": [],
+     "definitions": [],
+     "certified": false
     }
    ],
    "relations": [
@@ -11562,6 +11677,19 @@
      "synonyms": [
       "Lee's backer"
      ],
+     "certified": false,
+     "from": {
+      "types": []
+     },
+     "to": {
+      "types": []
+     },
+     "properties": []
+    },
+    {
+     "type": "USES",
+     "aliases": [],
+     "synonyms": [],
      "certified": false,
      "from": {
       "types": []
@@ -12290,6 +12418,90 @@
      ],
      "missing": [
       "lee backer"
+     ],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "explicit stopwords and single chars",
+    [
+     "a",
+     "it",
+     "c"
+    ],
+    3,
+    {
+     "question": "explicit stopwords and single chars",
+     "verdict": "answerable",
+     "terms": [
+      {
+       "term": "a",
+       "status": "entity",
+       "matches": [
+        "vitamin:a"
+       ],
+       "certified": false
+      },
+      {
+       "term": "it",
+       "status": "entity",
+       "matches": [
+        "department:it"
+       ],
+       "certified": false
+      },
+      {
+       "term": "c",
+       "status": "entity",
+       "matches": [
+        "language:c"
+       ],
+       "certified": false
+      }
+     ],
+     "missing": [],
+     "connected": true,
+     "hub_only": [],
+     "note": null
+    }
+   ],
+   [
+    "explicit non-entity forms",
+    [
+     "B",
+     "who",
+     "w"
+    ],
+    3,
+    {
+     "question": "explicit non-entity forms",
+     "verdict": "not_answerable",
+     "terms": [
+      {
+       "term": "B",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "who",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      },
+      {
+       "term": "w",
+       "status": "missing",
+       "matches": [],
+       "certified": false
+      }
+     ],
+     "missing": [
+      "B",
+      "who",
+      "w"
      ],
      "connected": true,
      "hub_only": [],
