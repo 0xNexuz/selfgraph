@@ -127,7 +127,7 @@ const NEO4J_LOSS_SPEC = {
   ],
 };
 
-const SCHEMA_SPEC = {
+const SCHEMA_SPEC: Schema = {
   name: "conformance",
   entities: [
     {
@@ -1387,6 +1387,11 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     ["Choose supplier"],
   );
   const pruned = await termed.maintenance.prune({ older_than: new Date(), types: ["User", "DATABASE"] });
+  const schemed = new SelfGraph(store, { namespace: ns, schema: SCHEMA_SPEC });
+  const relationsAlias: Record<string, string[]> = {};
+  for (const alias of ["employed by", "EMPLOYED_BY", "WORKS_AT", "is friends with"]) {
+    relationsAlias[alias] = (await schemed.relations.list({ type: alias })).items.map((r) => r.id);
+  }
   return toJsonable({
     diff: await graph.diff("1900-01-01", "2100-01-01"),
     diff_windows: await diffWindows(graph),
@@ -1410,6 +1415,7 @@ export async function dump(graph: SelfGraph, ns: string): Promise<unknown> {
     tiers: termed.tiers,
     entities,
     relations,
+    relations_alias: relationsAlias,
     preferences,
     preference_versions: preferenceVersions,
     sources,
