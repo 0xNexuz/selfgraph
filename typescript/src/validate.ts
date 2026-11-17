@@ -55,6 +55,7 @@ export function hasControl(text: string): boolean {
  * Reject __proto__ keys before property or external-id values are parsed.
  *
  * @param value (unknown): the raw input, traversed through plain objects and arrays.
+ * @return (void): nothing; throws ValidationError on a __proto__ key.
  */
 export function rejectProtoKeys(value: unknown): void {
   const pending = [value];
