@@ -250,6 +250,25 @@ def test_certification_follows_the_stored_definitions_name():
     assert [(t.status, t.matches, t.certified) for t in report.terms] == [("definition", ["status"], True)]
 
 
+def test_certification_uses_the_matched_definitions_owner():
+    schema = {
+        "entities": [
+            {
+                "name": "Alpha",
+                "definitions": [{"name": "phase", "expression": "a", "synonyms": ["grade"], "certified": True}],
+            },
+            {
+                "name": "Beta",
+                "definitions": [{"name": "phase", "expression": "b", "synonyms": ["grade"], "certified": False}],
+            },
+        ]
+    }
+    g = fresh_graph("tier", schema=schema)
+    run(g.insert.facts({"entities": [{"type": "Alpha", "name": "Alice"}]}))
+    report = run(g.check_answerable("grade"))
+    assert [(t.status, t.matches, t.certified) for t in report.terms] == [("definition", ["phase"], True)]
+
+
 def test_check_answerable_ignores_possessive_and_contraction_endings():
     spec = {
         "entities": [{"name": "Person"}, {"name": "Company"}],

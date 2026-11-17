@@ -1244,9 +1244,9 @@ def answerability(
     """
     forms = schema_forms(schema)
     definition_entries: dict[str, list[tuple[str, str]]] = {}
-    definition_certified: dict[str, bool] = {}
+    definition_certified: dict[tuple[str, str], bool] = {}
     for (owner, name), (forms_for_def, certified) in _definition_forms(schema).items():
-        definition_certified[name] = definition_certified.get(name, True) and certified
+        definition_certified[(owner, name)] = certified
         for form in forms_for_def:
             definition_entries.setdefault(form, []).append((owner, name))
     if terms is None:
@@ -1280,7 +1280,9 @@ def answerability(
                         if not any(owner in held["type"] for owner, _ in entries):
                             continue
                         live.extend(
-                            (name, definition_certified[name]) for owner, name in entries if owner in held["type"]
+                            (name, definition_certified[(owner, name)])
+                            for owner, name in entries
+                            if owner in held["type"]
                         )
                 else:
                     live = [(t, c) for t, c in hits if kind not in held or t in held[kind]]

@@ -1312,7 +1312,7 @@ export function answerability(
   const definitionEntries = new Map<string, Array<readonly [string, string]>>();
   const definitionCertified = new Map<string, boolean>();
   for (const [owner, name, defForms, certified] of definitionForms(schema).values()) {
-    definitionCertified.set(name, (definitionCertified.get(name) ?? true) && certified);
+    definitionCertified.set(`${owner}\u0000${name}`, certified);
     for (const form of defForms) {
       const entries = definitionEntries.get(form) ?? [];
       entries.push([owner, name]);
@@ -1362,7 +1362,7 @@ export function answerability(
             const entries = definitionEntries.get(form) ?? [];
             if (!entries.some(([owner]) => held.type.has(owner))) continue;
             for (const [owner, name] of entries) {
-              if (held.type.has(owner)) live.push([name, definitionCertified.get(name) ?? false]);
+              if (held.type.has(owner)) live.push([name, definitionCertified.get(`${owner}\u0000${name}`) ?? false]);
             }
           }
         } else {
