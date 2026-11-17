@@ -5,12 +5,17 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from pydantic import ValidationError as PydanticValidationError
+from pydantic import validate_call
+
 from selfgraph import EvidenceInput, Extraction, KuzuStore, Schema, SelfGraph, ValidationError, _serde, ids
 from selfgraph._ops import parse_time
 from selfgraph._serde import json_iso
 from selfgraph.cli import _kv
 from selfgraph.errors import SelfGraphError
 from selfgraph.extraction.extractor import _lenient_event_time
+from selfgraph.mcp import server as mcp_server
+from selfgraph.models import validation_message
 from selfgraph.retrieval import _tokens
 from selfgraph.runtime import parse_json, to_jsonable
 from selfgraph.schema import validate_against_schema
@@ -544,6 +549,35 @@ FACTS_TYPE_CASES = [
     {"decisions": [{"title": "t", "event_time": "soon", "steps": []}]},
 ]
 
+MCP_ARGUMENT_CASES = [
+    ["list_entities", {"limit": "5"}],
+    ["list_entities", {"limit": True}],
+    ["retrieve", {"query": "x", "depth": "2", "k": "3"}],
+    ["check_answerable", {"question": "x", "depth": False}],
+    ["maintenance_decay", {"half_life_days": "30"}],
+    ["maintenance_prune", {"min_relevance": True}],
+    ["create_preference", {"subject_entity": "t:a", "key": "k", "value_entity": "t:b", "strength": "0.5"}],
+    ["create_decision", {"title": "t", "steps": None}],
+]
+
+
+async def mcp_argument_errors():
+    """Check MCP tool arguments that both servers must reject, with the pydantic rules the Python server applies.
+
+    The tools are validated directly, so the check runs without the mcp package.
+
+    @return (list[str]): the error text each call reports.
+    """
+    errors = []
+    for name, args in MCP_ARGUMENT_CASES:
+        try:
+            await validate_call(getattr(mcp_server, name))(**args)
+            errors.append("accepted")
+        except PydanticValidationError as exc:
+            errors.append(validation_message("invalid arguments", exc))
+    return errors
+
+
 USES_SPEC = {
     "entities": [{"name": "Person"}, {"name": "Tool"}],
     "relations": [{"type": "USES", "from": {"types": ["Person"], "max_count": 2}}],
@@ -748,6 +782,7 @@ async def write(graph):
         out["facts_none"] = "accepted"
     except ValidationError as exc:
         out["facts_none"] = str(exc)
+    out["mcp_arguments"] = await mcp_argument_errors()
     out["facts_types"] = []
     for facts in FACTS_TYPE_CASES:
         try:

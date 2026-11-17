@@ -250,6 +250,31 @@ describe("MCP tools over Kuzu", () => {
     }
   });
 
+  it("checks number arguments and decision steps with the same messages as the Python server", async () => {
+    await configure({ namespace: "mcp_numbers" });
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ["list_entities", { limit: "5" }, "limit: expected number"],
+      ["list_entities", { limit: true }, "limit: expected number"],
+      ["retrieve", { query: "x", depth: "2" }, "depth: expected number"],
+      ["check_answerable", { question: "x", depth: false }, "depth: expected number"],
+      ["maintenance_decay", { half_life_days: "30" }, "half_life_days: expected number"],
+      ["maintenance_prune", { min_relevance: true }, "min_relevance: expected number"],
+      [
+        "create_preference",
+        { subject_entity: "t:a", key: "k", value_entity: "t:b", strength: "0.5" },
+        "strength: expected number",
+      ],
+      ["create_decision", { title: "t", steps: null }, "steps: expected array"],
+    ];
+    for (const [name, args, message] of cases) {
+      expect(await invalid(name, args), name).toBe(`invalid arguments: ${message}`);
+    }
+    expect((await mcpOk<{ items: unknown[] }>("list_entities", { limit: 5.0 })).items).toEqual([]);
+    expect((await mcpOk<{ half_life_days: number }>("maintenance_decay", { half_life_days: 7 })).half_life_days).toBe(
+      7,
+    );
+  });
+
   it("names who retired a relation, fails versions of an unknown one, and supersedes from now", async () => {
     await configure({ namespace: "mcp_retired", contradiction: "supersede", schema: SINGLE_EMPLOYER });
     await mcpOk("insert_facts", { facts: ANN_AT_ACME });

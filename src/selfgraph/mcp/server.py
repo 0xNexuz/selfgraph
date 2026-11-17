@@ -7,9 +7,9 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import NonNegativeInt, PositiveInt, StrictBool, create_model
+from pydantic import BeforeValidator, NonNegativeInt, PositiveInt, StrictBool, create_model
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import core_schema
 
@@ -128,6 +128,24 @@ class _Unset:
 _UNSET: Any = _Unset()
 
 
+def _json_number(value: Any) -> Any:
+    """Reject a boolean or text for a number argument, as the TypeScript server does, and pass a number on.
+
+    @param value (Any): the argument value.
+    @return (Any): the value; raises ValueError for anything but an int or a float.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Expected number")
+    return value
+
+
+Number = Annotated[float, BeforeValidator(_json_number)]
+OptNumber = Annotated[float | None, BeforeValidator(lambda v: v if v is None else _json_number(v))]
+Integer = Annotated[int, BeforeValidator(_json_number)]
+PositiveInteger = Annotated[PositiveInt, BeforeValidator(_json_number)]
+NonNegativeInteger = Annotated[NonNegativeInt, BeforeValidator(_json_number)]
+
+
 async def configure(settings: GraphSettings | None = None) -> None:
     """Set the backend for the tools, closing any cached or pending graph.
 
@@ -233,7 +251,7 @@ async def check_answerable(
     terms: list[str] | None = None,
     as_of: str | None = None,
     known_at: str | None = None,
-    depth: PositiveInt = 3,
+    depth: PositiveInteger = 3,
 ) -> dict[str, Any]:
     """Check whether the graph holds what a question asks about before retrieving or answering. terms are the
     key phrases of the question (names, types, attributes); pass them when you can, else they are read from the
@@ -366,7 +384,7 @@ async def get_entity(id: str) -> dict[str, Any] | None:
 
 
 async def list_entities(
-    type: str | None = None, name: str | None = None, limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None
+    type: str | None = None, name: str | None = None, limit: Integer = DEFAULT_PAGE_LIMIT, cursor: str | None = None
 ) -> dict[str, Any]:
     """List entities, optionally filtered by type and/or name (an exact, case-sensitive match on the current name).
     Paged via next_cursor."""
@@ -374,14 +392,14 @@ async def list_entities(
     return to_jsonable(await g.entities.list(type=type, name=name, limit=limit, cursor=cursor))
 
 
-async def entity_evidence(id: str, limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
+async def entity_evidence(id: str, limit: Integer = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
     """List the evidence (source, version, chunk, quote, offsets, confidence) supporting an entity. Paged via
     next_cursor."""
     g = await _graph_handle()
     return to_jsonable(await g.entities.evidence(id, limit=limit, cursor=cursor))
 
 
-async def entity_merges(id: str, limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
+async def entity_merges(id: str, limit: Integer = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
     """List the merge records of entities that entity resolution folded into this entity: the absorbed input,
     reason, confidence, added aliases, and rewritten references. Paged via next_cursor."""
     g = await _graph_handle()
@@ -470,7 +488,7 @@ async def list_relations(
     from_entity: str | None = None,
     type: str | None = None,
     to_entity: str | None = None,
-    limit: int = DEFAULT_PAGE_LIMIT,
+    limit: Integer = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
     include_invalidated: StrictBool = False,
 ) -> dict[str, Any]:
@@ -531,7 +549,7 @@ async def relation_versions(id: str, newest_first: StrictBool = True) -> list[di
     return to_jsonable(await g.relations.versions(id, newest_first=newest_first))
 
 
-async def relation_evidence(id: str, limit: int = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
+async def relation_evidence(id: str, limit: Integer = DEFAULT_PAGE_LIMIT, cursor: str | None = None) -> dict[str, Any]:
     """List the evidence (source, version, chunk, quote, offsets, confidence) supporting a relationship across all
     its versions. Paged via next_cursor."""
     g = await _graph_handle()
@@ -551,7 +569,7 @@ async def create_preference(
     stance: Stance = "preference",
     id: str | None = None,
     about_entity: str | None = None,
-    strength: float | None = None,
+    strength: OptNumber = None,
     properties: dict | None = None,
     event_time: str | None = None,
 ) -> dict[str, Any]:
@@ -578,7 +596,7 @@ async def list_preferences(
     subject_entity: str | None = None,
     key: str | None = None,
     stance: Stance | None = None,
-    limit: int = DEFAULT_PAGE_LIMIT,
+    limit: Integer = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
 ) -> dict[str, Any]:
     """List current preferences, optionally scoped to one subject entity. Paged via next_cursor."""
@@ -594,7 +612,7 @@ async def preference_versions(id: str, newest_first: StrictBool = True) -> list[
 
 async def update_preference(
     id: str,
-    strength: float | None = None,
+    strength: OptNumber = None,
     properties: dict | None = None,
     remove_properties: list[str] | None = None,
     event_time: str | None = None,
@@ -630,7 +648,7 @@ async def delete_preference(id: str) -> dict[str, Any]:
 
 async def create_decision(
     title: str,
-    steps: list[str] | None = None,
+    steps: tuple[str, ...] = (),
     id: str | None = None,
     actor_entity: str | None = None,
     summary: str | None = None,
@@ -647,7 +665,7 @@ async def create_decision(
     return to_jsonable(
         await g.decisions.create(
             title,
-            steps=steps or [],
+            steps=list(steps),
             id=id,
             actor_entity=actor_entity,
             summary=summary,
@@ -707,7 +725,7 @@ async def get_decision(id: str) -> dict[str, Any] | None:
 async def list_decisions(
     actor_entity: str | None = None,
     status: Status | None = None,
-    limit: int = DEFAULT_PAGE_LIMIT,
+    limit: Integer = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
 ) -> dict[str, Any]:
     """List decision traces, optionally filtered by actor and/or status."""
@@ -740,10 +758,10 @@ async def run_cypher(query: str, params: dict | None = None) -> dict[str, Any]:
 async def retrieve(
     query: str,
     strategy: str | None = None,
-    depth: NonNegativeInt = 3,
-    k: PositiveInt = 20,
-    max_nodes: PositiveInt = 200,
-    budget_tokens: PositiveInt = 3000,
+    depth: NonNegativeInteger = 3,
+    k: PositiveInteger = 20,
+    max_nodes: PositiveInteger = 200,
+    budget_tokens: PositiveInteger = 3000,
     as_of: str | None = None,
     known_at: str | None = None,
     seeds: str | None = None,
@@ -773,7 +791,7 @@ async def retrieve(
 
 
 async def maintenance_decay(
-    half_life_days: float = 30, now: str | None = None, dry_run: StrictBool = True
+    half_life_days: Number = 30, now: str | None = None, dry_run: StrictBool = True
 ) -> dict[str, Any]:
     """Score every entity and current relation by recency (half-life decay from its latest timestamp) and
     frequency (sources, plus degree for entities) and store it as relevance, without a new version. Never
@@ -785,7 +803,7 @@ async def maintenance_decay(
 
 
 async def maintenance_prune(
-    min_relevance: float | None = None,
+    min_relevance: OptNumber = None,
     older_than: str | None = None,
     types: list[str] | None = None,
     relation_types: list[str] | None = None,

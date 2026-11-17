@@ -260,7 +260,7 @@ def test_call_tool_arguments_results_and_errors(server):
     for tool, args, message in (
         ("get_schema", {"format": "bogus"}, "invalid arguments: format: expected 'selfgraph', 'neo4j' or 'ossie'"),
         ("create_entity", {"name": "a"}, "invalid arguments: type: field required"),
-        ("list_entities", {"limit": "x"}, "invalid arguments: limit: expected integer"),
+        ("list_entities", {"limit": "x"}, "invalid arguments: limit: expected number"),
     ):
         with pytest.raises(Exception) as exc:
             run(server.call_tool(tool, args))
@@ -286,6 +286,35 @@ def test_call_tool_arguments_results_and_errors(server):
     ):
         with pytest.raises(Exception, match="invalid arguments"):
             run(server.call_tool(tool, args))
+
+
+NUMBER_ARGUMENT_CASES = [
+    ("list_entities", {"limit": "5"}, "limit: expected number"),
+    ("list_entities", {"limit": True}, "limit: expected number"),
+    ("retrieve", {"query": "x", "depth": "2"}, "depth: expected number"),
+    ("check_answerable", {"question": "x", "depth": False}, "depth: expected number"),
+    ("maintenance_decay", {"half_life_days": "30"}, "half_life_days: expected number"),
+    ("maintenance_prune", {"min_relevance": True}, "min_relevance: expected number"),
+    (
+        "create_preference",
+        {"subject_entity": "t:a", "key": "k", "value_entity": "t:b", "strength": "0.5"},
+        "strength: expected number",
+    ),
+    ("create_decision", {"title": "t", "steps": None}, "steps: expected array"),
+]
+
+
+@pytest.mark.parametrize(("tool", "args", "message"), NUMBER_ARGUMENT_CASES)
+def test_number_arguments_and_steps_are_checked_like_typescript(server, tool, args, message):
+    with pytest.raises(Exception) as exc:
+        run(server.call_tool(tool, args))
+    assert str(exc.value).endswith(f"ValidationError: invalid arguments: {message}")
+
+
+def test_whole_floats_pass_as_integers_and_integers_as_numbers(server):
+    assert json.loads(run(server.call_tool("list_entities", {"limit": 5.0})).content[0].text)["items"] == []
+    decay = json.loads(run(server.call_tool("maintenance_decay", {"half_life_days": 7})).content[0].text)
+    assert decay["half_life_days"] == 7
 
 
 def test_run_cypher_needs_every_parameter_and_ids_need_their_prefix():
