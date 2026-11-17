@@ -206,6 +206,28 @@ function suite(spec: StoreSpec): void {
     expect(withManual.source_diff).toEqual({ kept: [knows, manual.id, works].sort(), added: [], retired: [] });
   });
 
+  it.each([undefined, utc(2024)])(
+    "takes effect when an already stored version of a replaced source did (replay at %s)",
+    async (replayTime) => {
+      const g = open({ extractor: lineExtractor });
+      await g.insert.text("ann WORKS_AT acme", { source_id: "hr", event_time: utc(2020) });
+      const stored = await g.insert.text("ann WORKS_AT globex", { source_id: "hr", event_time: utc(2022) });
+      const again = await g.insert.text("ann WORKS_AT globex", {
+        source_id: "hr",
+        replace_source: true,
+        ...(replayTime ? { event_time: replayTime } : {}),
+      });
+      expect(again.source_version).toBe(stored.source_version);
+      const [works] = again.source_diff!.retired;
+      expect((await g.relations.versions(works!))[0]!.invalidated_at).toEqual(utc(2022));
+      const old = ["SOURCE | ann WORKS_AT acme", "GRAPH | ann -[WORKS_AT]-> acme"];
+      const before = (await g.retrieve("ann acme globex", { as_of: utc(2021) })).context.split("\n");
+      const after = (await g.retrieve("ann acme globex", { as_of: utc(2023) })).context.split("\n");
+      expect(old.map((line) => before.includes(line))).toEqual([true, true]);
+      expect(old.map((line) => after.includes(line))).toEqual([false, false]);
+    },
+  );
+
   it("keeps certified facts on a replaced source and needs a source id", async () => {
     const g = open({ extractor: lineExtractor });
     const rel = (await g.insert.text("ann WORKS_AT acme", { source_id: "hr" })).relations[0]!;
