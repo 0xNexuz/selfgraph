@@ -539,6 +539,15 @@ describe("trust rules without a store", () => {
     expect(blocked.get("thing:h")).toBe(1);
   });
 
+  it("ranks equal PageRank mass by id in a graph with mirrored halves", () => {
+    const half = ["s {}b", "{}b {}x1", "{}b {}x2", "{}x1 {}x2", "{}x2 {}x3", "{}x1 {}x3", "s {}x3"];
+    const pairs = ["l", "r"].flatMap((p) => half.map((edge) => edge.replaceAll("{}", p).split(" ")));
+    const walk = ["s", "lb", "lx3", "rb", "rx3", "lx1", "lx2", "rx1", "rx2"].map((n) => `thing:${n}`);
+    const rels = pairs.map(([a, b]) => relation(`relation:${a}${b}`, `thing:${a}`, `thing:${b}`));
+    const ranks = pprRank([[entity("thing:s", "S"), 1]], walk, rels);
+    expect([...ranks.keys()].sort((a, b) => ranks.get(a)! - ranks.get(b)!)).toEqual(walk);
+  });
+
   it("logs every schema field the Ossie export leaves out", async () => {
     const schema = {
       entities: [{ name: "Company", aliases: ["Co"], certified: true }],
