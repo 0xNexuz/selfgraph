@@ -67,6 +67,37 @@ function suite(spec: StoreSpec) {
   const ns = uniqueNs(`ts_${spec.name}`);
   const fresh = freshGraphs(spec, "fresh");
 
+  it("rejects proto properties from a custom extractor", async () => {
+    const g = fresh({
+      extractor: {
+        extract: async () => ({
+          entities: [{ type: "Person", name: "Ann", properties: JSON.parse('{"nested":[{"__proto__":"x"}]}') }],
+        }),
+      },
+    });
+    await expect(g.insert.text("Ann is a person.")).rejects.toThrow(
+      "property and external id keys cannot be '__proto__'",
+    );
+    expect((await g.entities.list()).items).toEqual([]);
+  });
+
+  it("rejects proto keys before writes without rejecting other keys", async () => {
+    const g = fresh();
+    for (const properties of [JSON.parse('{"__proto__":"x"}'), JSON.parse('{"nested":[{"__proto__":"x"}]}')]) {
+      for (const fields of [{ properties }, { external_ids: JSON.parse('{"__proto__":"x"}') }]) {
+        await expect(g.entities.create("Ann", "Person", fields)).rejects.toThrow(
+          "property and external id keys cannot be '__proto__'",
+        );
+        await expect(g.insert.facts({ entities: [{ type: "Person", name: "Ann", ...fields }] })).rejects.toThrow(
+          "property and external id keys cannot be '__proto__'",
+        );
+      }
+    }
+    expect((await g.entities.list()).items).toEqual([]);
+    const good = { constructor: "x", prototype: "y", value: "__proto__" };
+    expect((await g.entities.create("Ann", "Person", { properties: good })).properties).toEqual(good);
+  });
+
   beforeAll(async () => {
     graph = new SelfGraph(spec.make(), { namespace: ns });
     other = new SelfGraph(spec.make(), { namespace: `${ns}_other` });

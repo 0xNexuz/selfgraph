@@ -61,13 +61,10 @@ export const optNumber = nullable(z.number());
 export const optInt = nullable(z.number().int());
 const optDate = nullable(DateTimeInput);
 const props = <V extends z.ZodType<JsonValue>>(label: string, values: V = JsonValue as unknown as V) =>
-  z
-    .record(z.string(), values)
-    .default({})
-    .transform((value) => {
-      requireCleanJson(label, value);
-      return value;
-    });
+  z.preprocess((value: Record<string, z.input<V>> | undefined) => {
+    requireCleanJson(label, value, 0, true, true);
+    return value;
+  }, z.record(z.string(), values).default({}));
 
 const entityText = z.string().transform((value) => {
   if (!value || !pyStrip(value)) {

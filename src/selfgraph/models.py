@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
+from functools import partial
 from types import UnionType
 from typing import Annotated, Any, ClassVar, Generic, Literal, TypeVar, Union, get_args, get_origin
 
@@ -608,7 +609,9 @@ class EntityInput(InputModel):
             _require_no_control("entity alias", alias)
         return value
 
-    _clean_json = _check(_require_clean_json, "entity property and external id", "external_ids", "properties")
+    _clean_json = _check(
+        partial(_require_clean_json, reject_proto=True), "entity property and external id", "external_ids", "properties"
+    )
 
 
 def _facts_time(value: Any) -> Any:
@@ -682,7 +685,7 @@ class RelationInput(InputModel):
     def _normalize_type(cls, value: str) -> str:
         return normalize_rel_type(value)
 
-    _clean_json = _check(_require_clean_json, "relation property", "properties")
+    _clean_json = _check(partial(_require_clean_json, reject_proto=True), "relation property", "properties")
 
 
 class PreferenceInput(InputModel):
@@ -699,7 +702,7 @@ class PreferenceInput(InputModel):
     event_time: FactsTime = None
 
     _clean_key = _check(_require_no_control, "preference key", "key")
-    _clean_json = _check(_require_clean_json, "preference property", "properties")
+    _clean_json = _check(partial(_require_clean_json, reject_proto=True), "preference property", "properties")
 
 
 class DecisionTraceInput(InputModel):

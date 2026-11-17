@@ -606,6 +606,27 @@ async def choice_errors(graph):
     works_at = ids.relation_id("person:jane-doe", "WORKS_AT", "company:acme")
     dec = ids.decision_id("person:jane-doe", "Pick HydraDB")
     return {
+        "proto_entity": await error_of(
+            graph.entities.create("Proto", "Person", properties={"nested": [{"__proto__": "x"}]})
+        ),
+        "proto_update": await error_of(graph.entities.update("person:jane-doe", external_ids={"__proto__": "x"})),
+        "proto_relation": await error_of(
+            graph.relations.create("person:jane-doe", "USES", "database:hydradb", properties={"__proto__": "x"})
+        ),
+        "proto_relation_update": await error_of(
+            graph.relations.update(works_at, set_properties={"nested": [{"__proto__": "x"}]})
+        ),
+        "proto_preference": await error_of(
+            graph.preferences.create("person:jane-doe", "database", "database:hydradb", properties={"__proto__": "x"})
+        ),
+        "proto_facts": await error_of(
+            graph.insert.facts(
+                {"entities": [{"type": "Person", "name": "Proto", "properties": {"nested": [{"__proto__": "x"}]}}]}
+            )
+        ),
+        "proto_cli": await error_of(
+            graph.entities.create("Proto", "Person", properties=_kv(["__proto__=1"], "--prop"))
+        ),
         "pref_create_stance": await error_of(
             graph.preferences.create("person:jane-doe", "database", "database:hydradb", stance="meh")
         ),

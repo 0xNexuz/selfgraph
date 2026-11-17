@@ -625,6 +625,33 @@ async function choiceErrors(graph: SelfGraph): Promise<Record<string, string[]>>
   const dec = ids.decisionId("person:jane-doe", "Pick HydraDB");
   const bad = new Opaque() as never;
   return {
+    proto_entity: await errorOf(() =>
+      graph.entities.create("Proto", "Person", { properties: JSON.parse('{"nested":[{"__proto__":"x"}]}') }),
+    ),
+    proto_update: await errorOf(() =>
+      graph.entities.update("person:jane-doe", { external_ids: JSON.parse('{"__proto__":"x"}') }),
+    ),
+    proto_relation: await errorOf(() =>
+      graph.relations.create("person:jane-doe", "USES", "database:hydradb", {
+        properties: JSON.parse('{"__proto__":"x"}'),
+      }),
+    ),
+    proto_relation_update: await errorOf(() =>
+      graph.relations.update(worksAt, { set_properties: JSON.parse('{"nested":[{"__proto__":"x"}]}') }),
+    ),
+    proto_preference: await errorOf(() =>
+      graph.preferences.create("person:jane-doe", "database", "database:hydradb", {
+        properties: JSON.parse('{"__proto__":"x"}'),
+      }),
+    ),
+    proto_facts: await errorOf(() =>
+      graph.insert.facts({
+        entities: [{ type: "Person", name: "Proto", properties: JSON.parse('{"nested":[{"__proto__":"x"}]}') }],
+      }),
+    ),
+    proto_cli: await errorOf(() =>
+      graph.entities.create("Proto", "Person", { properties: kv(["__proto__=1"], "--prop") }),
+    ),
     pref_create_stance: await errorOf(() =>
       graph.preferences.create("person:jane-doe", "database", "database:hydradb", { stance: "meh" as never }),
     ),
