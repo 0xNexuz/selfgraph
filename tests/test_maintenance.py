@@ -71,6 +71,17 @@ def test_decay_scores_in_place_and_is_idempotent():
     assert run(g.entities.get("t:a")).relevance == expected
 
 
+def test_decay_counts_a_self_relation_once_toward_degree():
+    g = fresh_graph("mt")
+    t_entities(g, "a", "b")
+    run(g.relations.create("t:a", "KNOWS", "t:a"))
+    run(g.relations.create("t:a", "KNOWS", "t:b"))
+    at = _later(0)
+    a = run(g.entities.get("t:a"))
+    scores = run(g.maintenance.decay(now=at)).entities
+    assert scores["t:a"] == relevance_score([a.created_at, a.updated_at], at, 30, 2)
+
+
 def test_maintenance_rejects_bad_arguments():
     g = fresh_graph("mt")
     for bad in (0, -1, float("inf"), True, "30"):
